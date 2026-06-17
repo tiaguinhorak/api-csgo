@@ -1,21 +1,37 @@
 import { Client as SSHClient, ConnectConfig } from 'ssh2';
+import { exec } from 'child_process';
 
 interface ServerConnection {
   host: string;
   port: number;
-  username: string;
+  username?: string;
   privateKey?: string;
   password?: string;
 }
 
 export class SshService {
   async execCommand(conn: ServerConnection, command: string): Promise<{ stdout: string; stderr: string }> {
+    // Local execution (same machine, no SSH needed)
+    if (conn.host === '127.0.0.1' || conn.host === 'localhost' || !conn.username) {
+      const user = conn.username || 'root';
+      const fullCmd = user === 'root'
+        ? command
+        : `su - ${user} -c '${command.replace(/'/g, "'\\''")}'`;
+      return new Promise((resolve, reject) => {
+        exec(fullCmd, (error, stdout, stderr) => {
+          if (error && stderr) reject(new Error(stderr));
+          else resolve({ stdout: stdout || '', stderr: stderr || '' });
+        });
+      });
+    }
+
+    // Remote execution via SSH
     return new Promise((resolve, reject) => {
       const client = new SSHClient();
       const config: ConnectConfig = {
         host: conn.host,
         port: conn.port,
-        username: conn.username,
+        username: conn.username || 'root',
         readyTimeout: 10000,
       };
 

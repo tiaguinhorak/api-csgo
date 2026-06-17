@@ -3,7 +3,7 @@ export interface GameServer {
   name: string;
   host: string;
   sshPort: number;
-  sshUser: string;
+  sshUser?: string;
   sshKey?: string;
   sshPassword?: string;
   rconPort: number;
@@ -20,7 +20,7 @@ export interface CreateServerDTO {
   name: string;
   host: string;
   sshPort?: number;
-  sshUser: string;
+  sshUser?: string;
   sshKey?: string;
   sshPassword?: string;
   rconPort?: number;
