@@ -1,9 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { skinManager } from '../services/skin-manager';
-import { authMiddleware } from '../services/auth';
 
 const router = Router();
-router.use(authMiddleware);
 
 // --- Catalog ---
 

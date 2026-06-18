@@ -1,13 +1,11 @@
-import { RCON } from 'srcds-rcon';
-
-interface RconConnection {
-  host: string;
-  port: number;
-  password: string;
-}
+const createRcon: (opts: { address: string; password: string }) => {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  command(cmd: string): Promise<string>;
+} = require('srcds-rcon');
 
 export class RconService {
-  private connections: Map<string, RCON> = new Map();
+  private connections: Map<string, ReturnType<typeof createRcon>> = new Map();
 
   private getKey(host: string, port: number): string {
     return `${host}:${port}`;
@@ -15,11 +13,9 @@ export class RconService {
 
   async connect(host: string, port: number, password: string): Promise<void> {
     const key = this.getKey(host, port);
-    if (this.connections.has(key)) {
-      await this.disconnect(host, port);
-    }
+    await this.disconnect(host, port);
 
-    const rcon = new RCON({ host, port, password });
+    const rcon = createRcon({ address: `${host}:${port}`, password });
     await rcon.connect();
     this.connections.set(key, rcon);
   }
@@ -29,9 +25,10 @@ export class RconService {
     let rcon = this.connections.get(key);
 
     if (!rcon) {
-      rcon = new RCON({ host, port, password });
-      await rcon.connect();
-      this.connections.set(key, rcon);
+      const client = createRcon({ address: `${host}:${port}`, password });
+      await client.connect();
+      this.connections.set(key, client);
+      rcon = client;
     }
 
     try {
@@ -62,9 +59,6 @@ export class RconService {
       `sv_hibernate_when_empty 0`,
       `mp_team_timeout_max 1`,
       `mp_team_timeout_time 30`,
-      `sv_rcon_banpenalty 0`,
-      `sv_rcon_maxfailures 100`,
-      `sv_rcon_minfailures 100`,
     ];
     const results = await Promise.all(
       cmds.map(cmd => this.sendCommand(host, port, password, cmd))
@@ -92,13 +86,13 @@ export class RconService {
     const key = this.getKey(host, port);
     const rcon = this.connections.get(key);
     if (rcon) {
-      try { rcon.disconnect(); } catch {}
+      try { await rcon.disconnect(); } catch {}
       this.connections.delete(key);
     }
   }
 
   disconnectAll(): void {
-    for (const [key, rcon] of this.connections) {
+    for (const [, rcon] of this.connections) {
       try { rcon.disconnect(); } catch {}
     }
     this.connections.clear();

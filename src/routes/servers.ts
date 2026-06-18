@@ -1,9 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { serverManager } from '../services/server-manager';
-import { authMiddleware } from '../services/auth';
 
 const router = Router();
-router.use(authMiddleware);
 
 router.get('/', (_req: Request, res: Response) => {
   const status = typeof _req.query.status === 'string' ? _req.query.status : undefined;

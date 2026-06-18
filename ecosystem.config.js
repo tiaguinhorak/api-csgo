@@ -8,7 +8,6 @@ module.exports = {
     env: {
       NODE_ENV: 'production',
       PORT: 3000,
-      API_KEY: 'suachaveapi',
     },
     error_file: 'logs/err.log',
     out_file: 'logs/out.log',

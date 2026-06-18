@@ -1,16 +1,16 @@
 declare module 'srcds-rcon' {
-  export interface RCONOptions {
-    host: string;
-    port: number;
+  interface RconOptions {
+    address: string;
     password: string;
     timeout?: number;
   }
 
-  export class RCON {
-    constructor(options: RCONOptions);
+  interface RconClient {
     connect(): Promise<void>;
     disconnect(): Promise<void>;
     command(command: string): Promise<string>;
-    authenticate(): Promise<boolean>;
   }
+
+  function createRcon(options: RconOptions): RconClient;
+  export = createRcon;
 }

@@ -23,7 +23,6 @@ app.use('/api/matches', matchesRouter);
 app.use('/api/servers', serversRouter);
 app.use('/api/skins', skinsRouter);
 
-// Initialize default skin catalog
 skinManager.initializeDefaultSkins();
 
 app.listen(config.port, () => {

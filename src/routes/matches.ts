@@ -1,12 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { matchManager } from '../services/match-manager';
 import { serverManager } from '../services/server-manager';
-import { authMiddleware } from '../services/auth';
 import { rconService } from '../services/rcon';
-import { config } from '../config';
 
 const router = Router();
-router.use(authMiddleware);
 
 router.post('/', (req: Request, res: Response) => {
   try {
