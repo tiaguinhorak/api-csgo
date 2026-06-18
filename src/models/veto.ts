@@ -1,9 +1,16 @@
-export type VetoPhase = 'ban_a' | 'ban_b' | 'ban_a2' | 'ban_b2' | 'pick_a' | 'pick_b' | 'ban_a3' | 'ban_b3' | 'decider' | 'done';
+export type VetoPhase = string;
+export type VetoActionType = 'ban' | 'pick' | 'random';
+
+export interface VetoStepDef {
+  phase: string;
+  team: 'A' | 'B';
+  action: VetoActionType;
+}
 
 export interface VetoStep {
-  phase: VetoPhase;
+  phase: string;
   team: 'A' | 'B';
-  action: 'ban' | 'pick' | 'random';
+  action: VetoActionType;
   availableMaps: string[];
 }
 
@@ -13,19 +20,26 @@ export interface VetoRequest {
   map: string;
 }
 
-export const VETO_STEPS: { phase: VetoPhase; team: 'A' | 'B'; action: 'ban' | 'pick' | 'random' }[] = [
-  { phase: 'ban_a', team: 'B', action: 'ban' },
-  { phase: 'ban_b', team: 'A', action: 'ban' },
-  { phase: 'ban_a2', team: 'B', action: 'ban' },
-  { phase: 'ban_b2', team: 'A', action: 'ban' },
-  { phase: 'pick_a', team: 'A', action: 'pick' },
-  { phase: 'pick_b', team: 'B', action: 'pick' },
-  { phase: 'ban_a3', team: 'A', action: 'ban' },
-  { phase: 'ban_b3', team: 'B', action: 'ban' },
-  { phase: 'decider', team: 'A', action: 'random' },
-];
+export function generateVetoSteps(mapPool: string[]): VetoStepDef[] {
+  const total = mapPool.length;
+  const mapsAfterBans = 3;
+  const banCount = total - mapsAfterBans;
+  const steps: VetoStepDef[] = [];
 
-export function getAvailableMaps(mapPool: string[], vetoedMaps: string[], pickedMaps: string[]): string[] {
-  const removed = new Set([...vetoedMaps, ...pickedMaps]);
+  let banTeam: 'A' | 'B' = 'B';
+  for (let i = 0; i < banCount; i++) {
+    steps.push({ phase: `ban_${i + 1}`, team: banTeam, action: 'ban' });
+    banTeam = banTeam === 'A' ? 'B' : 'A';
+  }
+
+  steps.push({ phase: 'pick_a', team: 'A', action: 'pick' });
+  steps.push({ phase: 'pick_b', team: 'B', action: 'pick' });
+  steps.push({ phase: 'decider', team: 'A', action: 'random' });
+
+  return steps;
+}
+
+export function getAvailableMaps(mapPool: string[], usedMaps: string[]): string[] {
+  const removed = new Set(usedMaps);
   return mapPool.filter(m => !removed.has(m));
 }

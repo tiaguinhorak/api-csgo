@@ -13,12 +13,10 @@ export class SshService {
   async execCommand(conn: ServerConnection, command: string): Promise<{ stdout: string; stderr: string }> {
     // Local execution (same machine, no SSH needed)
     if (conn.host === '127.0.0.1' || conn.host === 'localhost' || !conn.username) {
-      const user = conn.username || 'root';
-      const fullCmd = user === 'root'
-        ? command
-        : `su - ${user} -c '${command.replace(/'/g, "'\\''")}'`;
+      const user = conn.username || 'csgo';
+      const fullCmd = `su - ${user} -c '${command.replace(/'/g, "'\\''")}'`;
       return new Promise((resolve, reject) => {
-        exec(fullCmd, (error, stdout, stderr) => {
+        exec(fullCmd, { maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
           if (error && stderr) reject(new Error(stderr));
           else resolve({ stdout: stdout || '', stderr: stderr || '' });
         });
