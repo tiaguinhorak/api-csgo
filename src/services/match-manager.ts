@@ -4,9 +4,11 @@ import { GameServer } from '../models/server';
 import { config } from '../config';
 import { v4 as uuidv4 } from 'uuid';
 import { rconService } from './rcon';
+import { stateStore } from './state-store';
+import { resolveRconPort } from '../utils/rcon-port';
 
 class MatchManager {
-  private matches: Map<string, Match> = new Map();
+  private matches = stateStore.matches;
   private stepsCache: Map<string, VetoStepDef[]> = new Map();
 
   private getSteps(match: Match): VetoStepDef[] {
@@ -43,6 +45,7 @@ class MatchManager {
     };
 
     this.matches.set(match.id, match);
+    stateStore.persist();
     return match;
   }
 
@@ -59,10 +62,14 @@ class MatchManager {
   startVeto(matchId: string): Match {
     const match = this.matches.get(matchId);
     if (!match) throw new Error('Match not found');
+    if (match.status === 'veto' || match.status === 'ready' || match.status === 'live') {
+      return match;
+    }
     if (match.status !== 'waiting_players') throw new Error('Invalid match status');
 
     match.status = 'veto';
     this.processAutoStep(match);
+    stateStore.persist();
     return match;
   }
 
@@ -111,6 +118,7 @@ class MatchManager {
     if (action === 'pick') match.selectedMap = map;
 
     this.processAutoStep(match);
+    stateStore.persist();
     return match;
   }
 
@@ -147,27 +155,30 @@ class MatchManager {
     match.serverId = server.id;
     match.status = 'live';
 
-    await rconService.setMatchConfig(server.host, server.rconPort, server.rconPassword, matchId);
-    await rconService.sendCommand(server.host, server.rconPort, server.rconPassword,
+    const rconPort = resolveRconPort(server);
+
+    await rconService.setMatchConfig(server.host, rconPort, server.rconPassword, matchId);
+    await rconService.sendCommand(server.host, rconPort, server.rconPassword,
       `mp_teamname_1 "${match.teamA.name}"`);
-    await rconService.sendCommand(server.host, server.rconPort, server.rconPassword,
+    await rconService.sendCommand(server.host, rconPort, server.rconPassword,
       `mp_teamname_2 "${match.teamB.name}"`);
 
     for (const p of match.teamA.players) {
-      await rconService.sendCommand(server.host, server.rconPort, server.rconPassword,
+      await rconService.sendCommand(server.host, rconPort, server.rconPassword,
         `addplayer "${p.steamId}" 1`);
     }
     for (const p of match.teamB.players) {
-      await rconService.sendCommand(server.host, server.rconPort, server.rconPassword,
+      await rconService.sendCommand(server.host, rconPort, server.rconPassword,
         `addplayer "${p.steamId}" 2`);
     }
 
-    await rconService.changeMap(server.host, server.rconPort, server.rconPassword, match.selectedMap);
+    await rconService.changeMap(server.host, rconPort, server.rconPassword, match.selectedMap);
 
     setTimeout(async () => {
-      try { await rconService.startMatch(server.host, server.rconPort, server.rconPassword); } catch {}
+      try { await rconService.startMatch(server.host, rconPort, server.rconPassword); } catch {}
     }, 15000);
 
+    stateStore.persist();
     return match;
   }
 
@@ -175,6 +186,7 @@ class MatchManager {
     const match = this.matches.get(matchId);
     if (!match) throw new Error('Match not found');
     match.status = 'finished';
+    stateStore.persist();
     return match;
   }
 
@@ -182,6 +194,7 @@ class MatchManager {
     const match = this.matches.get(matchId);
     if (!match) throw new Error('Match not found');
     match.status = 'cancelled';
+    stateStore.persist();
     return match;
   }
 }

@@ -3,9 +3,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { sshService } from './ssh';
 import { rconService } from './rcon';
 import { config } from '../config';
+import { stateStore } from './state-store';
+import { resolveRconPort } from '../utils/rcon-port';
 
 class ServerManager {
-  private servers: Map<string, GameServer> = new Map();
+  private servers = stateStore.servers;
 
   registerServer(dto: CreateServerDTO): GameServer {
     const server: GameServer = {
@@ -16,16 +18,17 @@ class ServerManager {
       sshUser: dto.sshUser,
       sshKey: dto.sshKey,
       sshPassword: dto.sshPassword,
-      rconPort: dto.rconPort || 27015,
+      rconPort: dto.rconPort ?? dto.port ?? 27015,
       rconPassword: dto.rconPassword,
       csgoDir: dto.csgoDir,
       screenSession: `csgo-${dto.name.toLowerCase().replace(/\s+/g, '-')}`,
       status: 'offline',
-      port: dto.port || 27015,
+      port: dto.port ?? 27015,
       tickrate: dto.tickrate || config.csgo.defaultTickrate,
     };
 
     this.servers.set(server.id, server);
+    stateStore.persist();
     return server;
   }
 
@@ -69,13 +72,15 @@ class ServerManager {
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 1000));
       try {
-        await rconService.getStatus(server.host, server.rconPort, server.rconPassword);
+        await rconService.getStatus(server.host, resolveRconPort(server), server.rconPassword);
         server.status = 'online';
+        stateStore.persist();
         return server;
       } catch {}
     }
 
     server.status = 'offline';
+    stateStore.persist();
     return server;
   }
 
@@ -88,6 +93,7 @@ class ServerManager {
 
     server.status = 'offline';
     server.currentMatchId = undefined;
+    stateStore.persist();
     return server;
   }
 
@@ -108,7 +114,7 @@ class ServerManager {
       if (running === 'running') {
         // Test RCON connection
         try {
-          await rconService.getStatus(server.host, server.rconPort, server.rconPassword);
+          await rconService.getStatus(server.host, resolveRconPort(server), server.rconPassword);
           server.status = server.currentMatchId ? 'busy' : 'online';
         } catch {
           server.status = 'offline';
@@ -120,7 +126,28 @@ class ServerManager {
       server.status = 'offline';
     }
 
+    stateStore.persist();
     return server;
+  }
+
+  releaseServer(serverId: string): void {
+    const server = this.servers.get(serverId);
+    if (!server) return;
+    server.currentMatchId = undefined;
+    if (server.status === 'busy') {
+      server.status = 'online';
+    }
+    stateStore.persist();
+  }
+
+  assignMatch(serverId: string, matchId: string): void {
+    const server = this.servers.get(serverId);
+    if (!server) return;
+    server.currentMatchId = matchId;
+    if (server.status === 'online') {
+      server.status = 'busy';
+    }
+    stateStore.persist();
   }
 
   async checkAllServers(): Promise<void> {
@@ -133,11 +160,12 @@ class ServerManager {
     const server = this.servers.get(id);
     if (!server) throw new Error('Server not found');
 
-    return rconService.sendCommand(server.host, server.rconPort, server.rconPassword, command);
+    return rconService.sendCommand(server.host, resolveRconPort(server), server.rconPassword, command);
   }
 
   removeServer(id: string): void {
     this.servers.delete(id);
+    stateStore.persist();
   }
 }
 

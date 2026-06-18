@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { matchManager } from '../services/match-manager';
 import { serverManager } from '../services/server-manager';
 import { rconService } from '../services/rcon';
+import { resolveRconPort } from '../utils/rcon-port';
 
 const router = Router();
 
@@ -71,7 +72,7 @@ router.post('/:id/start', async (req: Request, res: Response) => {
     if (!server) return res.status(404).json({ error: 'Server not found' });
 
     const updatedMatch = await matchManager.startMatch(String(req.params.id), server);
-    server.currentMatchId = match.id;
+    serverManager.assignMatch(serverId, match.id);
     res.json(updatedMatch);
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -87,7 +88,7 @@ router.post('/:id/pause', async (req: Request, res: Response) => {
     const server = serverManager.getServer(match.serverId);
     if (!server) return res.status(404).json({ error: 'Server not found' });
 
-    await rconService.pauseMatch(server.host, server.rconPort, server.rconPassword);
+    await rconService.pauseMatch(server.host, resolveRconPort(server), server.rconPassword);
     res.json({ success: true });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -103,7 +104,7 @@ router.post('/:id/unpause', async (req: Request, res: Response) => {
     const server = serverManager.getServer(match.serverId);
     if (!server) return res.status(404).json({ error: 'Server not found' });
 
-    await rconService.unpauseMatch(server.host, server.rconPort, server.rconPassword);
+    await rconService.unpauseMatch(server.host, resolveRconPort(server), server.rconPassword);
     res.json({ success: true });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -113,6 +114,9 @@ router.post('/:id/unpause', async (req: Request, res: Response) => {
 router.post('/:id/end', async (req: Request, res: Response) => {
   try {
     const match = await matchManager.endMatch(String(req.params.id));
+    if (match.serverId) {
+      serverManager.releaseServer(match.serverId);
+    }
     res.json(match);
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -122,6 +126,9 @@ router.post('/:id/end', async (req: Request, res: Response) => {
 router.post('/:id/cancel', (req: Request, res: Response) => {
   try {
     const match = matchManager.cancelMatch(String(req.params.id));
+    if (match.serverId) {
+      serverManager.releaseServer(match.serverId);
+    }
     res.json(match);
   } catch (error: any) {
     res.status(400).json({ error: error.message });
