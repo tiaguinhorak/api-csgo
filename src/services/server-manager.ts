@@ -59,19 +59,23 @@ class ServerManager {
 
     const conn = this.getSshConnection(server);
     await sshService.startServer(
-      conn,
-      server.csgoDir,
-      server.screenSession,
-      server.port,
-      server.tickrate,
-      config.csgo.defaultGameType,
-      config.csgo.defaultGameMode,
-      map,
-      server.rconPassword,
-      serverPassword
+      conn, server.csgoDir, server.screenSession,
+      server.port, server.tickrate,
+      config.csgo.defaultGameType, config.csgo.defaultGameMode,
+      map, server.rconPassword, serverPassword
     );
 
-    server.status = 'online';
+    // Aguarda até 30s pelo RCON responder
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        await rconService.getStatus(server.host, server.rconPort, server.rconPassword);
+        server.status = 'online';
+        return server;
+      } catch {}
+    }
+
+    server.status = 'offline';
     return server;
   }
 

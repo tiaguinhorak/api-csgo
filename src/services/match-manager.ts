@@ -67,21 +67,21 @@ class MatchManager {
 
     const step = VETO_STEPS[stepIndex];
     if (step.action === 'random') {
-      const available = getAvailableMaps(
-        match.vetoHistory.map(v => v.map),
-        []
-      );
-      if (available.length > 0) {
-        const randomMap = available[Math.floor(Math.random() * available.length)];
-        match.vetoHistory.push({
-          team: step.team,
-          action: 'random',
-          map: randomMap,
-          timestamp: new Date().toISOString(),
-        });
-        match.selectedMap = randomMap;
+      const used = match.vetoHistory.map(v => v.map);
+      const available = getAvailableMaps(match.mapPool, used, []);
+      if (available.length === 0) {
         match.status = 'ready';
+        return;
       }
+      const randomMap = available[Math.floor(Math.random() * available.length)];
+      match.vetoHistory.push({
+        team: step.team,
+        action: 'random',
+        map: randomMap,
+        timestamp: new Date().toISOString(),
+      });
+      match.selectedMap = randomMap;
+      match.status = 'ready';
     }
   }
 
@@ -100,10 +100,8 @@ class MatchManager {
     if (step.team !== team) throw new Error(`It's ${step.team}'s turn`);
     if (step.action !== action) throw new Error(`Expected action: ${step.action}`);
 
-    const available = getAvailableMaps(
-      match.vetoHistory.map(v => v.map),
-      []
-    );
+    const used = match.vetoHistory.map(v => v.map);
+    const available = getAvailableMaps(match.mapPool, used, []);
     if (!available.includes(map)) throw new Error(`Map ${map} is not available`);
 
     match.vetoHistory.push({ team, action, map, timestamp: new Date().toISOString() });
@@ -112,7 +110,6 @@ class MatchManager {
       match.selectedMap = map;
     }
 
-    // Check if veto is complete
     const nextStepIndex = match.vetoHistory.length;
     if (nextStepIndex >= VETO_STEPS.length) {
       match.status = 'ready';
@@ -137,10 +134,8 @@ class MatchManager {
 
     const stepIndex = match.vetoHistory.length;
     const isComplete = stepIndex >= VETO_STEPS.length;
-    const availableMaps = getAvailableMaps(
-      match.vetoHistory.map(v => v.map),
-      []
-    );
+    const used = match.vetoHistory.map(v => v.map);
+    const availableMaps = getAvailableMaps(match.mapPool, used, []);
 
     let currentStep: VetoStep | null = null;
     if (!isComplete && match.status === 'veto') {

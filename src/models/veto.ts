@@ -25,24 +25,7 @@ export const VETO_STEPS: { phase: VetoPhase; team: 'A' | 'B'; action: 'ban' | 'p
   { phase: 'decider', team: 'A', action: 'random' },
 ];
 
-export function getCurrentVetoStep(vetoHistory: import('./match').VetoAction[]): { currentStep: VetoStep | null; isComplete: boolean } {
-  const stepIndex = vetoHistory.length;
-  if (stepIndex >= VETO_STEPS.length) {
-    return { currentStep: null, isComplete: true };
-  }
-  const step = VETO_STEPS[stepIndex];
-  const availableMaps = getAvailableMaps(
-    vetoHistory.map(v => v.map),
-    [] // we need original map pool, passed separately
-  );
-  return { currentStep: { ...step, availableMaps }, isComplete: false };
-}
-
-export function getAvailableMaps(vetoedMaps: string[], pickedMaps: string[]): string[] {
-  const allMaps = [
-    'de_mirage', 'de_inferno', 'de_dust2', 'de_nuke',
-    'de_overpass', 'de_ancient', 'de_anubis', 'de_vertigo'
-  ];
+export function getAvailableMaps(mapPool: string[], vetoedMaps: string[], pickedMaps: string[]): string[] {
   const removed = new Set([...vetoedMaps, ...pickedMaps]);
-  return allMaps.filter(m => !removed.has(m));
+  return mapPool.filter(m => !removed.has(m));
 }
