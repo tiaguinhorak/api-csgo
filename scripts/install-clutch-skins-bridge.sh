@@ -47,6 +47,10 @@ chmod +x "${SCRIPT_DIR}/reload-clutch-skins-ingame.sh" 2>/dev/null || true
 
 echo "Copying source..."
 cp -f "${SP_SRC}" "${SM}/scripting/clutch_skins_bridge.sp"
+INC_SRC="${REPO_ROOT}/sourcemod/include/weapons.inc"
+if [[ -f "${INC_SRC}" ]]; then
+  cp -f "${INC_SRC}" "${SM}/scripting/include/weapons.inc"
+fi
 
 PLUGIN_SMX="z_clutch_skins_bridge.smx"
 LEGACY_SMX="clutch_skins_bridge.smx"
