@@ -49,8 +49,21 @@ try {
   console.warn(`[csgo-skins] weapons DB not ready: ${message}`);
 }
 
-app.listen(config.port, () => {
-  console.log(`CS:GO API running on port ${config.port}`);
+const bindHost = process.env.BIND_HOST?.trim() || '0.0.0.0';
+
+const server = app.listen(config.port, bindHost, () => {
+  console.log(`CS:GO API running on http://${bindHost}:${config.port}`);
+});
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `[api-csgo] Port ${config.port} already in use. Stop the other process or run: npm run pm2:recover`,
+    );
+    process.exit(1);
+  }
+  console.error('[api-csgo] Server error:', err);
+  process.exit(1);
 });
 
 export default app;
