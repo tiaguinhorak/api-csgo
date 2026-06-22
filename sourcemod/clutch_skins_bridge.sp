@@ -15,7 +15,7 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.3.3"
+#define PLUGIN_VERSION "3.3.4"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -959,6 +959,7 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
             LogMessage("[Clutch] Sem loadout no DB para %s (%N)", steamId, client);
             g_bLoggedMissingLoadout[client] = true;
         }
+        QueryPlayerGloves(client, steamId, 0);
         return;
     }
 
@@ -1018,6 +1019,13 @@ public void T_ApplyGlovesFromDbCallback(Database database, DBResultSet results, 
         return;
     }
 
+    if (results == null) {
+        if (g_cvDebug.BoolValue) {
+            LogError("[Clutch] gloves DB query failed: %s", error);
+        }
+        return;
+    }
+
     if (!results.FetchRow()) {
         if (altAttempt == 0) {
             if (steamId[6] == '1') {
@@ -1026,6 +1034,8 @@ public void T_ApplyGlovesFromDbCallback(Database database, DBResultSet results, 
                 steamId[6] = '1';
             }
             QueryPlayerGloves(client, steamId, 1);
+        } else {
+            ClutchGivePlayerGloves(client, 0, 0, 0.0);
         }
         return;
     }
@@ -1033,8 +1043,56 @@ public void T_ApplyGlovesFromDbCallback(Database database, DBResultSet results, 
     ApplyGlovesFromDbRow(client, results);
 }
 
+void ClutchFixCustomArms(int client) {
+    char armsModel[2];
+    GetEntPropString(client, Prop_Send, "m_szArmsModel", armsModel, sizeof(armsModel));
+    if (armsModel[0]) {
+        SetEntPropString(client, Prop_Send, "m_szArmsModel", "");
+    }
+}
+
+void ScheduleGlovesReapply(int client, int group, int paintkit, float wear) {
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteCell(group);
+    pack.WriteCell(paintkit);
+    pack.WriteFloat(wear);
+    CreateTimer(0.25, Timer_ApplyGlovesDelayed, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplyGlovesDelayed(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int group = pack.ReadCell();
+    int paintkit = pack.ReadCell();
+    float wear = pack.ReadFloat();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client)) {
+        ClutchGivePlayerGloves(client, group, paintkit, wear);
+    }
+    return Plugin_Stop;
+}
+
+public Action Timer_RetryGlovesAfterTeam(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client)) {
+        char steamId[32];
+        if (GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+            QueryPlayerGloves(client, steamId, 0);
+        }
+    }
+    return Plugin_Stop;
+}
+
 void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
     if (group <= 0 || paintkit <= 0) {
+        ClutchFixCustomArms(client);
         int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
         if (wearable != -1) {
             AcceptEntityInput(wearable, "KillHierarchy");
@@ -1042,6 +1100,8 @@ void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
         }
         return;
     }
+
+    ClutchFixCustomArms(client);
 
     int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
     if (wearable != -1) {
@@ -1094,10 +1154,16 @@ void ApplyGlovesFromDbRow(int client, DBResultSet results) {
         paintkit = DbFetchInt(results, "ct_glove", 0);
         wear = DbFetchFloat(results, "ct_float", 0.15);
     } else {
+        DataPack pack = new DataPack();
+        pack.WriteCell(GetClientUserId(client));
+        CreateTimer(0.5, Timer_RetryGlovesAfterTeam, pack, TIMER_FLAG_NO_MAPCHANGE);
         return;
     }
 
     ClutchGivePlayerGloves(client, group, paintkit, wear);
+    if (group > 0 && paintkit > 0) {
+        ScheduleGlovesReapply(client, group, paintkit, wear);
+    }
 }
 
 int DbFieldNum(DBResultSet results, const char[] column) {
