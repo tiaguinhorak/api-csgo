@@ -5,12 +5,14 @@ import {
   type SyncLoadoutOptions,
   type SyncWeaponPayload,
 } from './weapons-db-map';
+import { resolveWeaponsDbPath } from './weapons-db-path';
 
 const SQLITE_BUSY = 'SQLITE_BUSY';
 const MAX_RETRIES = 8;
 const BASE_RETRY_MS = 25;
 
 let dbInstance: Database.Database | null = null;
+let resolvedDbPath: string | null = null;
 let writeChain: Promise<void> = Promise.resolve();
 
 function sleep(ms: number): Promise<void> {
@@ -24,11 +26,8 @@ function alternateSteam2(steam2: string): string | null {
   return null;
 }
 
-export function getWeaponsDbPath(): string {
-  return (
-    process.env.WEAPONS_DB_PATH?.trim() ||
-    '/home/csgo/server/csgo/addons/sourcemod/data/sqlite/local.sq3'
-  );
+export function getActiveWeaponsDbPath(): string | null {
+  return resolvedDbPath;
 }
 
 function getTableName(): string {
@@ -39,18 +38,26 @@ function getTableName(): string {
 function openWeaponsDatabase(): Database.Database {
   if (dbInstance) return dbInstance;
 
-  const path = getWeaponsDbPath();
-  const db = new Database(path, {
-    timeout: 15000,
-    fileMustExist: true,
-  });
+  const dbPath = resolveWeaponsDbPath();
+  resolvedDbPath = dbPath;
 
-  db.pragma('journal_mode = WAL');
-  db.pragma('busy_timeout = 15000');
-  db.pragma('synchronous = NORMAL');
+  try {
+    const db = new Database(dbPath, {
+      timeout: 15000,
+      fileMustExist: true,
+    });
 
-  dbInstance = db;
-  return db;
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 15000');
+    db.pragma('synchronous = NORMAL');
+
+    dbInstance = db;
+    console.log(`[csgo-skins] weapons DB: ${dbPath}`);
+    return db;
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`unable to open database file (${dbPath}): ${detail}`);
+  }
 }
 
 function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
@@ -117,9 +124,10 @@ export async function syncPlayerLoadoutToWeaponsDb(
   steamId: string,
   weapons: SyncWeaponPayload[],
   options?: SyncLoadoutOptions,
-): Promise<{ steamId: string; updated: boolean; columns: number }> {
+): Promise<{ steamId: string; updated: boolean; columns: number; dbPath: string }> {
   return enqueueWrite(async () => {
     const db = openWeaponsDatabase();
+    const dbPath = resolvedDbPath ?? resolveWeaponsDbPath();
     const tablePrefix = process.env.WEAPONS_TABLE_PREFIX?.trim() || '';
     const syncOptions = normalizeSyncOptions(weapons, options);
 
@@ -150,6 +158,7 @@ export async function syncPlayerLoadoutToWeaponsDb(
       steamId: targetSteam,
       updated: Boolean(updateSql),
       columns: columnCount,
+      dbPath,
     };
   });
 }
@@ -158,5 +167,6 @@ export function closeWeaponsDatabase(): void {
   if (dbInstance) {
     dbInstance.close();
     dbInstance = null;
+    resolvedDbPath = null;
   }
 }

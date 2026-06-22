@@ -6,6 +6,7 @@ import { config } from '../config';
 import { reloadClutchSkinsInGame } from '../services/clutch-rcon';
 import type { SyncWeaponPayload } from '../services/weapons-db-map';
 import { syncPlayerLoadoutToWeaponsDb } from '../services/weapons-db-sync';
+import { getWeaponsDbCandidates } from '../services/weapons-db-path';
 
 const router = Router();
 
@@ -91,12 +92,16 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       weapons: body.weapons.length,
       columns: result.columns,
       updated: result.updated,
+      dbPath: result.dbPath,
       rconReload,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'sync failed';
     console.error('[csgo-skins player-sync]', message);
-    return res.status(500).json({ error: message });
+    return res.status(500).json({
+      error: message,
+      candidates: getWeaponsDbCandidates(),
+    });
   }
 });
 

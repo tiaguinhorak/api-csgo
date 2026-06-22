@@ -7,6 +7,7 @@ import serversRouter from './routes/servers';
 import skinsRouter from './routes/skins';
 import csgoSkinsPushRouter, { logSkinsAuthStatus } from './routes/csgo-skins-push';
 import { skinManager } from './services/skin-manager';
+import { resolveWeaponsDbPath } from './services/weapons-db-path';
 
 const app = express();
 
@@ -27,6 +28,13 @@ app.use('/api/csgo/skins', csgoSkinsPushRouter);
 
 skinManager.initializeDefaultSkins();
 logSkinsAuthStatus();
+try {
+  const dbPath = resolveWeaponsDbPath();
+  console.log(`[csgo-skins] weapons DB resolved: ${dbPath}`);
+} catch (err) {
+  const message = err instanceof Error ? err.message : String(err);
+  console.warn(`[csgo-skins] weapons DB not ready: ${message}`);
+}
 
 app.listen(config.port, () => {
   console.log(`CS:GO API running on port ${config.port}`);
