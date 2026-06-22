@@ -15,14 +15,15 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.4.0"
+#define PLUGIN_VERSION "3.4.2"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
 #define ENTITY_APPLY_COOLDOWN 1.5
 #define REAPPLY_PASS_COUNT 6
 #define SPAWN_APPLY_DELAY 0.35
-#define SPAWN_GLOVE_QUERY_DELAY 0.75
+#define SPAWN_GLOVE_QUERY_DELAY 1.0
+#define FORCE_GLOVE_AFTER_WEAPONS_DELAY 3.5
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -40,6 +41,7 @@ bool g_bGlovesTableReady = false;
 bool g_bGlovesPending[MAXPLAYERS + 1];
 int g_iGloveQueryGen[MAXPLAYERS + 1];
 int g_iGloveApplyGen[MAXPLAYERS + 1];
+bool g_bForceGloveApply[MAXPLAYERS + 1];
 int g_iLastGloveGroup[MAXPLAYERS + 1];
 int g_iLastGlovePaint[MAXPLAYERS + 1];
 Handle g_hRefreshTimer = null;
@@ -299,6 +301,7 @@ public Action Command_ReloadSkins(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
             ApplyClientSkins(i, true);
+            ScheduleForcePlayerGloves(i);
         }
     }
     ReplyToCommand(client, "[Clutch] Loadouts reaplicados do weapons DB.");
@@ -309,6 +312,7 @@ public Action Command_ApplySkins(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
             ApplyClientSkins(i, true);
+            ScheduleForcePlayerGloves(i);
         }
     }
     ReplyToCommand(client, "[Clutch] Reaplicando skins nos jogadores.");
@@ -327,6 +331,7 @@ public void OnClientDisconnect(int client) {
     g_bGlovesPending[client] = false;
     g_iGloveQueryGen[client] = 0;
     g_iGloveApplyGen[client] = 0;
+    g_bForceGloveApply[client] = false;
     g_CachedKnifeClass[client][0] = '\0';
 
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
@@ -591,6 +596,43 @@ public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
         ApplyClientSkins(client, false);
     }
     return Plugin_Stop;
+}
+
+void ScheduleForcePlayerGloves(int client) {
+    if (client <= 0 || IsFakeClient(client)) {
+        return;
+    }
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    CreateTimer(FORCE_GLOVE_AFTER_WEAPONS_DELAY, Timer_ForcePlayerGloves, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ForcePlayerGloves(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        ForceReapplyPlayerGloves(client);
+    }
+    return Plugin_Stop;
+}
+
+void ForceReapplyPlayerGloves(int client) {
+    g_bForceGloveApply[client] = true;
+    g_iLastGloveGroup[client] = 0;
+    g_iLastGlovePaint[client] = 0;
+    g_bGlovesPending[client] = false;
+    g_iGloveQueryGen[client]++;
+    ClutchClearWearableGloves(client);
+
+    char steamId[32];
+    if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+        g_bForceGloveApply[client] = false;
+        return;
+    }
+    QueryPlayerGloves(client, steamId, 0);
 }
 
 void ScheduleQueryPlayerGloves(int client) {
@@ -1042,20 +1084,16 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
             LogMessage("[Clutch] Sem loadout no DB para %s (%N)", steamId, client);
             g_bLoggedMissingLoadout[client] = true;
         }
-        if (force) {
-            QueryPlayerGloves(client, steamId, 0);
-        }
         return;
     }
 
     g_bLoggedMissingLoadout[client] = false;
 #if defined _weapons_included_
-    TryReloadWeaponsPluginData(client);
+    if (!force) {
+        TryReloadWeaponsPluginData(client);
+    }
 #endif
     ApplyLoadoutFromDbRow(client, results, force);
-    if (force) {
-        QueryPlayerGloves(client, steamId, 0);
-    }
 }
 
 void QueryPlayerGloves(int client, const char[] steamId, int altAttempt) {
@@ -1214,6 +1252,9 @@ bool ClutchHasExtraWearables(int client) {
 }
 
 bool ClutchShouldSkipGloveReapply(int client, int group, int paintkit) {
+    if (g_bForceGloveApply[client]) {
+        return false;
+    }
     if (g_iLastGloveGroup[client] != group || g_iLastGlovePaint[client] != paintkit) {
         return false;
     }
@@ -1225,10 +1266,7 @@ bool ClutchShouldSkipGloveReapply(int client, int group, int paintkit) {
 }
 
 public void OnFrame_FixArmsAfterGloves(any userid) {
-    int client = GetClientOfUserId(userid);
-    if (client > 0 && IsClientInGame(client)) {
-        ClutchFixCustomArms(client);
-    }
+    // Do not clear m_szArmsModel here — it reverts glove view to default mesh.
 }
 
 public Action Timer_RetryGlovesAfterTeam(Handle timer, DataPack pack) {
@@ -1251,15 +1289,24 @@ void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
         ClutchFixCustomArms(client);
         ClutchClearWearableGloves(client);
         g_bGlovesPending[client] = false;
+        g_bForceGloveApply[client] = false;
         return;
     }
 
     if (ClutchShouldSkipGloveReapply(client, group, paintkit)) {
         g_bGlovesPending[client] = false;
+        g_bForceGloveApply[client] = false;
+        if (g_cvDebug.BoolValue) {
+            LogMessage(
+                "[Clutch] Skipping glove reapply (already %d/%d) for %N",
+                group,
+                paintkit,
+                client
+            );
+        }
         return;
     }
 
-    ClutchFixCustomArms(client);
     ClutchClearWearableGloves(client);
 
     DataPack pack = new DataPack();
@@ -1286,6 +1333,15 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
     }
 
     if (applyGen != g_iGloveApplyGen[client]) {
+        if (g_cvDebug.BoolValue) {
+            LogMessage("[Clutch] Stale glove apply timer ignored for userid %d", userid);
+        }
+        return Plugin_Stop;
+    }
+
+    if (!IsPlayerAlive(client)) {
+        g_bGlovesPending[client] = false;
+        g_bForceGloveApply[client] = false;
         return Plugin_Stop;
     }
 
@@ -1300,6 +1356,8 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
     int ent = CreateEntityByName("wearable_item");
     if (ent == -1) {
         g_bGlovesPending[client] = false;
+        g_bForceGloveApply[client] = false;
+        LogError("[Clutch] CreateEntityByName(wearable_item) failed for %N", client);
         return Plugin_Stop;
     }
 
@@ -1334,8 +1392,9 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
     g_iLastGloveGroup[client] = group;
     g_iLastGlovePaint[client] = paintkit;
     g_bGlovesPending[client] = false;
+    g_bForceGloveApply[client] = false;
 
-    RequestFrame(OnFrame_FixArmsAfterGloves, GetClientUserId(client));
+    CS_UpdateClientModel(client);
 
     LogMessage("[Clutch] Applied gloves group %d paintkit %d for %N", group, paintkit, client);
     return Plugin_Stop;
