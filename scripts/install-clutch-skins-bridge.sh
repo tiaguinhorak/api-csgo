@@ -47,6 +47,12 @@ fi
 mkdir -p "${CSGO_ROOT}/cfg/sourcemod"
 cp -f "${CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
 
+# Fix legacy doubled path in existing cfg (addons/sourcemod/data → data)
+CFG_DEPLOY="${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
+if [[ -f "${CFG_DEPLOY}" ]]; then
+  sed -i 's|clutch_skins_file "addons/sourcemod/data/clutch_skins.txt"|clutch_skins_file "data/clutch_skins.txt"|g' "${CFG_DEPLOY}"
+fi
+
 DATA_FILE="${SM}/data/clutch_skins.txt"
 if [[ ! -f "${DATA_FILE}" ]]; then
   echo "Warning: ${DATA_FILE} missing — upload via WinSCP or run sync-clutch-skins.sh"

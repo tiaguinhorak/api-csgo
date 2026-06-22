@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.0.2"
+#define PLUGIN_VERSION "1.0.3"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -24,8 +24,8 @@ public Plugin myinfo = {
 public void OnPluginStart() {
     g_cvSkinsFile = CreateConVar(
         "clutch_skins_file",
-        "addons/sourcemod/data/clutch_skins.txt",
-        "KeyValues export path synced from clutchclube site",
+        "data/clutch_skins.txt",
+        "KeyValues export path (relative to addons/sourcemod/, or absolute)",
         FCVAR_NOTIFY
     );
     g_cvRefreshSeconds = CreateConVar(
@@ -65,11 +65,21 @@ public Action Command_ReloadSkins(int client, int args) {
 void LoadSkinsFile(bool announce) {
     g_cvSkinsFile.GetString(g_sSkinsFile, sizeof(g_sSkinsFile));
 
+    char relative[PLATFORM_MAX_PATH];
+    strcopy(relative, sizeof(relative), g_sSkinsFile);
+
+    // Legacy configs used addons/sourcemod/data/... which doubled Path_SM.
+    if (StrContains(relative, "addons/sourcemod/", false) == 0) {
+        strcopy(relative, sizeof(relative), g_sSkinsFile[17]);
+    }
+
     char path[PLATFORM_MAX_PATH];
-    if (StrContains(g_sSkinsFile, "addons/") == 0 || StrContains(g_sSkinsFile, "csgo/") == 0) {
-        BuildPath(Path_SM, path, sizeof(path), g_sSkinsFile);
+    if (relative[0] == '/') {
+        strcopy(path, sizeof(path), relative);
+    } else if (StrContains(relative, "csgo/", false) == 0 || StrContains(relative, "csgo\\", false) == 0) {
+        BuildPath(Path_Game, path, sizeof(path), relative);
     } else {
-        strcopy(path, sizeof(path), g_sSkinsFile);
+        BuildPath(Path_SM, path, sizeof(path), relative);
     }
 
     if (!FileExists(path)) {

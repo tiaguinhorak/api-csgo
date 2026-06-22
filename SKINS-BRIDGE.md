@@ -247,7 +247,7 @@ clutch_skins_bridge
 
 | ConVar | Default | Descrição |
 |--------|---------|-----------|
-| `clutch_skins_file` | `addons/sourcemod/data/clutch_skins.txt` | Caminho do export |
+| `clutch_skins_file` | `data/clutch_skins.txt` | Relativo a `addons/sourcemod/` |
 | `clutch_skins_refresh` | `30.0` | Intervalo de reload (segundos) |
 
 ### Comandos admin
