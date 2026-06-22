@@ -15,7 +15,7 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.3.7"
+#define PLUGIN_VERSION "3.3.8"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -199,7 +199,6 @@ public void OnAllPluginsLoaded() {
 
 bool ClutchIsKgnsGlovesPluginRunning() {
     char name[64];
-    char file[PLATFORM_MAX_PATH];
     Handle iter = GetPluginIterator();
     while (MorePlugins(iter)) {
         Handle plugin = ReadPlugin(iter);
@@ -207,8 +206,7 @@ bool ClutchIsKgnsGlovesPluginRunning() {
             continue;
         }
         GetPluginInfo(plugin, PlInfo_Name, name, sizeof(name));
-        GetPluginInfo(plugin, PlInfo_File, file, sizeof(file));
-        if (StrEqual(name, "Gloves", false) || StrContains(file, "gloves", false) != -1) {
+        if (StrEqual(name, "Gloves", false)) {
             delete iter;
             return true;
         }
