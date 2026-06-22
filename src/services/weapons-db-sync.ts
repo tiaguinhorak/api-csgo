@@ -132,6 +132,21 @@ function normalizeSyncOptions(
   return normalized;
 }
 
+function ensureGlovesTable(db: Database.Database, tablePrefix: string): void {
+  const table = `${tablePrefix}gloves`;
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS ${table} (
+      steamid varchar(32) NOT NULL PRIMARY KEY,
+      t_group int(5) NOT NULL DEFAULT 0,
+      t_glove int(5) NOT NULL DEFAULT 0,
+      t_float decimal(3,2) NOT NULL DEFAULT 0.0,
+      ct_group int(5) NOT NULL DEFAULT 0,
+      ct_glove int(5) NOT NULL DEFAULT 0,
+      ct_float decimal(3,2) NOT NULL DEFAULT 0.0
+    )`,
+  );
+}
+
 export async function syncPlayerLoadoutToWeaponsDb(
   steamId: string,
   weapons: SyncWeaponPayload[],
@@ -154,6 +169,7 @@ export async function syncPlayerLoadoutToWeaponsDb(
     let columnCount = 0;
 
     await runWithRetryAsync(() => {
+      ensureGlovesTable(db, tablePrefix);
       const tx = db.transaction(() => {
         for (const targetSteam of steamIds) {
           const { insertSql, updateSql } = buildPlayerLoadoutSql(

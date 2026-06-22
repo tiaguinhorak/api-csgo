@@ -113,6 +113,20 @@ fi
 echo ""
 echo "OK — ${PLUGIN_SMX} installed (loads after weapons.smx)."
 echo "Expected plugin version: $(grep -E '#define PLUGIN_VERSION' "${SP_SRC}" | sed 's/.*"\(.*\)".*/\1/')"
+
+GLOVES_SMX="${SM}/plugins/gloves.smx"
+if [[ -f "${GLOVES_SMX}" ]]; then
+  echo "gloves.smx found — same SQLite DB for glove menu + bridge apply."
+else
+  echo "NOTE: gloves.smx not found — bridge still applies gloves from DB; install kgns Gloves for !gloves menu."
+fi
+
+WEAPONS_SMX="${SM}/plugins/weapons.smx"
+if [[ -f "${WEAPONS_SMX}" ]]; then
+  echo "weapons.smx found — required for knife models (!ws / PTaH)."
+else
+  echo "WARNING: weapons.smx missing — knife models will not change."
+fi
 echo ""
 echo "Full deploy (api + plugin): ./scripts/deploy-skins-v3.sh"
 echo "Recarregar no CS:"

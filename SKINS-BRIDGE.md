@@ -330,9 +330,15 @@ npm run db:seed
 
 ---
 
-## 8. v1 — fora do escopo
+## 8. Cobertura (v3.1)
 
-- Agentes (`AGENT`) no bridge automático
-- Sync em tempo real sem respawn / buy (use `kill` ou novo round após equipar faca)
+| Tipo | Status |
+|------|--------|
+| Armas (53 slots kgns) | Sync + apply no buy/spawn/round |
+| Facas (todos modelos kgns 1.7.8) | Modelo via weapons.smx + paintkit bridge |
+| Luvas (8 tipos CSGO-API) | Tabela `gloves` + wearable no bridge |
+| Wear / seed / nametag / StatTrak | `_float`, `_seed`, `_tag`, `_trak`, `_trak_count` |
+| Kukri | Não no kgns 1.7.8 — aguarda update do !ws |
+| Agentes | Fora do kgns weapons/gloves — não suportado |
 
-**Luvas:** suportadas em v3.0.2 — sync na tabela `gloves` (kgns `gloves.smx`) + apply no bridge. Precisa `gloves.smx` instalado **ou** só o bridge (recomendado: ambos no mesmo `storage-local` DB).
+Requisitos servidor: **PTaH**, `FollowCSGOServerGuidelines "no"`, **weapons.smx**, recomendado **gloves.smx**.

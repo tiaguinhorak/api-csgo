@@ -8,9 +8,9 @@
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
 
-#define PLUGIN_VERSION "3.0.2"
-#define APPLY_COOLDOWN_SECONDS 5.0
-#define CLUTCH_WEAPON_SLOTS 54
+#define PLUGIN_VERSION "3.1.0"
+#define APPLY_COOLDOWN_SECONDS 2.0
+#define CLUTCH_WEAPON_SLOTS 53
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -40,7 +40,7 @@ char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_knife_falchion", "weapon_knife_gut", "weapon_knife_ursus",
     "weapon_knife_gypsy_jackknife", "weapon_knife_stiletto", "weapon_knife_widowmaker",
     "weapon_mp5sd", "weapon_knife_css", "weapon_knife_cord", "weapon_knife_canis",
-    "weapon_knife_outdoor", "weapon_knife_skeleton", "weapon_knife_kukri"
+    "weapon_knife_outdoor", "weapon_knife_skeleton"
 };
 
 char g_ClutchDbColumns[CLUTCH_WEAPON_SLOTS][32] = {
@@ -52,8 +52,7 @@ char g_ClutchDbColumns[CLUTCH_WEAPON_SLOTS][32] = {
     "knife_m9_bayonet", "bayonet", "knife_survival_bowie", "knife_butterfly",
     "knife_flip", "knife_push", "knife_tactical", "knife_falchion", "knife_gut",
     "knife_ursus", "knife_gypsy_jackknife", "knife_stiletto", "knife_widowmaker",
-    "mp5sd", "knife_css", "knife_cord", "knife_canis", "knife_outdoor", "knife_skeleton",
-    "knife_kukri"
+    "mp5sd", "knife_css", "knife_cord", "knife_canis", "knife_outdoor", "knife_skeleton"
 };
 
 public Plugin myinfo = {
@@ -219,11 +218,29 @@ public void Event_ItemEquip(Event event, const char[] name, bool dontBroadcast) 
     g_fLastItemEquipApply[client] = now;
 
     int userid = GetClientUserId(client);
-    CreateTimer(0.25, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(0.25, Timer_ApplySkinsBypassCooldown, userid, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplySkinsBypassCooldown(Handle timer, any userid) {
+    int client = GetClientOfUserId(userid);
+    if (client > 0) {
+        ApplyClientSkins(client, false, true);
+    }
+    return Plugin_Stop;
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
-    CreateTimer(2.5, Timer_ApplyAllPlayersSkins, _, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(1.5, Timer_ApplyAllPlayersSkins, _, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(4.0, Timer_ApplyAllPlayersBypass, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplyAllPlayersBypass(Handle timer) {
+    for (int client = 1; client <= MaxClients; client++) {
+        if (IsClientInGame(client) && !IsFakeClient(client)) {
+            ApplyClientSkins(client, false, true);
+        }
+    }
+    return Plugin_Stop;
 }
 
 public Action Timer_ApplyAllPlayersSkins(Handle timer) {
@@ -238,6 +255,7 @@ public Action Timer_ApplyAllPlayersSkins(Handle timer) {
 void ScheduleApplyClientSkins(int client) {
     int userid = GetClientUserId(client);
     CreateTimer(1.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(3.5, Timer_ApplySkinsBypassCooldown, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
@@ -257,6 +275,7 @@ public Action Timer_ApplyKnifeSkinDelayed(Handle timer, DataPack pack) {
     float wear = pack.ReadFloat();
     int seed = pack.ReadCell();
     int stattrak = pack.ReadCell();
+    int stattrakCount = pack.ReadCell();
     char nametag[64];
     pack.ReadString(nametag, sizeof(nametag));
     delete pack;
@@ -268,7 +287,7 @@ public Action Timer_ApplyKnifeSkinDelayed(Handle timer, DataPack pack) {
 
     int weapon = FindPlayerWeapon(client, knifeClass);
     if (weapon != -1) {
-        SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, nametag, true);
+        SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, stattrakCount, nametag, true);
         if (g_cvDebug.BoolValue) {
             LogMessage(
                 "[Clutch] Applied %s paintkit %d (knife delayed) for %N",
@@ -375,20 +394,50 @@ void KnifeClassFromIndex(int idx, char[] out, int maxlen) {
             strcopy(out, maxlen, "weapon_knife_skeleton");
             return;
         }
-        case 53: {
-            strcopy(out, maxlen, "weapon_knife_kukri");
-            return;
-        }
     }
     out[0] = '\0';
+}
+
+int FindPlayerWeaponInSlots(int client, const char[] weaponKey, bool matchMelee) {
+    for (int slot = 0; slot <= 5; slot++) {
+        int weapon = GetPlayerWeaponSlot(client, slot);
+        if (weapon == -1) {
+            continue;
+        }
+
+        char classname[64];
+        GetEntityClassname(weapon, classname, sizeof(classname));
+
+        if (matchMelee) {
+            if (IsMeleeClassname(classname)) {
+                return weapon;
+            }
+            continue;
+        }
+
+        if (StrEqual(classname, weaponKey, false)) {
+            return weapon;
+        }
+    }
+    return -1;
 }
 
 int FindPlayerWeapon(int client, const char[] weaponKey) {
     bool matchMelee = IsMeleeWeaponKey(weaponKey);
 
-    for (int slot = 0; slot <= 5; slot++) {
-        int weapon = GetPlayerWeaponSlot(client, slot);
-        if (weapon == -1) {
+    int weapon = FindPlayerWeaponInSlots(client, weaponKey, matchMelee);
+    if (weapon != -1) {
+        return weapon;
+    }
+
+    int offset = FindSendPropInfo("CBasePlayer", "m_hMyWeapons");
+    if (offset == -1) {
+        return -1;
+    }
+
+    for (int i = 0; i < 64; i++) {
+        weapon = GetEntDataEnt(client, offset + (i * 4));
+        if (!IsPaintableWeaponEntity(weapon)) {
             continue;
         }
 
@@ -422,7 +471,8 @@ void SetClutchWeaponProps(
     int paintkit,
     float wear,
     int seed,
-    int stattrak,
+    int stattrakFlag,
+    int stattrakCount,
     const char[] nametag,
     bool isKnife
 ) {
@@ -447,13 +497,18 @@ void SetClutchWeaponProps(
 
     if (isKnife) {
         SetEntProp(weapon, Prop_Send, "m_iEntityQuality", 3);
-        if (stattrak >= 0) {
-            SetEntProp(weapon, Prop_Send, "m_nFallbackStatTrak", stattrak > 0 ? stattrak : -1);
+        if (stattrakFlag > 0) {
+            int count = stattrakCount > 0 ? stattrakCount : 1;
+            SetEntProp(weapon, Prop_Send, "m_nFallbackStatTrak", count);
+        } else {
+            SetEntProp(weapon, Prop_Send, "m_nFallbackStatTrak", -1);
         }
-    } else if (stattrak > 0) {
-        SetEntProp(weapon, Prop_Send, "m_nFallbackStatTrak", stattrak);
+    } else if (stattrakFlag > 0) {
+        int count = stattrakCount > 0 ? stattrakCount : 1;
+        SetEntProp(weapon, Prop_Send, "m_nFallbackStatTrak", count);
         SetEntProp(weapon, Prop_Send, "m_iEntityQuality", 9);
     } else {
+        SetEntProp(weapon, Prop_Send, "m_nFallbackStatTrak", -1);
         SetEntProp(weapon, Prop_Send, "m_iEntityQuality", 0);
     }
 
@@ -718,6 +773,7 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
     float knifeWear = 0.15;
     int knifeSeed = 0;
     int knifeTrak = 0;
+    int knifeTrakCount = 0;
     char knifeTag[64];
     knifeTag[0] = '\0';
 
@@ -749,6 +805,10 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
             Format(trakCol, sizeof(trakCol), "%s_trak", column);
             knifeTrak = DbFetchInt(results, trakCol, 0);
 
+            char trakCountCol[48];
+            Format(trakCountCol, sizeof(trakCountCol), "%s_trak_count", column);
+            knifeTrakCount = DbFetchInt(results, trakCountCol, 0);
+
             char tagCol[40];
             Format(tagCol, sizeof(tagCol), "%s_tag", column);
             DbFetchString(results, tagCol, knifeTag, sizeof(knifeTag));
@@ -778,6 +838,10 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
         Format(trakCol, sizeof(trakCol), "%s_trak", column);
         int stattrak = DbFetchInt(results, trakCol, 0);
 
+        char trakCountCol[48];
+        Format(trakCountCol, sizeof(trakCountCol), "%s_trak_count", column);
+        int stattrakCount = DbFetchInt(results, trakCountCol, 0);
+
         char tagCol[40];
         Format(tagCol, sizeof(tagCol), "%s_tag", column);
         char nametag[64];
@@ -785,7 +849,7 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
 
         int weapon = FindPlayerWeapon(client, weaponKey);
         if (weapon != -1) {
-            SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, nametag, false);
+            SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, stattrakCount, nametag, false);
             if (g_cvDebug.BoolValue) {
                 char classname[64];
                 GetEntityClassname(weapon, classname, sizeof(classname));
@@ -822,6 +886,7 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
     pack.WriteFloat(knifeWear);
     pack.WriteCell(knifeSeed);
     pack.WriteCell(knifeTrak);
+    pack.WriteCell(knifeTrakCount);
     pack.WriteString(knifeTag);
     CreateTimer(0.35, Timer_ApplyKnifeSkinDelayed, pack, TIMER_FLAG_NO_MAPCHANGE);
 }
@@ -833,16 +898,18 @@ public void ApplyClientSkinsFrame(any userid) {
     }
 }
 
-void ApplyClientSkins(int client, bool force) {
+void ApplyClientSkins(int client, bool force, bool bypassCooldown = false) {
     if (!IsClientInGame(client) || IsFakeClient(client)) {
         return;
     }
 
     float now = GetGameTime();
-    if (!force && (now - g_fLastApplyTime[client]) < APPLY_COOLDOWN_SECONDS) {
+    if (!force && !bypassCooldown && (now - g_fLastApplyTime[client]) < APPLY_COOLDOWN_SECONDS) {
         return;
     }
-    g_fLastApplyTime[client] = now;
+    if (!bypassCooldown) {
+        g_fLastApplyTime[client] = now;
+    }
 
     char steamId[32];
     if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
