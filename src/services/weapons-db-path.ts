@@ -12,7 +12,7 @@ function expandHome(filePath: string): string {
   return filePath;
 }
 
-function getSourceModRoots(): string[] {
+export function getSourceModRoots(): string[] {
   const serverDirs = new Set<string>();
   const envDir = process.env.CSGO_SERVER_DIR?.trim();
   if (envDir) serverDirs.add(envDir);

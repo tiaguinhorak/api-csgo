@@ -9,10 +9,11 @@
 #tryinclude <weapons>
 #include <PTaH>
 
-#define PLUGIN_VERSION "3.2.0"
+#define PLUGIN_VERSION "3.2.1"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
+#define ENTITY_APPLY_COOLDOWN 1.5
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -36,6 +37,7 @@ int g_CachedTrakCount[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 char g_CachedTag[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][64];
 int g_iAppliedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 char g_CachedKnifeClass[MAXPLAYERS + 1][CLUTCH_KNIFE_CLASS_LEN];
+float g_fLastEntityApply[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -245,6 +247,7 @@ public void OnClientDisconnect(int client) {
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
         g_CachedPaintkit[client][i] = 0;
         g_iAppliedPaintkit[client][i] = 0;
+        g_fLastEntityApply[client][i] = 0.0;
         g_CachedTag[client][i][0] = '\0';
     }
 }
@@ -280,21 +283,36 @@ public void Clutch_GiveNamedItemPost(
         return;
     }
 
+    char cn[64];
+    GetEntityClassname(entity, cn, sizeof(cn));
+    int idx = GetClutchIndexForClassname(client, cn);
+    if (idx == -1) {
+        return;
+    }
+
+    int paintkit = g_CachedPaintkit[client][idx];
+    if (paintkit > 0 && GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit") == paintkit) {
+        g_iAppliedPaintkit[client][idx] = paintkit;
+        return;
+    }
+
+    float now = GetGameTime();
+    if (now - g_fLastEntityApply[client][idx] < ENTITY_APPLY_COOLDOWN) {
+        return;
+    }
+
     DataPack pack = new DataPack();
     pack.WriteCell(GetClientUserId(client));
     pack.WriteCell(entity);
-    CreateTimer(0.15, Timer_ApplyCachedEntity, pack, TIMER_FLAG_NO_MAPCHANGE);
-
-    DataPack packLate = new DataPack();
-    packLate.WriteCell(GetClientUserId(client));
-    packLate.WriteCell(entity);
-    CreateTimer(0.6, Timer_ApplyCachedEntity, packLate, TIMER_FLAG_NO_MAPCHANGE);
+    pack.WriteCell(idx);
+    CreateTimer(0.35, Timer_ApplyCachedEntity, pack, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplyCachedEntity(Handle timer, DataPack pack) {
     pack.Reset();
     int userid = pack.ReadCell();
     int entity = pack.ReadCell();
+    int idx = pack.ReadCell();
     delete pack;
 
     int client = GetClientOfUserId(userid);
@@ -302,20 +320,15 @@ public Action Timer_ApplyCachedEntity(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
-    char classname[64];
-    GetEntityClassname(entity, classname, sizeof(classname));
-    int idx = GetClutchIndexForClassname(client, classname);
-    if (idx == -1) {
+    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS) {
         return Plugin_Stop;
     }
 
-    if (IsMeleeClassname(classname)) {
-        if (g_CachedKnifeClass[client][0] != '\0') {
-            ClutchSetClientKnife(client, g_CachedKnifeClass[client]);
-        }
-    }
+    char classname[64];
+    GetEntityClassname(entity, classname, sizeof(classname));
+    bool isKnife = IsMeleeClassname(classname);
 
-    ApplyCachedSkinToEntity(client, entity, idx, IsMeleeClassname(classname));
+    ApplyCachedSkinToEntity(client, entity, idx, isKnife);
     return Plugin_Stop;
 }
 
@@ -367,10 +380,16 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife) {
     }
 
     if (g_iAppliedPaintkit[client][idx] == paintkit
-        && GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit") == paintkit
-        && GetEntProp(entity, Prop_Send, "m_nFallbackSeed") == g_CachedSeed[client][idx]) {
+        && GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit") == paintkit) {
         return false;
     }
+
+    float now = GetGameTime();
+    if (now - g_fLastEntityApply[client][idx] < ENTITY_APPLY_COOLDOWN
+        && g_iAppliedPaintkit[client][idx] == paintkit) {
+        return false;
+    }
+    g_fLastEntityApply[client][idx] = now;
 
     SetClutchWeaponProps(
         client,

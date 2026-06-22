@@ -7,6 +7,10 @@ import { reloadClutchSkinsInGame } from '../services/clutch-rcon';
 import type { SyncWeaponPayload } from '../services/weapons-db-map';
 import { syncPlayerLoadoutToWeaponsDb } from '../services/weapons-db-sync';
 import { getWeaponsDbCandidates } from '../services/weapons-db-path';
+import {
+  buildWsAllowlistSet,
+  loadWsWeaponsAllowlist,
+} from '../services/ws-weapons-config';
 
 const router = Router();
 
@@ -67,6 +71,18 @@ type PlayerSyncBody = {
   clearKnifeSlot?: boolean;
   clearWeaponIds?: string[];
 };
+
+router.get('/ws-allowlist', (_req: Request, res: Response) => {
+  const { entries, sourcePath, count } = loadWsWeaponsAllowlist(true);
+  const keys = [...buildWsAllowlistSet(entries)];
+  return res.json({
+    ok: true,
+    count,
+    sourcePath,
+    keys,
+    entries,
+  });
+});
 
 router.post('/player-sync', async (req: Request, res: Response) => {
   if (!isAuthorized(req)) {
