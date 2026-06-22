@@ -29,6 +29,7 @@ send_cmd() {
 }
 
 send_cmd "sm plugins reload weapons"
+send_cmd "sm plugins info weapons"
 send_cmd "sm plugins reload z_clutch_skins_bridge"
 send_cmd "sm plugins info z_clutch_skins_bridge"
 send_cmd "clutch_skins_debug 1"
@@ -36,5 +37,6 @@ send_cmd "sm_reloadclutchskins"
 send_cmd "sm_clutch_applyskins"
 
 echo ""
-echo "Done. Expect plugin Version: 3.3.0"
-echo "If CS was offline during equip, DB still updated — respawn or run sm_clutch_applyskins."
+echo "Done. Expect z_clutch_skins_bridge Version: 3.3.1 (not 3.3.0)."
+echo "If weapons reload failed, change map (sm_map de_dust2) then re-run this script."
+echo "Respawn in-game after apply. New errors after reload: tail addons/sourcemod/logs/errors_*.log"

@@ -38,9 +38,19 @@ fi
 
 WEAPONS_SP="${SM}/scripting/weapons.sp"
 NATIVES_SP="${SM}/scripting/weapons/natives.sp"
+WEAPONS_SMX="${SM}/plugins/weapons.smx"
 if [[ -f "${WEAPONS_SP}" ]]; then
   if grep -q 'Weapons_ReloadClientData' "${WEAPONS_SP}" && grep -q 'Weapons_ReloadClientData_Native' "${NATIVES_SP}" 2>/dev/null; then
     echo "OK  weapons native patch present in source"
+    if [[ -f "${WEAPONS_SMX}" ]]; then
+      if [[ "${WEAPONS_SP}" -nt "${WEAPONS_SMX}" ]]; then
+        echo "WARN weapons.smx is OLDER than weapons.sp — run patch script + reload weapons in CS"
+      else
+        echo "OK  weapons.smx compiled (smx not older than source)"
+      fi
+    else
+      echo "MISSING ${WEAPONS_SMX} — run patch-weapons-reload-native.sh"
+    fi
   else
     echo "MISSING Weapons_ReloadClientData in weapons source — run:"
     echo "  CSGO_ROOT=${CSGO_ROOT} bash scripts/patch-weapons-reload-native.sh"
@@ -49,9 +59,16 @@ else
   echo "WARN weapons.sp not found — cannot verify native patch"
 fi
 
+BRIDGE_SMX="${SM}/plugins/z_clutch_skins_bridge.smx"
+if [[ -f "${BRIDGE_SMX}" ]]; then
+  BRIDGE_MTIME="$(stat -c %Y "${BRIDGE_SMX}" 2>/dev/null || stat -f %m "${BRIDGE_SMX}" 2>/dev/null || echo 0)"
+  echo "TIP  bridge smx mtime: $(date -d "@${BRIDGE_MTIME}" 2>/dev/null || date -r "${BRIDGE_MTIME}" 2>/dev/null || echo unknown)"
+  echo "     Errors in log BEFORE this time are from an old plugin — reload in CS then respawn."
+fi
+
 echo ""
-echo "Recent SM errors (clutch / clutch_skins):"
-grep -iE 'clutch|Weapons_ReloadClientData|Native is not bound' "${SM}/logs/errors_"*.log 2>/dev/null | tail -10 || echo "  (none or no log yet)"
+echo "Recent SM errors (last 8 lines — ignore if timestamp is BEFORE bridge reload):"
+grep -iE 'clutch|Weapons_ReloadClientData|Native is not bound' "${SM}/logs/errors_"*.log 2>/dev/null | tail -8 || echo "  (none or no log yet)"
 
 echo ""
 echo "=== Reload (SSH) ==="
