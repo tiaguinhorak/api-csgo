@@ -15,7 +15,7 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.4.2"
+#define PLUGIN_VERSION "3.4.3"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -1213,8 +1213,17 @@ void ClutchFixCustomArms(int client) {
 }
 
 void ClutchClearWearableGloves(int client) {
+    // Remove the default/custom glove the engine attached via the wearable list.
+    int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
+    int guard = 0;
+    while (wearable != -1 && IsValidEntity(wearable) && guard < 64) {
+        ClutchDestroyWearableEntity(wearable);
+        wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
+        guard++;
+    }
     SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
 
+    // Belt-and-suspenders: any wearable_item still parented to this client.
     int entity = -1;
     while ((entity = FindEntityByClassname(entity, "wearable_item")) != -1) {
         if (!IsValidEntity(entity)) {
@@ -1350,9 +1359,9 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
+    // Fully strip default + any custom glove first so we never stack.
     ClutchClearWearableGloves(client);
 
-    bool worldModel = g_cvGlovesWorldModel.BoolValue;
     int ent = CreateEntityByName("wearable_item");
     if (ent == -1) {
         g_bGlovesPending[client] = false;
@@ -1361,33 +1370,32 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
-    SetEntProp(ent, Prop_Send, "m_iItemIDLow", -1);
-    SetEntProp(ent, Prop_Send, "m_iItemIDHigh", -1);
-    SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", group);
-    SetEntProp(ent, Prop_Send, "m_nFallbackPaintKit", paintkit);
-
     float appliedWear = wear;
     if (appliedWear <= 0.0) {
-        appliedWear = 0.15;
+        appliedWear = 0.0001;
     } else if (appliedWear >= 1.0) {
         appliedWear = 0.999999;
     }
-    SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", appliedWear);
-    SetEntProp(ent, Prop_Send, "m_nFallbackSeed", GetRandomInt(1, 1000));
-    SetEntProp(ent, Prop_Send, "m_iEntityQuality", 3);
+
+    SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", group);
+    SetEntProp(ent, Prop_Send, "m_iItemIDHigh", -1);
+    SetEntProp(ent, Prop_Send, "m_iItemIDLow", -1);
     SetEntProp(ent, Prop_Send, "m_iAccountID", GetSteamAccountID(client));
-    SetEntPropEnt(ent, Prop_Data, "m_hOwnerEntity", client);
-    SetEntPropEnt(ent, Prop_Data, "m_hParent", client);
-    if (worldModel) {
-        SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", client);
-    }
+    SetEntProp(ent, Prop_Send, "m_iEntityQuality", 3);
     SetEntProp(ent, Prop_Send, "m_bInitialized", 1);
+    SetEntProp(ent, Prop_Send, "m_nFallbackPaintKit", paintkit);
+    SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", appliedWear);
+    SetEntProp(ent, Prop_Send, "m_nFallbackSeed", GetRandomInt(0, 1000));
+    if (HasEntProp(ent, Prop_Send, "m_nFallbackStatTrak")) {
+        SetEntProp(ent, Prop_Send, "m_nFallbackStatTrak", -1);
+    }
 
     DispatchSpawn(ent);
-    SetEntPropEnt(client, Prop_Send, "m_hMyWearables", ent);
-    if (worldModel) {
-        SetEntProp(client, Prop_Send, "m_nBody", 1);
-    }
+
+    // EquipPlayerWeapon registers the wearable as THE active glove, replacing
+    // the default model instead of layering a second wearable on top of it.
+    SetEntProp(client, Prop_Send, "m_nBody", 1);
+    EquipPlayerWeapon(client, ent);
 
     g_iLastGloveGroup[client] = group;
     g_iLastGlovePaint[client] = paintkit;
