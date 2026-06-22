@@ -9,8 +9,6 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
 DATA="${CLUTCH_SKINS_OUT:-${CSGO_ROOT}/addons/sourcemod/data/clutch_skins.txt}"
-SYNC_KEY="${CSGO_SKINS_SYNC_KEY:-}"
-API_URL="${CLUTCH_API_URL:-http://127.0.0.1:3000}"
 
 if [[ -f "${REPO_ROOT}/.env" ]]; then
   set -a
@@ -18,6 +16,9 @@ if [[ -f "${REPO_ROOT}/.env" ]]; then
   source "${REPO_ROOT}/.env"
   set +a
 fi
+
+SYNC_KEY="${CSGO_SKINS_SYNC_KEY:-}"
+API_URL="${CLUTCH_API_URL:-http://127.0.0.1:3000}"
 
 echo "=== Steam + Skins diagnose ==="
 echo ""
@@ -50,6 +51,10 @@ if [[ -f "${DB_PATH}" ]]; then
       TABLES="$(sqlite3 "${DB_PATH}" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%weapons%';" 2>/dev/null || true)"
       if [[ -n "${TABLES}" ]]; then
         echo "OK  weapons table(s): ${TABLES}"
+        echo "Sample loadout (knife_butterfly / bayonet / knife):"
+        sqlite3 "${DB_PATH}" \
+          "SELECT steamid, knife, knife_butterfly, bayonet FROM weapons WHERE knife_butterfly > 0 OR bayonet > 0 LIMIT 5;" \
+          2>/dev/null || true
       else
         echo "WARN no 'weapons' table — use !ws once in-game or check databases.cfg"
       fi
