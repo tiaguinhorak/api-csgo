@@ -77,14 +77,7 @@ fi
 if command -v pm2 >/dev/null 2>&1; then
   echo ""
   echo ">>> pm2 (api-csgo)"
-  if pm2 describe api-csgo >/dev/null 2>&1; then
-    pm2 restart api-csgo --update-env
-  else
-    echo "api-csgo not registered in pm2 — starting ecosystem.config.js"
-    pm2 start ecosystem.config.js --update-env
-  fi
-  sleep 3
-  pm2 status api-csgo 2>/dev/null || pm2 list
+  "${REPO_ROOT}/scripts/pm2-ensure-api-csgo.sh"
 else
   echo "WARN: pm2 not found — restart api-csgo manually"
 fi
