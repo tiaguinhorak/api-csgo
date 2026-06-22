@@ -15,7 +15,7 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.3.2"
+#define PLUGIN_VERSION "3.3.3"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -442,6 +442,27 @@ void UpdateSlotCache(
     g_CachedTrak[client][idx] = trak;
     g_CachedTrakCount[client][idx] = trakCount;
     strcopy(g_CachedTag[client][idx], sizeof(g_CachedTag[][]), tag);
+}
+
+void ClearSlotCache(int client, int idx) {
+    g_CachedPaintkit[client][idx] = 0;
+    g_iAppliedPaintkit[client][idx] = 0;
+    g_CachedWear[client][idx] = 0.0;
+    g_CachedSeed[client][idx] = 0;
+    g_CachedTrak[client][idx] = 0;
+    g_CachedTrakCount[client][idx] = 0;
+    g_CachedTag[client][idx][0] = '\0';
+    g_fLastEntityApply[client][idx] = 0.0;
+}
+
+void ClearAllMeleeSlotCaches(int client) {
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        if (IsMeleeWeaponKey(g_ClutchWeaponKeys[i])) {
+            ClearSlotCache(client, i);
+        }
+    }
+    g_CachedKnifeClass[client][0] = '\0';
+    g_iLastKnifePaint[client] = 0;
 }
 
 bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool force = false) {
@@ -1014,6 +1035,11 @@ public void T_ApplyGlovesFromDbCallback(Database database, DBResultSet results, 
 
 void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
     if (group <= 0 || paintkit <= 0) {
+        int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
+        if (wearable != -1) {
+            AcceptEntityInput(wearable, "KillHierarchy");
+            SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
+        }
         return;
     }
 
@@ -1167,6 +1193,7 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
 
         int paintkit = DbFetchInt(results, column, 0);
         if (paintkit <= 0) {
+            ClearSlotCache(client, i);
             continue;
         }
 
@@ -1228,7 +1255,12 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
 
     ScheduleForceReapply(client, force);
 
-    if (knifeClass[0] == '\0' || knifePaintkit <= 0) {
+    if (knifePaintkit <= 0) {
+        ClearAllMeleeSlotCaches(client);
+        return;
+    }
+
+    if (knifeClass[0] == '\0') {
         return;
     }
 
