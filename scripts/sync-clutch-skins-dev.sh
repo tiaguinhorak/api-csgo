@@ -11,7 +11,8 @@ set -euo pipefail
 #   CSGO_SKINS_SYNC_KEY   — igual ao site/.env
 #   CLUTCH_SSH_TARGET     — default csgo@188.220.168.233
 #   CLUTCH_SSH_REMOTE     — path no servidor CS:GO
-#   CLUTCH_SSH_KEY        — chave privada (-i). Auto: ~/.ssh/id_ed25519 ou id_rsa
+#   CLUTCH_SSH_KEY        — chave privada (-i). Não usa/replace suas outras chaves; crie uma nova:
+#                           ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_csgo_vps -N ""
 #   CLUTCH_FETCH_ONLY=1   — só baixa export (sem SSH). Arquivo: scripts/clutch_skins.export.txt
 #   CLUTCH_SSH_PASSWORD   — senha para sshpass (opcional, não recomendado)
 
@@ -37,7 +38,10 @@ pick_default_ssh_key() {
   if [[ -n "${SSH_KEY}" ]]; then
     return
   fi
-  for candidate in "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_rsa"; do
+  for candidate in \
+    "${HOME}/.ssh/id_ed25519_csgo_vps" \
+    "${HOME}/.ssh/id_ed25519" \
+    "${HOME}/.ssh/id_rsa"; do
     if [[ -f "${candidate}" ]]; then
       SSH_KEY="${candidate}"
       echo "Using SSH key: ${SSH_KEY}"
@@ -79,12 +83,12 @@ print_ssh_help() {
   echo "1) Teste login:" >&2
   echo "   ssh ${SSH_TARGET}" >&2
   echo "" >&2
-  echo "2) Crie chave no PC (se não tem):" >&2
-  echo "   ssh-keygen -t ed25519 -f \"\$HOME/.ssh/id_ed25519\" -N \"\"" >&2
-  echo "   ssh-copy-id -i \"\$HOME/.ssh/id_ed25519.pub\" ${SSH_TARGET}" >&2
+  echo "2) Chave NOVA só para este servidor (não altera suas chaves atuais):" >&2
+  echo "   ssh-keygen -t ed25519 -f \"\$HOME/.ssh/id_ed25519_csgo_vps\" -N \"\"" >&2
+  echo "   ssh-copy-id -i \"\$HOME/.ssh/id_ed25519_csgo_vps.pub\" ${SSH_TARGET}" >&2
   echo "" >&2
-  echo "3) Rode com a chave:" >&2
-  echo "   CLUTCH_SSH_KEY=\"\$HOME/.ssh/id_ed25519\" ./sync-clutch-skins-dev.sh" >&2
+  echo "3) Rode o sync com essa chave:" >&2
+  echo "   CLUTCH_SSH_KEY=\"\$HOME/.ssh/id_ed25519_csgo_vps\" ./sync-clutch-skins-dev.sh" >&2
   echo "" >&2
   echo "4) Sem SSH agora — só baixar o arquivo:" >&2
   echo "   CLUTCH_FETCH_ONLY=1 ./sync-clutch-skins-dev.sh" >&2
