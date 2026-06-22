@@ -84,16 +84,35 @@ else
   if [[ "${HTTP}" == "500" ]]; then
     echo "  → Check WEAPONS_DB_PATH and chmod on .sq3 file"
   fi
+  if [[ "${HTTP}" == "200" ]]; then
+    echo "  → DB sync OK (rconReload may be false if server is hibernating — respawn still works)"
+  fi
   if [[ "${HTTP}" == "000" ]]; then
     echo "  → api-csgo not running on ${API_URL} (pm2 restart --update-env?)"
   fi
 fi
 
 echo ""
-echo "--- 4) Steam / spawn ---"
+echo "--- 4) RCON / screen ---"
+RCON_HOST="${CSGO_SERVER_HOST:-127.0.0.1}"
+RCON_PORT="${CSGO_RCON_PORT:-27015}"
+if command -v nc >/dev/null 2>&1; then
+  if nc -z -w2 "${RCON_HOST}" "${RCON_PORT}" 2>/dev/null; then
+    echo "OK  TCP ${RCON_HOST}:${RCON_PORT} (RCON reachable)"
+  else
+    echo "WARN TCP ${RCON_HOST}:${RCON_PORT} refused — server hibernating/offline?"
+    echo "  Set CLUTCH_CS_SCREEN=csgo-clutch-#1 in .env for screen fallback"
+    screen -ls 2>/dev/null | grep -i csgo || true
+  fi
+else
+  echo "SKIP nc not installed — install netcat-openbsd for RCON port check"
+fi
+
+echo ""
+echo "--- 5) Steam / spawn ---"
 echo "  BAD log: Could not establish connection to Steam servers → fix GSLT"
 echo "  BAD log: PutClientInServer: no info_player_start → changelevel de_mirage"
 echo ""
-echo "--- 5) In-game ---"
+echo "--- 6) In-game ---"
 echo "  sm plugins info z_clutch_skins_bridge  (must be 3.0.0)"
 echo "  sm_clutch_applyskins && kill"
