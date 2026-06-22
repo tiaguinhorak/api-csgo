@@ -5,7 +5,7 @@ import { config } from './config';
 import matchesRouter from './routes/matches';
 import serversRouter from './routes/servers';
 import skinsRouter from './routes/skins';
-import csgoSkinsPushRouter from './routes/csgo-skins-push';
+import csgoSkinsPushRouter, { logSkinsAuthStatus } from './routes/csgo-skins-push';
 import { skinManager } from './services/skin-manager';
 
 const app = express();
@@ -26,6 +26,7 @@ app.use('/api/skins', skinsRouter);
 app.use('/api/csgo/skins', csgoSkinsPushRouter);
 
 skinManager.initializeDefaultSkins();
+logSkinsAuthStatus();
 
 app.listen(config.port, () => {
   console.log(`CS:GO API running on port ${config.port}`);

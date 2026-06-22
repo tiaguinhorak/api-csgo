@@ -3,7 +3,10 @@ dotenv.config();
 
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
-  apiKey: process.env.API_KEY || 'default-key-change-me',
+  apiKey:
+    process.env.API_KEY?.trim() ||
+    process.env.CSGO_API_KEY?.trim() ||
+    'default-key-change-me',
 
   csgo: {
     defaultTickrate: 128,

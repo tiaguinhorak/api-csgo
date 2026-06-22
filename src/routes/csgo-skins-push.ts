@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import express from 'express';
 import fs from 'fs/promises';
 import path from 'path';
+import { config } from '../config';
 import { reloadClutchSkinsInGame } from '../services/clutch-rcon';
 import type { SyncWeaponPayload } from '../services/weapons-db-map';
 import { syncPlayerLoadoutToWeaponsDb } from '../services/weapons-db-sync';
@@ -9,16 +10,54 @@ import { syncPlayerLoadoutToWeaponsDb } from '../services/weapons-db-sync';
 const router = Router();
 
 const SYNC_HEADER = 'x-skins-sync-key';
+const API_KEY_HEADER = 'x-api-key';
+
+function getProvidedAuthKey(req: Request): string | null {
+  if (typeof req.headers[SYNC_HEADER] === 'string') {
+    return req.headers[SYNC_HEADER];
+  }
+  if (typeof req.headers[API_KEY_HEADER] === 'string') {
+    return req.headers[API_KEY_HEADER];
+  }
+  if (typeof req.headers.authorization === 'string') {
+    return req.headers.authorization.replace(/^Bearer\s+/i, '');
+  }
+  return null;
+}
 
 function isAuthorized(req: Request): boolean {
-  const expected = process.env.CSGO_SKINS_SYNC_KEY?.trim();
-  if (!expected) return false;
-  const provided =
-    (typeof req.headers[SYNC_HEADER] === 'string' ? req.headers[SYNC_HEADER] : null) ??
-    (typeof req.headers['authorization'] === 'string'
-      ? req.headers['authorization'].replace(/^Bearer\s+/i, '')
-      : null);
-  return provided === expected;
+  const provided = getProvidedAuthKey(req);
+  if (!provided) {
+    return false;
+  }
+
+  const syncKey = process.env.CSGO_SKINS_SYNC_KEY?.trim();
+  if (syncKey && provided === syncKey) {
+    return true;
+  }
+
+  const apiKey = config.apiKey?.trim();
+  if (apiKey && apiKey !== 'default-key-change-me' && provided === apiKey) {
+    return true;
+  }
+
+  return false;
+}
+
+export function logSkinsAuthStatus(): void {
+  const syncKey = process.env.CSGO_SKINS_SYNC_KEY?.trim();
+  const apiKey = config.apiKey?.trim();
+  if (!syncKey && (!apiKey || apiKey === 'default-key-change-me')) {
+    console.warn(
+      '[csgo-skins] Set CSGO_SKINS_SYNC_KEY or API_KEY in .env — player-sync will reject requests',
+    );
+    return;
+  }
+  if (syncKey) {
+    console.log('[csgo-skins] player-sync auth: CSGO_SKINS_SYNC_KEY configured');
+  } else {
+    console.log('[csgo-skins] player-sync auth: API_KEY only (no CSGO_SKINS_SYNC_KEY)');
+  }
 }
 
 type PlayerSyncBody = {
