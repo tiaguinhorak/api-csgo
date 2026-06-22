@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.1.3"
+#define PLUGIN_VERSION "1.1.4"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -285,39 +285,26 @@ void ApplyWeaponSkinEntity(
     SetEntProp(weapon, Prop_Send, "m_iAccountID", accountId);
 }
 
-void ApplySkinToMatchingViewModels(
+void ApplySkinToWeaponWorldModel(
     int client,
-    const char[] weaponKey,
+    int weapon,
     int paintkit,
     float wear,
     int seed,
     int stattrak,
     const char[] nametag
 ) {
-    bool matchMelee = IsMeleeWeaponKey(weaponKey);
-
-    for (int i = 0; i <= 2; i++) {
-        char prop[20];
-        Format(prop, sizeof(prop), "m_hViewModel[%d]", i);
-
-        int viewModel = GetEntPropEnt(client, Prop_Send, prop);
-        if (viewModel <= MaxClients) {
-            continue;
-        }
-
-        char classname[64];
-        GetEntityClassname(viewModel, classname, sizeof(classname));
-
-        if (matchMelee) {
-            if (!IsMeleeClassname(classname)) {
-                continue;
-            }
-        } else if (!StrEqual(classname, weaponKey, false)) {
-            continue;
-        }
-
-        ApplyWeaponSkinEntity(client, viewModel, paintkit, wear, seed, stattrak, nametag);
+    // Dedicated servers have no player viewmodels — only world weapon entities.
+    if (!HasEntProp(weapon, Prop_Send, "m_hWeaponWorldModel")) {
+        return;
     }
+
+    int worldModel = GetEntPropEnt(weapon, Prop_Send, "m_hWeaponWorldModel");
+    if (worldModel <= MaxClients) {
+        return;
+    }
+
+    ApplyWeaponSkinEntity(client, worldModel, paintkit, wear, seed, stattrak, nametag);
 }
 
 public void ApplyClientSkinsFrame(any userid) {
@@ -368,9 +355,9 @@ void ApplyClientSkins(int client) {
             int weapon = FindPlayerWeapon(client, weaponKey);
             if (weapon != -1) {
                 ApplyWeaponSkinEntity(client, weapon, paintkit, wear, seed, stattrak, nametag);
-                ApplySkinToMatchingViewModels(
+                ApplySkinToWeaponWorldModel(
                     client,
-                    weaponKey,
+                    weapon,
                     paintkit,
                     wear,
                     seed,
@@ -381,7 +368,7 @@ void ApplyClientSkins(int client) {
                     char classname[64];
                     GetEntityClassname(weapon, classname, sizeof(classname));
                     LogMessage(
-                        "[Clutch] Applied %s paintkit %d on %s (+viewmodels) for %N",
+                        "[Clutch] Applied %s paintkit %d on %s for %N",
                         weaponKey,
                         paintkit,
                         classname,

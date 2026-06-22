@@ -45,7 +45,7 @@ send_cmd "sm_clutch_applyskins"
 
 echo ""
 echo "Done. Check server log above in screen -r for:"
-echo "  Clutch Skins Bridge (1.1.0)"
+echo "  Clutch Skins Bridge (1.1.4+)"
 echo "  [Clutch] Applied weapon_bayonet paintkit ..."
 echo ""
 echo "Then respawn in game (kill)."
