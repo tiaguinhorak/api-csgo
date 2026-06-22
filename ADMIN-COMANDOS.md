@@ -362,7 +362,27 @@ sm_reloadclutchskins     # igual (lê weapons SQLite)
 clutch_skins_debug 1     # logs de paintkit no SourceMod log
 ```
 
-### Instalar plugin bridge (uma vez)
+### Deploy completo (pull + api + plugin + reload)
+
+Um único comando na VPS (usuário `csgo`):
+
+```bash
+cd ~/api-csgo && ./scripts/deploy-vps.sh
+```
+
+Isso faz: `git pull` → `npm install` → `npm run build` → `pm2 restart` → compila/instala `z_clutch_skins_bridge` → recarrega plugin no screen do CS.
+
+Atalho equivalente: `./scripts/deploy-skins-v3.sh`
+
+Opções:
+
+```bash
+./scripts/deploy-vps.sh --skip-pull      # sem git pull
+./scripts/deploy-vps.sh --skip-ingame  # sem reload no screen (CS offline)
+./scripts/deploy-vps.sh --skip-plugin    # só api (build + pm2)
+```
+
+### Instalar plugin bridge (primeira vez ou manual)
 
 ```bash
 cd ~/api-csgo && git pull

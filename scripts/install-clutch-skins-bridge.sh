@@ -189,7 +189,7 @@ else
   echo "WARNING: weapons.smx missing — knife models will not change."
 fi
 echo ""
-echo "Full deploy (api + plugin): ./scripts/deploy-skins-v3.sh"
+echo "Full deploy (pull + api + plugin + reload): ./scripts/deploy-vps.sh"
 echo "Recarregar no CS:"
 echo "  ./scripts/reload-clutch-skins-ingame.sh"
 echo ""
