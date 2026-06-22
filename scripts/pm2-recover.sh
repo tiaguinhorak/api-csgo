@@ -6,6 +6,13 @@ cd "$(dirname "$0")/.."
 echo "[pm2-recover] Stopping PM2 app api-csgo..."
 pm2 delete api-csgo 2>/dev/null || true
 
+# Orphan node from prior crashes can hold :3000 while PM2 shows pid 0 / ↺ loop
+if pgrep -f "node.*dist/index.js" >/dev/null 2>&1; then
+  echo "[pm2-recover] Killing orphan node (dist/index.js)..."
+  pkill -f "node.*dist/index.js" 2>/dev/null || true
+  sleep 1
+fi
+
 if command -v lsof >/dev/null 2>&1; then
   PIDS=$(lsof -ti :3000 2>/dev/null || true)
   if [ -n "$PIDS" ]; then

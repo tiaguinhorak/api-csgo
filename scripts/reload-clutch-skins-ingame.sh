@@ -28,15 +28,13 @@ send_cmd() {
   sleep 0.4
 }
 
-send_cmd "sm plugins unload clutch_skins_bridge"
-send_cmd "sm plugins unload z_clutch_skins_bridge"
-send_cmd "sm plugins load z_clutch_skins_bridge"
+send_cmd "sm plugins reload weapons"
+send_cmd "sm plugins reload z_clutch_skins_bridge"
 send_cmd "sm plugins info z_clutch_skins_bridge"
 send_cmd "clutch_skins_debug 1"
 send_cmd "sm_reloadclutchskins"
 send_cmd "sm_clutch_applyskins"
 
 echo ""
-echo "Done. Expect plugin Version: 3.2.0"
-echo "If still 3.1.0: wrong CSGO_ROOT — run install with CSGO_ROOT from install script output."
-echo "Then respawn in game (kill)."
+echo "Done. Expect plugin Version: 3.3.0"
+echo "If CS was offline during equip, DB still updated — respawn or run sm_clutch_applyskins."
