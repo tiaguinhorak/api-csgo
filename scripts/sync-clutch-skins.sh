@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# DEPRECATED — use sync-loadouts-from-site.sh (100% API, no files).
+# Legacy: baixava export KeyValues e gravava clutch_skins.txt (v3 plugin ignores).
+#
 # Rode NA VPS do CS (ou cron): baixa export do site e grava clutch_skins.txt local.
 # Não use sync-clutch-skins-dev.sh aqui — esse é PC → SCP.
 #

@@ -323,6 +323,63 @@ RCON **não** substitui flags SourceMod para `sm_admin` — use `admins_simple.i
 
 ---
 
+---
+
+## Skins (100% API + banco — sem arquivos na VPS)
+
+### Fluxo normal (automático)
+
+1. Jogador equipa no site → Postgres (`CsgoPlayerSkin`)
+2. Site chama `POST http://VPS:3000/api/csgo/skins/player-sync` (JSON)
+3. api-csgo grava no SQLite do `!ws` e envia `sm_clutch_applyskins`
+4. Plugin lê o DB e aplica paint no jogo
+
+Não precisa de `clutch_skins.txt`, SCP, nem editar configs de skin na VPS.
+
+### Re-sync em massa (opcional, cron)
+
+Se o servidor reiniciou ou algo ficou desincronizado:
+
+```bash
+cd ~/api-csgo
+./scripts/sync-loadouts-from-site.sh
+```
+
+Isso chama `POST /api/csgo/skins/sync-from-site` — site API lê Postgres → api-csgo → SQLite.
+
+Requer no `api-csgo/.env`:
+
+```env
+CLUTCH_SITE_URL=https://clutchclube.com
+CSGO_SKINS_SYNC_KEY=mesma-chave-do-site
+```
+
+### Comandos in-game (admin)
+
+```text
+sm_clutch_applyskins     # reaplica skins do DB para todos online
+sm_reloadclutchskins     # igual (lê weapons SQLite)
+clutch_skins_debug 1     # logs de paintkit no SourceMod log
+```
+
+### Instalar plugin bridge (uma vez)
+
+```bash
+cd ~/api-csgo && git pull
+CSGO_ROOT=/home/csgo/server/csgo bash scripts/install-clutch-skins-bridge.sh
+CSGO_ROOT=/home/csgo/server/csgo bash scripts/patch-weapons-reload-native.sh
+```
+
+### O que NÃO usar (legado)
+
+| Legado | Substituir por |
+|--------|----------------|
+| `sync-clutch-skins.sh` | `sync-loadouts-from-site.sh` |
+| `clutch_skins.txt` | `player-sync` / `sync-from-site` |
+| Editar `weapons_english.cfg` para catálogo | `WS_ALLOWLIST_SOURCE=github` |
+
+---
+
 ## Paths úteis na VPS
 
 ```text

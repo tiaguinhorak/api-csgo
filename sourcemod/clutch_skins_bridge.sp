@@ -7,13 +7,20 @@
 
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
+#include <sdkhooks>
 #include <PTaH>
 
-#define PLUGIN_VERSION "3.2.1"
+#if defined _weapons_included_
+    bool g_bWeaponsReloadNative = false;
+#endif
+
+#define PLUGIN_VERSION "3.3.0"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
 #define ENTITY_APPLY_COOLDOWN 1.5
+#define REAPPLY_PASS_COUNT 6
+#define SPAWN_APPLY_DELAY 0.35
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -38,6 +45,7 @@ char g_CachedTag[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][64];
 int g_iAppliedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 char g_CachedKnifeClass[MAXPLAYERS + 1][CLUTCH_KNIFE_CLASS_LEN];
 float g_fLastEntityApply[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
+float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.0, 0.15, 0.35, 0.75, 1.5, 3.0};
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -125,7 +133,27 @@ public void OnPluginStart() {
 
     PTaH(PTaH_GiveNamedItemPost, Hook, Clutch_GiveNamedItemPost);
 
+#if defined _weapons_included_
+    MarkNativeAsOptional("Weapons_ReloadClientData");
+#endif
+
     UpdateRefreshTimer();
+}
+
+public void OnLibraryAdded(const char[] name) {
+#if defined _weapons_included_
+    if (StrEqual(name, "weapons")) {
+        g_bWeaponsReloadNative = true;
+    }
+#endif
+}
+
+public void OnLibraryRemoved(const char[] name) {
+#if defined _weapons_included_
+    if (StrEqual(name, "weapons")) {
+        g_bWeaponsReloadNative = false;
+    }
+#endif
 }
 
 public void OnConfigsExecuted() {
@@ -149,6 +177,11 @@ public void OnAllPluginsLoaded() {
     if (!LibraryExists("weapons")) {
         LogMessage("[Clutch] weapons.smx not loaded — knife models need kgns Weapons & Knives + PTaH");
     }
+#if defined _weapons_included_
+    if (LibraryExists("weapons")) {
+        g_bWeaponsReloadNative = true;
+    }
+#endif
 }
 
 public void OnPluginEnd() {
@@ -239,6 +272,9 @@ public Action Command_ApplySkins(int client, int args) {
 }
 
 public void OnClientDisconnect(int client) {
+    if (!IsFakeClient(client)) {
+        SDKUnhook(client, SDKHook_WeaponEquip, OnWeaponEquip);
+    }
     g_bLoggedMissingLoadout[client] = false;
     g_fLastApplyTime[client] = 0.0;
     g_iLastKnifePaint[client] = 0;
@@ -256,7 +292,47 @@ public void OnClientPutInServer(int client) {
     if (IsFakeClient(client)) {
         return;
     }
+    SDKHook(client, SDKHook_WeaponEquip, OnWeaponEquip);
     ScheduleApplyClientSkins(client);
+}
+
+public Action OnWeaponEquip(int client, int weapon) {
+    if (client <= 0 || IsFakeClient(client) || !IsValidEntity(weapon)) {
+        return Plugin_Continue;
+    }
+
+    char classname[64];
+    GetEntityClassname(weapon, classname, sizeof(classname));
+    int idx = GetClutchIndexForClassname(client, classname);
+    if (idx < 0 || g_CachedPaintkit[client][idx] <= 0) {
+        return Plugin_Continue;
+    }
+
+    bool isKnife = IsMeleeClassname(classname);
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteCell(weapon);
+    pack.WriteCell(idx);
+    pack.WriteCell(isKnife ? 1 : 0);
+    CreateTimer(0.1, Timer_ApplyEquippedWeapon, pack, TIMER_FLAG_NO_MAPCHANGE);
+    return Plugin_Continue;
+}
+
+public Action Timer_ApplyEquippedWeapon(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int weapon = pack.ReadCell();
+    int idx = pack.ReadCell();
+    bool isKnife = pack.ReadCell() == 1;
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || !IsValidEntity(weapon)) {
+        return Plugin_Stop;
+    }
+
+    ApplyCachedSkinToEntity(client, weapon, idx, isKnife, true);
+    return Plugin_Stop;
 }
 
 public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
@@ -291,21 +367,17 @@ public void Clutch_GiveNamedItemPost(
     }
 
     int paintkit = g_CachedPaintkit[client][idx];
-    if (paintkit > 0 && GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit") == paintkit) {
+    if (paintkit <= 0) {
+        return;
+    }
+
+    int entityPaint = GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit");
+    if (entityPaint == paintkit) {
         g_iAppliedPaintkit[client][idx] = paintkit;
         return;
     }
 
-    float now = GetGameTime();
-    if (now - g_fLastEntityApply[client][idx] < ENTITY_APPLY_COOLDOWN) {
-        return;
-    }
-
-    DataPack pack = new DataPack();
-    pack.WriteCell(GetClientUserId(client));
-    pack.WriteCell(entity);
-    pack.WriteCell(idx);
-    CreateTimer(0.35, Timer_ApplyCachedEntity, pack, TIMER_FLAG_NO_MAPCHANGE);
+    ApplyCachedSkinToEntity(client, entity, idx, IsMeleeClassname(cn), true);
 }
 
 public Action Timer_ApplyCachedEntity(Handle timer, DataPack pack) {
@@ -328,7 +400,7 @@ public Action Timer_ApplyCachedEntity(Handle timer, DataPack pack) {
     GetEntityClassname(entity, classname, sizeof(classname));
     bool isKnife = IsMeleeClassname(classname);
 
-    ApplyCachedSkinToEntity(client, entity, idx, isKnife);
+    ApplyCachedSkinToEntity(client, entity, idx, isKnife, false);
     return Plugin_Stop;
 }
 
@@ -373,19 +445,22 @@ void UpdateSlotCache(
     strcopy(g_CachedTag[client][idx], sizeof(g_CachedTag[][]), tag);
 }
 
-bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife) {
+bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool force = false) {
     int paintkit = g_CachedPaintkit[client][idx];
     if (paintkit <= 0 || !IsPaintableWeaponEntity(entity)) {
         return false;
     }
 
-    if (g_iAppliedPaintkit[client][idx] == paintkit
-        && GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit") == paintkit) {
+    int entityPaint = GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit");
+    if (!force
+        && g_iAppliedPaintkit[client][idx] == paintkit
+        && entityPaint == paintkit) {
         return false;
     }
 
     float now = GetGameTime();
-    if (now - g_fLastEntityApply[client][idx] < ENTITY_APPLY_COOLDOWN
+    if (!force
+        && now - g_fLastEntityApply[client][idx] < ENTITY_APPLY_COOLDOWN
         && g_iAppliedPaintkit[client][idx] == paintkit) {
         return false;
     }
@@ -428,7 +503,7 @@ public Action Timer_ApplyAllPlayersSkins(Handle timer) {
 
 void ScheduleApplyClientSkins(int client) {
     int userid = GetClientUserId(client);
-    CreateTimer(2.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(SPAWN_APPLY_DELAY, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
@@ -699,6 +774,87 @@ void SetClutchWeaponProps(
     if (HasEntProp(weapon, Prop_Send, "m_hPrevOwner")) {
         SetEntPropEnt(weapon, Prop_Send, "m_hPrevOwner", -1);
     }
+
+    if (HasEntProp(weapon, Prop_Send, "m_bInitialized")) {
+        SetEntProp(weapon, Prop_Send, "m_bInitialized", 1);
+    }
+
+    ClutchNetworkUpdate(weapon);
+    if (isKnife) {
+        CS_UpdateClientModel(client);
+    }
+}
+
+void ClutchNetworkUpdate(int entity) {
+    int offset = FindNetworkPropInfo("CBaseEntity", "m_nModelIndex");
+    if (offset != -1) {
+        ChangeEdictState(entity, offset);
+    }
+}
+
+#if defined _weapons_included_
+void TryReloadWeaponsPluginData(int client) {
+    if (!LibraryExists("weapons") || !g_bWeaponsReloadNative) {
+        return;
+    }
+    Weapons_ReloadClientData(client);
+}
+#endif
+
+void ApplyAllCachedWeaponsToClient(int client, bool force) {
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        int paintkit = g_CachedPaintkit[client][i];
+        if (paintkit <= 0) {
+            continue;
+        }
+
+        char weaponKey[32];
+        strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
+        int weapon = FindPlayerWeapon(client, weaponKey);
+        if (weapon == -1) {
+            continue;
+        }
+
+        ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force);
+    }
+
+    CS_UpdateClientModel(client);
+}
+
+void ScheduleForceReapply(int client, bool force) {
+    if (!IsClientInGame(client) || IsFakeClient(client)) {
+        return;
+    }
+
+    int userid = GetClientUserId(client);
+    for (int i = 0; i < REAPPLY_PASS_COUNT; i++) {
+        DataPack pack = new DataPack();
+        pack.WriteCell(userid);
+        pack.WriteCell(force ? 1 : 0);
+        pack.WriteCell(i);
+        CreateTimer(g_fReapplyDelays[i], Timer_ForceReapplyPass, pack, TIMER_FLAG_NO_MAPCHANGE);
+    }
+}
+
+public Action Timer_ForceReapplyPass(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    bool force = pack.ReadCell() == 1;
+    int pass = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return Plugin_Stop;
+    }
+
+    ApplyAllCachedWeaponsToClient(client, force);
+
+    if (force && pass == REAPPLY_PASS_COUNT - 1 && g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Finished forced re-apply passes for %N", client);
+    }
+
+    return Plugin_Stop;
 }
 
 void ClutchSetClientKnife(int client, const char[] knifeClass) {
@@ -775,6 +931,9 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
     }
 
     g_bLoggedMissingLoadout[client] = false;
+#if defined _weapons_included_
+    TryReloadWeaponsPluginData(client);
+#endif
     ApplyLoadoutFromDbRow(client, results, force);
     QueryPlayerGloves(client, steamId, 0);
 }
@@ -1057,6 +1216,7 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
     CS_UpdateClientModel(client);
 
     if (knifeClass[0] == '\0' || knifePaintkit <= 0) {
+        ScheduleForceReapply(client, force);
         return;
     }
 
@@ -1091,6 +1251,8 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
     pack.WriteCell(knifeTrakCount);
     pack.WriteString(knifeTag);
     CreateTimer(0.35, Timer_ApplyKnifeSkinDelayed, pack, TIMER_FLAG_NO_MAPCHANGE);
+
+    ScheduleForceReapply(client, force);
 }
 
 public void ApplyClientSkinsFrame(any userid) {

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fetchWsAllowlistFromGithub } from './ws-allowlist-github';
 import { GLOVE_WEAPON_ID_TO_DEFINDEX } from './weapons-db-map';
 import { getSourceModRoots } from './weapons-db-path';
 
@@ -8,6 +9,8 @@ export type WsSkinAllowEntry = {
   paintkit: number;
   name: string;
 };
+
+export type WsAllowlistSource = 'github' | 'vps-config' | 'all';
 
 const DEFAULT_LANG = 'english';
 
@@ -111,44 +114,120 @@ function resolveWeaponsCfgFile(): { filePath: string; smRoot: string } | null {
   return null;
 }
 
+export function resolveWsAllowlistSource(): WsAllowlistSource {
+  const raw = process.env.WS_ALLOWLIST_SOURCE?.trim().toLowerCase() ?? 'github';
+  if (raw === 'vps-config' || raw === 'vps' || raw === 'local') {
+    return 'vps-config';
+  }
+  if (raw === 'all' || raw === 'none' || raw === 'off') {
+    return 'all';
+  }
+  return 'github';
+}
+
 let cachedEntries: WsSkinAllowEntry[] | null = null;
+let cachedSource: WsAllowlistSource | null = null;
+let cachedSourcePath: string | null = null;
 let cachedAt = 0;
 const CACHE_MS = 5 * 60 * 1000;
 
-export function loadWsWeaponsAllowlist(force = false): {
+function loadWsWeaponsAllowlistFromVps(): {
   entries: WsSkinAllowEntry[];
   sourcePath: string | null;
-  count: number;
 } {
-  const now = Date.now();
-  if (!force && cachedEntries && now - cachedAt < CACHE_MS) {
-    return {
-      entries: cachedEntries,
-      sourcePath: resolveWeaponsCfgFile()?.filePath ?? null,
-      count: cachedEntries.length,
-    };
-  }
-
   const resolved = resolveWeaponsCfgFile();
   if (!resolved) {
-    cachedEntries = [];
-    cachedAt = now;
-    return { entries: [], sourcePath: null, count: 0 };
+    return { entries: [], sourcePath: null };
   }
 
   const content = fs.readFileSync(resolved.filePath, 'utf8');
   const weaponEntries = parseWeaponsCfg(content);
   let gloveEntries: WsSkinAllowEntry[] = [];
-  const glovesPath = glovesCfgPath(resolved.smRoot, process.env.WS_WEAPONS_LANG?.trim() || DEFAULT_LANG);
+  const glovesPath = glovesCfgPath(
+    resolved.smRoot,
+    process.env.WS_WEAPONS_LANG?.trim() || DEFAULT_LANG,
+  );
   if (fs.existsSync(glovesPath)) {
     gloveEntries = parseGlovesCfg(fs.readFileSync(glovesPath, 'utf8'));
   }
-  cachedEntries = [...weaponEntries, ...gloveEntries];
+
+  return {
+    entries: [...weaponEntries, ...gloveEntries],
+    sourcePath: resolved.filePath,
+  };
+}
+
+export async function loadWsWeaponsAllowlist(force = false): Promise<{
+  entries: WsSkinAllowEntry[];
+  source: WsAllowlistSource;
+  sourcePath: string | null;
+  count: number;
+}> {
+  const now = Date.now();
+  const source = resolveWsAllowlistSource();
+
+  if (
+    !force &&
+    cachedEntries &&
+    cachedSource === source &&
+    now - cachedAt < CACHE_MS
+  ) {
+    return {
+      entries: cachedEntries,
+      source,
+      sourcePath: cachedSourcePath,
+      count: cachedEntries.length,
+    };
+  }
+
+  if (source === 'all') {
+    cachedEntries = [];
+    cachedSource = source;
+    cachedSourcePath = null;
+    cachedAt = now;
+    return { entries: [], source, sourcePath: null, count: 0 };
+  }
+
+  if (source === 'github') {
+    const lang = process.env.WS_WEAPONS_LANG?.trim() || DEFAULT_LANG;
+    try {
+      cachedEntries = await fetchWsAllowlistFromGithub(lang);
+      cachedSource = source;
+      cachedSourcePath = `github:kgns/weapons+kgns/gloves (${lang})`;
+      cachedAt = now;
+      return {
+        entries: cachedEntries,
+        source,
+        sourcePath: cachedSourcePath,
+        count: cachedEntries.length,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[ws-allowlist] GitHub fetch failed: ${message} — trying VPS configs`);
+      const vps = loadWsWeaponsAllowlistFromVps();
+      cachedEntries = vps.entries;
+      cachedSource = 'vps-config';
+      cachedSourcePath = vps.sourcePath;
+      cachedAt = now;
+      return {
+        entries: cachedEntries,
+        source: 'vps-config',
+        sourcePath: cachedSourcePath,
+        count: cachedEntries.length,
+      };
+    }
+  }
+
+  const vps = loadWsWeaponsAllowlistFromVps();
+  cachedEntries = vps.entries;
+  cachedSource = source;
+  cachedSourcePath = vps.sourcePath;
   cachedAt = now;
 
   return {
     entries: cachedEntries,
-    sourcePath: resolved.filePath,
+    source,
+    sourcePath: cachedSourcePath,
     count: cachedEntries.length,
   };
 }
@@ -158,7 +237,8 @@ export function isWsSkinAllowed(
   paintkit: number,
   entries?: WsSkinAllowEntry[],
 ): boolean {
-  const list = entries ?? loadWsWeaponsAllowlist().entries;
+  const list = entries ?? cachedEntries ?? [];
+  if (list.length === 0) return true;
   return list.some((e) => e.weaponId === weaponId && e.paintkit === paintkit);
 }
 

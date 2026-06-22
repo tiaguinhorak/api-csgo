@@ -1,6 +1,28 @@
 # Skins Bridge — Site ↔ Servidor CS:GO
 
-Fluxo (v3 — **sem arquivo**): o jogador equipa no site → Postgres → **API JSON** → SQLite do `!ws` (kgns weapons) → plugin lê o DB no spawn.
+## Arquitetura (100% API + banco — sem arquivos estáticos na VPS)
+
+| Camada | O que é | Manual na VPS? |
+|--------|---------|----------------|
+| **Postgres (Hostinger)** | Loadouts equipados, catálogo | Não |
+| **Site** | Equip → push JSON | Não |
+| **api-csgo** | `POST /player-sync` → SQLite local | Não |
+| **SQLite** (`sourcemod-local.sq3`) | Mesmo DB do `!ws` — escrito pela API | Não (automático) |
+| **Plugin bridge** | Lê SQLite no spawn | Instalar `.smx` 1x |
+
+```
+Site equip → Postgres
+     ↓ POST /api/csgo/skins/player-sync (automático ao equipar)
+api-csgo → UPDATE weapons SQLite
+     ↓ RCON sm_clutch_applyskins
+z_clutch_skins_bridge.smx → paint no jogo
+```
+
+**Não use** `clutch_skins.txt`, SCP, nem cron de arquivo. Opcional: `POST /sync-from-site` ou `scripts/sync-loadouts-from-site.sh` para re-sync em massa.
+
+**Allowlist do catálogo:** `WS_ALLOWLIST_SOURCE=github` (padrão) — busca listas kgns no GitHub, não lê `configs/weapons/*.cfg` na VPS.
+
+Fluxo legado removido: `clutch_skins.txt`, `sync-clutch-skins.sh`, `POST /push`.
 
 ```
 Site (equip/unequip) → POST /api/csgo/skins/player-sync (api-csgo na VPS)
@@ -341,6 +363,6 @@ npm run db:seed
 | Kukri | Não no kgns 1.7.8 — aguarda update do !ws |
 | Agentes | Fora do kgns weapons/gloves — não suportado |
 
-v3.2: PTaH `GiveNamedItemPost` re-aplica após weapons.smx; cria `gloves` se ausente; `clutch_skins_refresh 0` por padrão; detecta paintkit/seed divergente na entidade.
+v3.3: Re-sync weapons.smx in-memory cache after site DB writes (`Weapons_ReloadClientData` native + patch script); immediate PTaH paint apply; SDKHook WeaponEquip; 6-pass force re-apply; faster spawn apply (0.35s).
 
 Requisitos servidor: **PTaH**, `FollowCSGOServerGuidelines "no"`, **weapons.smx**, recomendado **gloves.smx**.

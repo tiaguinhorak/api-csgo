@@ -1,21 +1,18 @@
 import { Router, Request, Response } from 'express';
-import express from 'express';
-import fs from 'fs/promises';
-import path from 'path';
-import { config } from '../config';
-import { reloadClutchSkinsInGame } from '../services/clutch-rcon';
+import { syncAllLoadoutsFromSite } from '../services/sync-loadouts-from-site';
 import type { SyncWeaponPayload } from '../services/weapons-db-map';
 import { syncPlayerLoadoutToWeaponsDb } from '../services/weapons-db-sync';
 import {
   buildWsAllowlistSet,
   loadWsWeaponsAllowlist,
 } from '../services/ws-weapons-config';
+import { reloadClutchSkinsInGame } from '../services/clutch-rcon';
 
 const router = Router();
 
 export function logSkinsAuthStatus(): void {
   const syncKey = process.env.CSGO_SKINS_SYNC_KEY?.trim();
-  const apiKey = config.apiKey?.trim();
+  const apiKey = process.env.API_KEY?.trim();
   if (!syncKey && (!apiKey || apiKey === 'default-key-change-me')) {
     console.warn(
       '[csgo-skins] Set CSGO_SKINS_SYNC_KEY or API_KEY in .env — requests will be rejected',
@@ -36,15 +33,22 @@ type PlayerSyncBody = {
   clearWeaponIds?: string[];
 };
 
-router.get('/ws-allowlist', (_req: Request, res: Response) => {
-  const { entries, count } = loadWsWeaponsAllowlist(true);
-  const keys = [...buildWsAllowlistSet(entries)];
-  return res.json({
-    ok: true,
-    count,
-    keys,
-    entries,
-  });
+router.get('/ws-allowlist', async (_req: Request, res: Response) => {
+  try {
+    const { entries, count, source, sourcePath } = await loadWsWeaponsAllowlist(true);
+    const keys = [...buildWsAllowlistSet(entries)];
+    return res.json({
+      ok: true,
+      source,
+      sourcePath,
+      count,
+      keys,
+      entries,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'allowlist failed';
+    return res.status(500).json({ error: message });
+  }
 });
 
 router.post('/player-sync', async (req: Request, res: Response) => {
@@ -77,41 +81,30 @@ router.post('/player-sync', async (req: Request, res: Response) => {
   }
 });
 
-/** Legacy: full KeyValues file export (deprecated — use POST /player-sync). */
-router.post(
-  '/push',
-  express.text({ type: ['text/*', 'application/octet-stream'], limit: '2mb' }),
-  async (req: Request, res: Response) => {
-    const body = typeof req.body === 'string' ? req.body : '';
-    if (!body.trim()) {
-      return res.status(400).json({ error: 'Empty export body' });
+/**
+ * Pull all equipped loadouts from site Postgres (site API) → local weapons SQLite.
+ * No clutch_skins.txt. Optional cron / manual recovery.
+ */
+router.post('/sync-from-site', async (_req: Request, res: Response) => {
+  try {
+    const result = await syncAllLoadoutsFromSite();
+    if (!result.ok && result.synced === 0) {
+      return res.status(500).json(result);
     }
+    return res.json({ mode: 'api', ...result, ok: result.errors.length === 0 || result.synced > 0 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'sync-from-site failed';
+    console.error('[csgo-skins sync-from-site]', message);
+    return res.status(500).json({ error: message });
+  }
+});
 
-    const outPath =
-      process.env.CLUTCH_SKINS_OUT?.trim() ||
-      '/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt';
-
-    try {
-      await fs.mkdir(path.dirname(outPath), { recursive: true });
-      const tmp = `${outPath}.tmp`;
-      await fs.writeFile(tmp, body, 'utf8');
-      await fs.rename(tmp, outPath);
-
-      const rconReload = await reloadClutchSkinsInGame();
-
-      return res.json({
-        ok: true,
-        mode: 'file',
-        deprecated: true,
-        bytes: Buffer.byteLength(body, 'utf8'),
-        rconReload,
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Write failed';
-      console.error('[csgo-skins-push] write failed:', message);
-      return res.status(500).json({ error: message });
-    }
-  },
-);
+/** @deprecated Use POST /player-sync or POST /sync-from-site — writes a static file. */
+router.post('/push', (_req: Request, res: Response) => {
+  return res.status(410).json({
+    error: 'Deprecated — use POST /api/csgo/skins/player-sync (per player) or POST /sync-from-site (bulk from Postgres via site API).',
+    deprecated: true,
+  });
+});
 
 export default router;
