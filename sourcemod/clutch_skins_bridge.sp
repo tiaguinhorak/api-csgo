@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.0.4"
+#define PLUGIN_VERSION "1.0.5"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -76,7 +76,7 @@ void ResolveSkinsFilePath(const char[] configured, char[] path, int maxlen) {
     }
 
     if (StrContains(relative, "csgo/", false) == 0 || StrContains(relative, "csgo\\", false) == 0) {
-        BuildPath(Path_Game, path, maxlen, relative);
+        BuildPath(Path_Mod, path, maxlen, relative);
         return;
     }
 
