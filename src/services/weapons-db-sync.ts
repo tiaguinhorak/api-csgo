@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import {
+  buildGlovesLoadoutSql,
   buildPlayerLoadoutSql,
   isMeleeWeaponId,
   type SyncLoadoutOptions,
@@ -166,6 +167,19 @@ export async function syncPlayerLoadoutToWeaponsDb(
             db.exec(updateSql);
             updated = true;
             columnCount = updateSql.split(',').length;
+          }
+
+          const glovesSql = buildGlovesLoadoutSql(
+            tablePrefix,
+            targetSteam,
+            weapons,
+            syncOptions.clearWeaponIds,
+          );
+          db.exec(glovesSql.insertSql);
+          if (glovesSql.updateSql) {
+            db.exec(glovesSql.updateSql);
+            updated = true;
+            columnCount += glovesSql.updateSql.split(',').length;
           }
         }
       });

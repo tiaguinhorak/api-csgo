@@ -332,6 +332,7 @@ npm run db:seed
 
 ## 8. v1 — fora do escopo
 
-- Luvas (`GLOVES`) e agentes (`AGENT`) no bridge automático
-- Modelo de faca (só paintkit na faca atual)
-- Sync em tempo real (usa cron + reload periódico)
+- Agentes (`AGENT`) no bridge automático
+- Sync em tempo real sem respawn / buy (use `kill` ou novo round após equipar faca)
+
+**Luvas:** suportadas em v3.0.2 — sync na tabela `gloves` (kgns `gloves.smx`) + apply no bridge. Precisa `gloves.smx` instalado **ou** só o bridge (recomendado: ambos no mesmo `storage-local` DB).

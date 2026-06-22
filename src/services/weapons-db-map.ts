@@ -53,7 +53,19 @@ export const WEAPON_ID_TO_DB_COLUMN: Record<string, string> = {
   weapon_knife_canis: 'knife_canis',
   weapon_knife_outdoor: 'knife_outdoor',
   weapon_knife_skeleton: 'knife_skeleton',
-  weapon_knife: 'bayonet',
+  weapon_knife_kukri: 'knife_kukri',
+};
+
+/** kgns gloves.smx — item definition index per glove type (CSGO-API weapon.weapon_id). */
+export const GLOVE_WEAPON_ID_TO_DEFINDEX: Record<string, number> = {
+  studded_bloodhound_gloves: 5027,
+  sporty_gloves: 5030,
+  slick_gloves: 5031,
+  leather_handwraps: 5032,
+  motorcycle_gloves: 5033,
+  specialist_gloves: 5034,
+  studded_hydra_gloves: 5035,
+  studded_brokenfang_gloves: 4725,
 };
 
 /** All knife paintkit columns in kgns weapons table. */
@@ -101,6 +113,7 @@ export const WEAPON_ID_TO_KNIFE_INDEX: Record<string, number> = {
   weapon_knife_canis: 50,
   weapon_knife_outdoor: 51,
   weapon_knife_skeleton: 52,
+  weapon_knife_kukri: 53,
 };
 
 export type SyncWeaponPayload = {
@@ -209,6 +222,46 @@ export function buildPlayerLoadoutSql(
     updates.length > 0
       ? `UPDATE ${table} SET ${updates.join(', ')} WHERE steamid='${escapedSteam}'`
       : '';
+
+  return { insertSql, updateSql };
+}
+
+function glovesTableName(tablePrefix: string): string {
+  return `${tablePrefix}gloves`;
+}
+
+export function buildGlovesLoadoutSql(
+  tablePrefix: string,
+  steamId: string,
+  weapons: SyncWeaponPayload[],
+  clearWeaponIds?: string[],
+): { insertSql: string; updateSql: string } {
+  const escapedSteam = steamId.replace(/'/g, "''");
+  const table = glovesTableName(tablePrefix);
+  const insertSql = `INSERT OR IGNORE INTO ${table} (steamid) VALUES ('${escapedSteam}')`;
+
+  const shouldClear =
+    (clearWeaponIds ?? []).some((id) => isGlovesWeaponId(id)) ||
+    !weapons.some((w) => isGlovesWeaponId(w.weaponId) && w.paintkit > 0);
+
+  if (shouldClear) {
+    const updateSql = `UPDATE ${table} SET t_group=0, t_glove=0, t_float=0, ct_group=0, ct_glove=0, ct_float=0 WHERE steamid='${escapedSteam}'`;
+    return { insertSql, updateSql };
+  }
+
+  const equipped = weapons.find((w) => isGlovesWeaponId(w.weaponId) && w.paintkit > 0);
+  if (!equipped) {
+    return { insertSql, updateSql: '' };
+  }
+
+  const group = GLOVE_WEAPON_ID_TO_DEFINDEX[equipped.weaponId];
+  if (!group) {
+    return { insertSql, updateSql: '' };
+  }
+
+  const wear = (equipped.wear ?? WEAR_DEFAULT).toFixed(2);
+  const paint = equipped.paintkit;
+  const updateSql = `UPDATE ${table} SET t_group=${group}, t_glove=${paint}, t_float=${wear}, ct_group=${group}, ct_glove=${paint}, ct_float=${wear} WHERE steamid='${escapedSteam}'`;
 
   return { insertSql, updateSql };
 }

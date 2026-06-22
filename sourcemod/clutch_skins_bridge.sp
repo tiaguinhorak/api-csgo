@@ -8,9 +8,9 @@
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
 
-#define PLUGIN_VERSION "3.0.1"
+#define PLUGIN_VERSION "3.0.2"
 #define APPLY_COOLDOWN_SECONDS 5.0
-#define CLUTCH_WEAPON_SLOTS 53
+#define CLUTCH_WEAPON_SLOTS 54
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -21,6 +21,7 @@ Database g_hWeaponsDb = null;
 char g_sTablePrefix[16];
 bool g_bLoggedMissingLoadout[MAXPLAYERS + 1];
 float g_fLastApplyTime[MAXPLAYERS + 1];
+float g_fLastItemEquipApply[MAXPLAYERS + 1];
 int g_iLastKnifePaint[MAXPLAYERS + 1];
 int g_iItemIdHigh = 16384;
 
@@ -39,7 +40,7 @@ char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_knife_falchion", "weapon_knife_gut", "weapon_knife_ursus",
     "weapon_knife_gypsy_jackknife", "weapon_knife_stiletto", "weapon_knife_widowmaker",
     "weapon_mp5sd", "weapon_knife_css", "weapon_knife_cord", "weapon_knife_canis",
-    "weapon_knife_outdoor", "weapon_knife_skeleton"
+    "weapon_knife_outdoor", "weapon_knife_skeleton", "weapon_knife_kukri"
 };
 
 char g_ClutchDbColumns[CLUTCH_WEAPON_SLOTS][32] = {
@@ -51,7 +52,8 @@ char g_ClutchDbColumns[CLUTCH_WEAPON_SLOTS][32] = {
     "knife_m9_bayonet", "bayonet", "knife_survival_bowie", "knife_butterfly",
     "knife_flip", "knife_push", "knife_tactical", "knife_falchion", "knife_gut",
     "knife_ursus", "knife_gypsy_jackknife", "knife_stiletto", "knife_widowmaker",
-    "mp5sd", "knife_css", "knife_cord", "knife_canis", "knife_outdoor", "knife_skeleton"
+    "mp5sd", "knife_css", "knife_cord", "knife_canis", "knife_outdoor", "knife_skeleton",
+    "knife_kukri"
 };
 
 public Plugin myinfo = {
@@ -104,6 +106,10 @@ public void OnPluginStart() {
     RegAdminCmd("sm_clutch_applyskins", Command_ApplySkins, ADMFLAG_ROOT, "Re-apply clutch skins to all players");
 
     ConnectWeaponsDatabase();
+
+    HookEvent("player_spawn", OnPlayerSpawn, EventHookMode_Post);
+    HookEvent("item_equip", Event_ItemEquip, EventHookMode_Post);
+    HookEvent("round_start", Event_RoundStart, EventHookMode_Post);
 
     float refresh = g_cvRefreshSeconds.FloatValue;
     if (refresh > 0.0) {
@@ -181,6 +187,7 @@ public Action Command_ApplySkins(int client, int args) {
 public void OnClientDisconnect(int client) {
     g_bLoggedMissingLoadout[client] = false;
     g_fLastApplyTime[client] = 0.0;
+    g_fLastItemEquipApply[client] = 0.0;
     g_iLastKnifePaint[client] = 0;
 }
 
@@ -197,6 +204,35 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
         return;
     }
     ScheduleApplyClientSkins(client);
+}
+
+public void Event_ItemEquip(Event event, const char[] name, bool dontBroadcast) {
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client <= 0 || IsFakeClient(client)) {
+        return;
+    }
+
+    float now = GetGameTime();
+    if ((now - g_fLastItemEquipApply[client]) < 1.0) {
+        return;
+    }
+    g_fLastItemEquipApply[client] = now;
+
+    int userid = GetClientUserId(client);
+    CreateTimer(0.25, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
+    CreateTimer(2.5, Timer_ApplyAllPlayersSkins, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplyAllPlayersSkins(Handle timer) {
+    for (int client = 1; client <= MaxClients; client++) {
+        if (IsClientInGame(client) && !IsFakeClient(client)) {
+            ApplyClientSkins(client, false);
+        }
+    }
+    return Plugin_Stop;
 }
 
 void ScheduleApplyClientSkins(int client) {
@@ -337,6 +373,10 @@ void KnifeClassFromIndex(int idx, char[] out, int maxlen) {
         }
         case 52: {
             strcopy(out, maxlen, "weapon_knife_skeleton");
+            return;
+        }
+        case 53: {
+            strcopy(out, maxlen, "weapon_knife_kukri");
             return;
         }
     }
@@ -508,6 +548,128 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
 
     g_bLoggedMissingLoadout[client] = false;
     ApplyLoadoutFromDbRow(client, results, force);
+    QueryPlayerGloves(client, steamId, 0);
+}
+
+void QueryPlayerGloves(int client, const char[] steamId, int altAttempt) {
+    if (g_hWeaponsDb == null) {
+        return;
+    }
+
+    char escaped[64];
+    g_hWeaponsDb.Escape(steamId, escaped, sizeof(escaped));
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteString(steamId);
+    pack.WriteCell(altAttempt);
+
+    char query[256];
+    Format(
+        query,
+        sizeof(query),
+        "SELECT * FROM %sgloves WHERE steamid='%s' LIMIT 1",
+        g_sTablePrefix,
+        escaped
+    );
+    g_hWeaponsDb.Query(T_ApplyGlovesFromDbCallback, query, pack);
+}
+
+public void T_ApplyGlovesFromDbCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    char steamId[32];
+    pack.ReadString(steamId, sizeof(steamId));
+    int altAttempt = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return;
+    }
+
+    if (results == null) {
+        if (g_cvDebug.BoolValue) {
+            LogError("[Clutch] gloves DB query failed: %s", error);
+        }
+        return;
+    }
+
+    if (!results.FetchRow()) {
+        if (altAttempt == 0) {
+            if (steamId[6] == '1') {
+                steamId[6] = '0';
+            } else if (steamId[6] == '0') {
+                steamId[6] = '1';
+            }
+            QueryPlayerGloves(client, steamId, 1);
+        }
+        return;
+    }
+
+    ApplyGlovesFromDbRow(client, results);
+}
+
+void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
+    if (group <= 0 || paintkit <= 0) {
+        return;
+    }
+
+    int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
+    if (wearable != -1) {
+        AcceptEntityInput(wearable, "KillHierarchy");
+    }
+
+    int ent = CreateEntityByName("wearable_item");
+    if (ent == -1) {
+        return;
+    }
+
+    SetEntProp(ent, Prop_Send, "m_iItemIDLow", -1);
+    SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", group);
+    SetEntProp(ent, Prop_Send, "m_nFallbackPaintKit", paintkit);
+
+    float appliedWear = wear;
+    if (appliedWear <= 0.0) {
+        appliedWear = 0.15;
+    } else if (appliedWear >= 1.0) {
+        appliedWear = 0.999999;
+    }
+    SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", appliedWear);
+    SetEntProp(ent, Prop_Send, "m_nFallbackSeed", GetRandomInt(1, 1000));
+    SetEntPropEnt(ent, Prop_Data, "m_hOwnerEntity", client);
+    SetEntPropEnt(ent, Prop_Data, "m_hParent", client);
+    SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", client);
+    SetEntProp(ent, Prop_Send, "m_bInitialized", 1);
+
+    DispatchSpawn(ent);
+    SetEntPropEnt(client, Prop_Send, "m_hMyWearables", ent);
+    SetEntProp(client, Prop_Send, "m_nBody", 1);
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Applied gloves group %d paintkit %d for %N", group, paintkit, client);
+    }
+}
+
+void ApplyGlovesFromDbRow(int client, DBResultSet results) {
+    int team = GetClientTeam(client);
+    int group = 0;
+    int paintkit = 0;
+    float wear = 0.15;
+
+    if (team == CS_TEAM_T) {
+        group = DbFetchInt(results, "t_group", 0);
+        paintkit = DbFetchInt(results, "t_glove", 0);
+        wear = DbFetchFloat(results, "t_float", 0.15);
+    } else if (team == CS_TEAM_CT) {
+        group = DbFetchInt(results, "ct_group", 0);
+        paintkit = DbFetchInt(results, "ct_glove", 0);
+        wear = DbFetchFloat(results, "ct_float", 0.15);
+    } else {
+        return;
+    }
+
+    ClutchGivePlayerGloves(client, group, paintkit, wear);
 }
 
 int DbFieldNum(DBResultSet results, const char[] column) {
@@ -639,6 +801,8 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
             LogMessage("[Clutch] Weapon not found for key %s (%N)", weaponKey, client);
         }
     }
+
+    CS_UpdateClientModel(client);
 
     if (knifeClass[0] == '\0' || knifePaintkit <= 0) {
         return;
