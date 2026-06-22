@@ -77,6 +77,11 @@ cp -f "${CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
 CFG_DEPLOY="${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
 if [[ -f "${CFG_DEPLOY}" ]]; then
   sed -i 's|clutch_skins_file "addons/sourcemod/data/clutch_skins.txt"|clutch_skins_file "data/clutch_skins.txt"|g' "${CFG_DEPLOY}"
+  if grep -q 'clutch_skins_refresh' "${CFG_DEPLOY}"; then
+    sed -i 's|^clutch_skins_refresh.*|clutch_skins_refresh "0"|g' "${CFG_DEPLOY}"
+  else
+    printf '\nclutch_skins_refresh "0"\n' >> "${CFG_DEPLOY}"
+  fi
 fi
 
 DATA_FILE="${SM}/data/clutch_skins.txt"

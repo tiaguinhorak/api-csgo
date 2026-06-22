@@ -8,7 +8,8 @@
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
 
-#define PLUGIN_VERSION "3.0.0"
+#define PLUGIN_VERSION "3.0.1"
+#define APPLY_COOLDOWN_SECONDS 5.0
 #define CLUTCH_WEAPON_SLOTS 53
 
 ConVar g_cvDebug;
@@ -19,6 +20,8 @@ ConVar g_cvRefreshSeconds;
 Database g_hWeaponsDb = null;
 char g_sTablePrefix[16];
 bool g_bLoggedMissingLoadout[MAXPLAYERS + 1];
+float g_fLastApplyTime[MAXPLAYERS + 1];
+int g_iLastKnifePaint[MAXPLAYERS + 1];
 int g_iItemIdHigh = 16384;
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
@@ -149,7 +152,7 @@ public void WeaponsDatabaseConnected(Database database, const char[] error, any 
 public Action Timer_RefreshFromDb(Handle timer) {
     for (int client = 1; client <= MaxClients; client++) {
         if (IsClientInGame(client) && !IsFakeClient(client)) {
-            ApplyClientSkins(client);
+            ApplyClientSkins(client, false);
         }
     }
     return Plugin_Continue;
@@ -158,7 +161,7 @@ public Action Timer_RefreshFromDb(Handle timer) {
 public Action Command_ReloadSkins(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
-            ApplyClientSkins(i);
+            ApplyClientSkins(i, true);
         }
     }
     ReplyToCommand(client, "[Clutch] Loadouts reaplicados do weapons DB.");
@@ -168,7 +171,7 @@ public Action Command_ReloadSkins(int client, int args) {
 public Action Command_ApplySkins(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
-            ScheduleApplyClientSkins(i);
+            ApplyClientSkins(i, true);
         }
     }
     ReplyToCommand(client, "[Clutch] Reaplicando skins nos jogadores.");
@@ -177,6 +180,8 @@ public Action Command_ApplySkins(int client, int args) {
 
 public void OnClientDisconnect(int client) {
     g_bLoggedMissingLoadout[client] = false;
+    g_fLastApplyTime[client] = 0.0;
+    g_iLastKnifePaint[client] = 0;
 }
 
 public void OnClientPutInServer(int client) {
@@ -196,17 +201,49 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
 
 void ScheduleApplyClientSkins(int client) {
     int userid = GetClientUserId(client);
-    RequestFrame(ApplyClientSkinsFrame, userid);
-    CreateTimer(0.25, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
     CreateTimer(1.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
-    CreateTimer(3.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
     int client = GetClientOfUserId(userid);
     if (client > 0) {
-        ApplyClientSkins(client);
+        ApplyClientSkins(client, false);
     }
+    return Plugin_Stop;
+}
+
+public Action Timer_ApplyKnifeSkinDelayed(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    char knifeClass[64];
+    pack.ReadString(knifeClass, sizeof(knifeClass));
+    int paintkit = pack.ReadCell();
+    float wear = pack.ReadFloat();
+    int seed = pack.ReadCell();
+    int stattrak = pack.ReadCell();
+    char nametag[64];
+    pack.ReadString(nametag, sizeof(nametag));
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return Plugin_Stop;
+    }
+
+    int weapon = FindPlayerWeapon(client, knifeClass);
+    if (weapon != -1) {
+        SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, nametag, true);
+        if (g_cvDebug.BoolValue) {
+            LogMessage(
+                "[Clutch] Applied %s paintkit %d (knife delayed) for %N",
+                knifeClass,
+                paintkit,
+                client
+            );
+        }
+        CS_UpdateClientModel(client);
+    }
+
     return Plugin_Stop;
 }
 
@@ -406,7 +443,7 @@ void ClutchSetClientKnife(int client, const char[] knifeClass) {
 #endif
 }
 
-void QueryPlayerLoadout(int client, const char[] steamId, int altAttempt) {
+void QueryPlayerLoadout(int client, const char[] steamId, int altAttempt, bool force = false) {
     if (g_hWeaponsDb == null) {
         ConnectWeaponsDatabase();
         return;
@@ -419,6 +456,7 @@ void QueryPlayerLoadout(int client, const char[] steamId, int altAttempt) {
     pack.WriteCell(GetClientUserId(client));
     pack.WriteString(steamId);
     pack.WriteCell(altAttempt);
+    pack.WriteCell(force ? 1 : 0);
 
     char query[256];
     Format(
@@ -437,6 +475,7 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
     char steamId[32];
     pack.ReadString(steamId, sizeof(steamId));
     int altAttempt = pack.ReadCell();
+    bool force = pack.ReadCell() == 1;
     delete pack;
 
     int client = GetClientOfUserId(userid);
@@ -456,7 +495,7 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
             } else if (steamId[6] == '0') {
                 steamId[6] = '1';
             }
-            QueryPlayerLoadout(client, steamId, 1);
+            QueryPlayerLoadout(client, steamId, 1, force);
             return;
         }
 
@@ -468,7 +507,7 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
     }
 
     g_bLoggedMissingLoadout[client] = false;
-    ApplyLoadoutFromDbRow(client, results);
+    ApplyLoadoutFromDbRow(client, results, force);
 }
 
 int DbFieldNum(DBResultSet results, const char[] column) {
@@ -504,7 +543,7 @@ void DbFetchString(DBResultSet results, const char[] column, char[] buffer, int 
     results.FetchString(field, buffer, maxlen);
 }
 
-void ApplyLoadoutFromDbRow(int client, DBResultSet results) {
+void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
     char knifeClass[64];
     knifeClass[0] = '\0';
 
@@ -513,7 +552,47 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results) {
         KnifeClassFromIndex(knifeIdx, knifeClass, sizeof(knifeClass));
     }
 
+    int knifePaintkit = 0;
+    float knifeWear = 0.15;
+    int knifeSeed = 0;
+    int knifeTrak = 0;
+    char knifeTag[64];
+    knifeTag[0] = '\0';
+
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        char weaponKey[32];
+        strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
+
+        if (IsMeleeWeaponKey(weaponKey)) {
+            if (knifeClass[0] != '\0' && !StrEqual(weaponKey, knifeClass, false)) {
+                continue;
+            }
+
+            char column[32];
+            strcopy(column, sizeof(column), g_ClutchDbColumns[i]);
+            knifePaintkit = DbFetchInt(results, column, 0);
+
+            char floatCol[40];
+            Format(floatCol, sizeof(floatCol), "%s_float", column);
+            knifeWear = DbFetchFloat(results, floatCol, 0.15);
+            if (knifeWear <= 0.0) {
+                knifeWear = 0.15;
+            }
+
+            char seedCol[40];
+            Format(seedCol, sizeof(seedCol), "%s_seed", column);
+            knifeSeed = DbFetchInt(results, seedCol, 0);
+
+            char trakCol[40];
+            Format(trakCol, sizeof(trakCol), "%s_trak", column);
+            knifeTrak = DbFetchInt(results, trakCol, 0);
+
+            char tagCol[40];
+            Format(tagCol, sizeof(tagCol), "%s_tag", column);
+            DbFetchString(results, tagCol, knifeTag, sizeof(knifeTag));
+            continue;
+        }
+
         char column[32];
         strcopy(column, sizeof(column), g_ClutchDbColumns[i]);
 
@@ -542,17 +621,9 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results) {
         char nametag[64];
         DbFetchString(results, tagCol, nametag, sizeof(nametag));
 
-        char weaponKey[32];
-        strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
-        bool isMelee = IsMeleeWeaponKey(weaponKey);
-
-        if (isMelee && knifeClass[0] == '\0') {
-            strcopy(knifeClass, sizeof(knifeClass), weaponKey);
-        }
-
         int weapon = FindPlayerWeapon(client, weaponKey);
         if (weapon != -1) {
-            SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, nametag, isMelee);
+            SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, nametag, false);
             if (g_cvDebug.BoolValue) {
                 char classname[64];
                 GetEntityClassname(weapon, classname, sizeof(classname));
@@ -569,29 +640,50 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results) {
         }
     }
 
-    if (knifeClass[0] != '\0') {
-        ClutchSetClientKnife(client, knifeClass);
+    if (knifeClass[0] == '\0' || knifePaintkit <= 0) {
+        return;
     }
 
-    CS_UpdateClientModel(client);
+    if (!force && g_iLastKnifePaint[client] == knifePaintkit) {
+        return;
+    }
+    g_iLastKnifePaint[client] = knifePaintkit;
+
+    ClutchSetClientKnife(client, knifeClass);
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteString(knifeClass);
+    pack.WriteCell(knifePaintkit);
+    pack.WriteFloat(knifeWear);
+    pack.WriteCell(knifeSeed);
+    pack.WriteCell(knifeTrak);
+    pack.WriteString(knifeTag);
+    CreateTimer(0.35, Timer_ApplyKnifeSkinDelayed, pack, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public void ApplyClientSkinsFrame(any userid) {
     int client = GetClientOfUserId(userid);
     if (client > 0) {
-        ApplyClientSkins(client);
+        ApplyClientSkins(client, false);
     }
 }
 
-void ApplyClientSkins(int client) {
+void ApplyClientSkins(int client, bool force) {
     if (!IsClientInGame(client) || IsFakeClient(client)) {
         return;
     }
+
+    float now = GetGameTime();
+    if (!force && (now - g_fLastApplyTime[client]) < APPLY_COOLDOWN_SECONDS) {
+        return;
+    }
+    g_fLastApplyTime[client] = now;
 
     char steamId[32];
     if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
         return;
     }
 
-    QueryPlayerLoadout(client, steamId, 0);
+    QueryPlayerLoadout(client, steamId, 0, force);
 }
