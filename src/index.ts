@@ -8,17 +8,30 @@ import skinsRouter from './routes/skins';
 import csgoSkinsPushRouter, { logSkinsAuthStatus } from './routes/csgo-skins-push';
 import { skinManager } from './services/skin-manager';
 import { resolveWeaponsDbPath } from './services/weapons-db-path';
+import { assertProductionApiKey, requireApiAuth } from './middleware/auth';
 
 const app = express();
 
-app.use(helmet());
-app.use(cors());
-app.use(express.json());
+assertProductionApiKey();
 
-// Health check
+const siteOrigin = process.env.SITE_ORIGIN?.trim();
+
+app.use(helmet());
+app.use(
+  cors(
+    siteOrigin
+      ? { origin: siteOrigin, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] }
+      : { origin: false },
+  ),
+);
+app.use(express.json({ limit: '64kb' }));
+
+// Health check (no auth — bind to private network in production)
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+app.use(requireApiAuth);
 
 // Routes
 app.use('/api/matches', matchesRouter);
