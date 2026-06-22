@@ -358,11 +358,11 @@ npm run db:seed
 |------|--------|
 | Armas (53 slots kgns) | Sync + apply no buy/spawn/round + PTaH post-hook |
 | Facas (todos modelos kgns 1.7.8) | Modelo via weapons.smx + paintkit bridge (re-apply após !ws) |
-| Luvas (8 tipos CSGO-API) | Tabela `gloves` (API + plugin) + wearable no bridge |
+| Luvas (8 tipos CSGO-API) | Tabela `gloves` (API + bridge) — **não** usar `gloves.smx` junto (duplica luvas) |
 | Wear / seed / nametag / StatTrak | `_float`, `_seed`, `_tag`, `_trak`, `_trak_count` |
 | Kukri | Não no kgns 1.7.8 — aguarda update do !ws |
 | Agentes | Fora do kgns weapons/gloves — não suportado |
 
 v3.3: Re-sync weapons.smx in-memory cache after site DB writes (`Weapons_ReloadClientData` native + patch script); immediate PTaH paint apply; SDKHook WeaponEquip; 6-pass force re-apply; faster spawn apply (0.35s).
 
-Requisitos servidor: **PTaH**, `FollowCSGOServerGuidelines "no"`, **weapons.smx**, recomendado **gloves.smx**.
+Requisitos servidor: **PTaH**, `FollowCSGOServerGuidelines "no"`, **weapons.smx**. **Não** carregar **gloves.smx** (kgns) — o bridge aplica luvas do SQLite; os dois juntos duplicam no modelo.

@@ -15,7 +15,7 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.3.6"
+#define PLUGIN_VERSION "3.3.7"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -191,9 +191,39 @@ public void OnAllPluginsLoaded() {
     if (!LibraryExists("weapons")) {
         LogMessage("[Clutch] weapons.smx not loaded — knife models need kgns Weapons & Knives + PTaH");
     }
+    ClutchWarnIfKgnsGlovesLoaded();
 #if defined _weapons_included_
     RefreshWeaponsReloadNativeFlag();
 #endif
+}
+
+bool ClutchIsKgnsGlovesPluginRunning() {
+    char name[64];
+    char file[PLATFORM_MAX_PATH];
+    Handle iter = GetPluginIterator();
+    while (MorePlugins(iter)) {
+        Handle plugin = ReadPlugin(iter);
+        if (GetPluginStatus(plugin) != Plugin_Running) {
+            continue;
+        }
+        GetPluginInfo(plugin, PlInfo_Name, name, sizeof(name));
+        GetPluginInfo(plugin, PlInfo_File, file, sizeof(file));
+        if (StrEqual(name, "Gloves", false) || StrContains(file, "gloves", false) != -1) {
+            delete iter;
+            return true;
+        }
+    }
+    delete iter;
+    return false;
+}
+
+void ClutchWarnIfKgnsGlovesLoaded() {
+    if (!ClutchIsKgnsGlovesPluginRunning()) {
+        return;
+    }
+    LogError(
+        "[Clutch] kgns gloves.smx is loaded — it applies gloves on spawn from the same SQLite table as this bridge, which causes DOUBLE gloves. Move it to addons/sourcemod/plugins/disabled/gloves.smx and sm plugins reload"
+    );
 }
 
 public void OnPluginEnd() {
@@ -1072,8 +1102,52 @@ void ClutchClearWearableGloves(int client) {
         AcceptEntityInput(wearable, "KillHierarchy");
     }
     SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
+
+    int entity = -1;
+    while ((entity = FindEntityByClassname(entity, "wearable_item")) != -1) {
+        if (!IsValidEntity(entity)) {
+            continue;
+        }
+        if (
+            GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity") == client ||
+            GetEntPropEnt(entity, Prop_Data, "m_hParent") == client ||
+            GetEntPropEnt(entity, Prop_Data, "m_hMoveParent") == client
+        ) {
+            AcceptEntityInput(entity, "KillHierarchy");
+        }
+    }
+
+    SetEntProp(client, Prop_Send, "m_nBody", 0);
     g_iLastGloveGroup[client] = 0;
     g_iLastGlovePaint[client] = 0;
+}
+
+bool ClutchHasExtraWearables(int client) {
+    int count = 0;
+    int entity = -1;
+    while ((entity = FindEntityByClassname(entity, "wearable_item")) != -1) {
+        if (!IsValidEntity(entity)) {
+            continue;
+        }
+        if (GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity") == client) {
+            count++;
+            if (count > 1) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool ClutchShouldSkipGloveReapply(int client, int group, int paintkit) {
+    if (g_iLastGloveGroup[client] != group || g_iLastGlovePaint[client] != paintkit) {
+        return false;
+    }
+    int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
+    if (wearable == -1 || !IsValidEntity(wearable)) {
+        return false;
+    }
+    return !ClutchHasExtraWearables(client);
 }
 
 public void OnFrame_FixArmsAfterGloves(any userid) {
@@ -1105,13 +1179,7 @@ void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
         return;
     }
 
-    int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
-    if (
-        g_iLastGloveGroup[client] == group &&
-        g_iLastGlovePaint[client] == paintkit &&
-        wearable != -1 &&
-        IsValidEntity(wearable)
-    ) {
+    if (ClutchShouldSkipGloveReapply(client, group, paintkit)) {
         return;
     }
 

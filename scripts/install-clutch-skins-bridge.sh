@@ -106,6 +106,11 @@ if [[ -f "${CFG_DEPLOY}" ]]; then
   else
     printf '\nclutch_skins_refresh "0"\n' >> "${CFG_DEPLOY}"
   fi
+  if grep -q 'clutch_skins_gloves_world_model' "${CFG_DEPLOY}"; then
+    sed -i 's|^clutch_skins_gloves_world_model.*|clutch_skins_gloves_world_model "0"|g' "${CFG_DEPLOY}"
+  else
+    printf '\nclutch_skins_gloves_world_model "0"\n' >> "${CFG_DEPLOY}"
+  fi
 fi
 
 DATA_FILE="${SM}/data/clutch_skins.txt"
@@ -176,10 +181,21 @@ else
 fi
 
 GLOVES_SMX="${SM}/plugins/gloves.smx"
+GLOVES_DISABLED_DIR="${SM}/plugins/disabled"
+mkdir -p "${GLOVES_DISABLED_DIR}"
 if [[ -f "${GLOVES_SMX}" ]]; then
-  echo "gloves.smx found — same SQLite DB for glove menu + bridge apply."
+  mv -f "${GLOVES_SMX}" "${GLOVES_DISABLED_DIR}/gloves.smx"
+  echo "Disabled kgns gloves.smx → plugins/disabled/gloves.smx (avoids double gloves; bridge applies from site DB)."
+elif [[ -f "${GLOVES_DISABLED_DIR}/gloves.smx" ]]; then
+  echo "kgns gloves.smx already in plugins/disabled/."
 else
-  echo "NOTE: gloves.smx not found — bridge still applies gloves from DB; install kgns Gloves for !gloves menu."
+  echo "kgns gloves.smx not found — bridge applies gloves from SQLite only."
+fi
+# Legacy mistaken rename (still loaded as .smx in plugins/)
+LEGACY_DISABLED="${SM}/plugins/z_disabled_kgns_gloves.smx"
+if [[ -f "${LEGACY_DISABLED}" ]]; then
+  mv -f "${LEGACY_DISABLED}" "${GLOVES_DISABLED_DIR}/gloves.smx"
+  echo "Moved legacy z_disabled_kgns_gloves.smx into plugins/disabled/."
 fi
 
 WEAPONS_SMX="${SM}/plugins/weapons.smx"
