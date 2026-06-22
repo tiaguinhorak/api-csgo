@@ -20,6 +20,13 @@ if [[ ! -f "${SP_SRC}" ]]; then
   exit 1
 fi
 
+if [[ -d "${REPO_ROOT}/.git" ]]; then
+  LOCAL_HEAD="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || true)"
+  if [[ -n "${LOCAL_HEAD}" ]]; then
+    echo "Repo at ${LOCAL_HEAD} — run: cd ~/api-csgo && git pull"
+  fi
+fi
+
 if [[ ! -d "${SM}/scripting" ]]; then
   echo "SourceMod not found at ${SM}" >&2
   exit 1
@@ -45,7 +52,10 @@ PLUGIN_SMX="z_clutch_skins_bridge.smx"
 LEGACY_SMX="clutch_skins_bridge.smx"
 
 echo "Compiling..."
-(cd "${SM}/scripting" && "${SPCOMP}" clutch_skins_bridge.sp -o"${SM}/plugins/${PLUGIN_SMX}")
+if ! (cd "${SM}/scripting" && "${SPCOMP}" clutch_skins_bridge.sp -o"${SM}/plugins/${PLUGIN_SMX}"); then
+  echo "Compile failed — fix errors above. Run: cd ~/api-csgo && git pull" >&2
+  exit 1
+fi
 
 if [[ ! -f "${SM}/plugins/${PLUGIN_SMX}" ]]; then
   echo "Compile failed — no .smx output" >&2

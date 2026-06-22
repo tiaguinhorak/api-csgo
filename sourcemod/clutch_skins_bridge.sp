@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.1.2"
+#define PLUGIN_VERSION "1.1.3"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -218,6 +218,108 @@ bool JumpToPlayerLoadoutKv(int client) {
     return false;
 }
 
+bool IsMeleeWeaponKey(const char[] weaponKey) {
+    return StrContains(weaponKey, "knife", false) != -1
+        || StrContains(weaponKey, "bayonet", false) != -1;
+}
+
+bool IsMeleeClassname(const char[] classname) {
+    return StrContains(classname, "knife", false) != -1
+        || StrContains(classname, "bayonet", false) != -1;
+}
+
+int FindPlayerWeapon(int client, const char[] weaponKey) {
+    bool matchMelee = IsMeleeWeaponKey(weaponKey);
+
+    for (int slot = 0; slot <= 5; slot++) {
+        int weapon = GetPlayerWeaponSlot(client, slot);
+        if (weapon == -1) {
+            continue;
+        }
+
+        char classname[64];
+        GetEntityClassname(weapon, classname, sizeof(classname));
+
+        if (matchMelee) {
+            if (IsMeleeClassname(classname)) {
+                return weapon;
+            }
+            continue;
+        }
+
+        if (StrEqual(classname, weaponKey, false)) {
+            return weapon;
+        }
+    }
+
+    return -1;
+}
+
+void ApplyWeaponSkinEntity(
+    int client,
+    int weapon,
+    int paintkit,
+    float wear,
+    int seed,
+    int stattrak,
+    const char[] nametag
+) {
+    SetEntProp(weapon, Prop_Send, "m_iItemIDHigh", -1);
+    SetEntProp(weapon, Prop_Send, "m_iItemIDLow", -1);
+    SetEntProp(weapon, Prop_Send, "m_iEntityQuality", 4);
+    SetEntProp(weapon, Prop_Send, "m_nFallbackPaintKit", paintkit);
+    SetEntPropFloat(weapon, Prop_Send, "m_flFallbackWear", wear);
+    SetEntProp(weapon, Prop_Send, "m_nFallbackSeed", seed);
+
+    if (stattrak >= 0) {
+        SetEntProp(weapon, Prop_Send, "m_nFallbackStatTrak", stattrak);
+    }
+
+    if (nametag[0] != '\0') {
+        SetEntPropString(weapon, Prop_Send, "m_szCustomName", nametag);
+    }
+
+    int accountId = GetSteamAccountID(client);
+    SetEntProp(weapon, Prop_Send, "m_OriginalOwnerXuidLow", accountId);
+    SetEntProp(weapon, Prop_Send, "m_OriginalOwnerXuidHigh", 0);
+    SetEntProp(weapon, Prop_Send, "m_iAccountID", accountId);
+}
+
+void ApplySkinToMatchingViewModels(
+    int client,
+    const char[] weaponKey,
+    int paintkit,
+    float wear,
+    int seed,
+    int stattrak,
+    const char[] nametag
+) {
+    bool matchMelee = IsMeleeWeaponKey(weaponKey);
+
+    for (int i = 0; i <= 2; i++) {
+        char prop[20];
+        Format(prop, sizeof(prop), "m_hViewModel[%d]", i);
+
+        int viewModel = GetEntPropEnt(client, Prop_Send, prop);
+        if (viewModel <= MaxClients) {
+            continue;
+        }
+
+        char classname[64];
+        GetEntityClassname(viewModel, classname, sizeof(classname));
+
+        if (matchMelee) {
+            if (!IsMeleeClassname(classname)) {
+                continue;
+            }
+        } else if (!StrEqual(classname, weaponKey, false)) {
+            continue;
+        }
+
+        ApplyWeaponSkinEntity(client, viewModel, paintkit, wear, seed, stattrak, nametag);
+    }
+}
+
 public void ApplyClientSkinsFrame(any userid) {
     int client = GetClientOfUserId(userid);
     if (client > 0) {
@@ -296,72 +398,6 @@ void ApplyClientSkins(int client) {
     KvGoBack(g_hSkinsKv);
 
     CS_UpdateClientModel(client);
-}
-
-void ApplyWeaponSkinEntity(
-    int client,
-    int weapon,
-    int paintkit,
-    float wear,
-    int seed,
-    int stattrak,
-    const char[] nametag
-) {
-    SetEntProp(weapon, Prop_Send, "m_iItemIDHigh", -1);
-    SetEntProp(weapon, Prop_Send, "m_iItemIDLow", -1);
-    SetEntProp(weapon, Prop_Send, "m_iEntityQuality", 4);
-    SetEntProp(weapon, Prop_Send, "m_nFallbackPaintKit", paintkit);
-    SetEntPropFloat(weapon, Prop_Send, "m_flFallbackWear", wear);
-    SetEntProp(weapon, Prop_Send, "m_nFallbackSeed", seed);
-
-    if (stattrak >= 0) {
-        SetEntProp(weapon, Prop_Send, "m_nFallbackStatTrak", stattrak);
-    }
-
-    if (nametag[0] != '\0') {
-        SetEntPropString(weapon, Prop_Send, "m_szCustomName", nametag);
-    }
-
-    int accountId = GetSteamAccountID(client);
-    SetEntProp(weapon, Prop_Send, "m_OriginalOwnerXuidLow", accountId);
-    SetEntProp(weapon, Prop_Send, "m_OriginalOwnerXuidHigh", 0);
-}
-
-bool IsMeleeWeaponKey(const char[] weaponKey) {
-    return StrContains(weaponKey, "knife", false) != -1
-        || StrContains(weaponKey, "bayonet", false) != -1;
-}
-
-bool IsMeleeClassname(const char[] classname) {
-    return StrContains(classname, "knife", false) != -1
-        || StrContains(classname, "bayonet", false) != -1;
-}
-
-int FindPlayerWeapon(int client, const char[] weaponKey) {
-    bool matchMelee = IsMeleeWeaponKey(weaponKey);
-
-    for (int slot = 0; slot <= 5; slot++) {
-        int weapon = GetPlayerWeaponSlot(client, slot);
-        if (weapon == -1) {
-            continue;
-        }
-
-        char classname[64];
-        GetEntityClassname(weapon, classname, sizeof(classname));
-
-        if (matchMelee) {
-            if (IsMeleeClassname(classname)) {
-                return weapon;
-            }
-            continue;
-        }
-
-        if (StrEqual(classname, weaponKey, false)) {
-            return weapon;
-        }
-    }
-
-    return -1;
 }
 
 public void OnPluginEnd() {
