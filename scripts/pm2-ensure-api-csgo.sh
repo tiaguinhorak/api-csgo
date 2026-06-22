@@ -38,7 +38,8 @@ sleep 3
 
 if ! health_has_gloves_marker; then
   echo "[pm2-ensure] /health missing glovesPlayerSync — likely stale node on :${PORT}, running kill-stale"
-  bash "${REPO_ROOT}/scripts/kill-stale-api-csgo.sh"
+  bash "${REPO_ROOT}/scripts/kill-stale-api-csgo.sh" || true
+  pm2 delete api-csgo 2>/dev/null || true
   pm2 start ecosystem.config.js --update-env
   sleep 5
   if ! health_has_gloves_marker; then

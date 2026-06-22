@@ -15,13 +15,14 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.3.9"
+#define PLUGIN_VERSION "3.4.0"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
 #define ENTITY_APPLY_COOLDOWN 1.5
 #define REAPPLY_PASS_COUNT 6
 #define SPAWN_APPLY_DELAY 0.35
+#define SPAWN_GLOVE_QUERY_DELAY 0.75
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -38,6 +39,7 @@ int g_iItemIdHigh = 16384;
 bool g_bGlovesTableReady = false;
 bool g_bGlovesPending[MAXPLAYERS + 1];
 int g_iGloveQueryGen[MAXPLAYERS + 1];
+int g_iGloveApplyGen[MAXPLAYERS + 1];
 int g_iLastGloveGroup[MAXPLAYERS + 1];
 int g_iLastGlovePaint[MAXPLAYERS + 1];
 Handle g_hRefreshTimer = null;
@@ -324,6 +326,7 @@ public void OnClientDisconnect(int client) {
     g_iLastGlovePaint[client] = 0;
     g_bGlovesPending[client] = false;
     g_iGloveQueryGen[client] = 0;
+    g_iGloveApplyGen[client] = 0;
     g_CachedKnifeClass[client][0] = '\0';
 
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
@@ -340,6 +343,9 @@ public void OnClientPutInServer(int client) {
     }
     SDKHook(client, SDKHook_WeaponEquip, OnWeaponEquip);
     ScheduleApplyClientSkins(client);
+    if (IsPlayerAlive(client)) {
+        ScheduleQueryPlayerGloves(client);
+    }
 }
 
 public Action OnWeaponEquip(int client, int weapon) {
@@ -392,6 +398,7 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     g_iLastGlovePaint[client] = 0;
     ClutchClearWearableGloves(client);
     ScheduleApplyClientSkins(client);
+    ScheduleQueryPlayerGloves(client);
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
@@ -583,6 +590,29 @@ public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
     if (client > 0) {
         ApplyClientSkins(client, false);
     }
+    return Plugin_Stop;
+}
+
+void ScheduleQueryPlayerGloves(int client) {
+    if (client <= 0 || IsFakeClient(client)) {
+        return;
+    }
+    int userid = GetClientUserId(client);
+    CreateTimer(SPAWN_GLOVE_QUERY_DELAY, Timer_QueryPlayerGlovesDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_QueryPlayerGlovesDelayed(Handle timer, any userid) {
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client)) {
+        return Plugin_Stop;
+    }
+
+    char steamId[32];
+    if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+        return Plugin_Stop;
+    }
+
+    QueryPlayerGloves(client, steamId, 0);
     return Plugin_Stop;
 }
 
@@ -1012,7 +1042,9 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
             LogMessage("[Clutch] Sem loadout no DB para %s (%N)", steamId, client);
             g_bLoggedMissingLoadout[client] = true;
         }
-        QueryPlayerGloves(client, steamId, 0);
+        if (force) {
+            QueryPlayerGloves(client, steamId, 0);
+        }
         return;
     }
 
@@ -1021,7 +1053,9 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
     TryReloadWeaponsPluginData(client);
 #endif
     ApplyLoadoutFromDbRow(client, results, force);
-    QueryPlayerGloves(client, steamId, 0);
+    if (force) {
+        QueryPlayerGloves(client, steamId, 0);
+    }
 }
 
 void QueryPlayerGloves(int client, const char[] steamId, int altAttempt) {
@@ -1035,6 +1069,7 @@ void QueryPlayerGloves(int client, const char[] steamId, int altAttempt) {
 
     g_bGlovesPending[client] = true;
     g_iGloveQueryGen[client]++;
+    g_iGloveApplyGen[client]++;
     int queryGen = g_iGloveQueryGen[client];
 
     char escaped[64];
@@ -1232,6 +1267,7 @@ void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
     pack.WriteCell(group);
     pack.WriteCell(paintkit);
     pack.WriteFloat(wear);
+    pack.WriteCell(g_iGloveApplyGen[client]);
     CreateTimer(0.05, Timer_ApplyGlovesAfterClear, pack, TIMER_FLAG_NO_MAPCHANGE);
 }
 
@@ -1241,6 +1277,7 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
     int group = pack.ReadCell();
     int paintkit = pack.ReadCell();
     float wear = pack.ReadFloat();
+    int applyGen = pack.ReadCell();
     delete pack;
 
     int client = GetClientOfUserId(userid);
@@ -1248,10 +1285,16 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
+    if (applyGen != g_iGloveApplyGen[client]) {
+        return Plugin_Stop;
+    }
+
     if (group <= 0 || paintkit <= 0) {
         g_bGlovesPending[client] = false;
         return Plugin_Stop;
     }
+
+    ClutchClearWearableGloves(client);
 
     bool worldModel = g_cvGlovesWorldModel.BoolValue;
     int ent = CreateEntityByName("wearable_item");

@@ -9,9 +9,30 @@ API_PORT="${PORT:-3000}"
 MY_UID="$(id -u)"
 KILLED=0
 
+should_skip_pid() {
+  local pid="$1"
+  local args
+  args="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
+  if [[ -z "${args}" ]]; then
+    return 0
+  fi
+  case "${args}" in
+    *kill-stale-api-csgo.sh*|*pm2-ensure-api-csgo.sh*|*deploy-vps.sh*)
+      return 0
+      ;;
+  esac
+  if [[ "${args}" == *bash* ]] && [[ "${args}" != *node* ]] && [[ "${args}" != *dist/index.js* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 kill_pid() {
   local pid="$1"
-  if [[ -z "${pid}" ]] || [[ "${pid}" == "$$" ]]; then
+  if [[ -z "${pid}" ]] || [[ "${pid}" == "$$" ]] || [[ "${pid}" == "${PPID}" ]]; then
+    return 0
+  fi
+  if should_skip_pid "${pid}"; then
     return 0
   fi
   if ! kill -0 "${pid}" 2>/dev/null; then
@@ -71,10 +92,14 @@ for attempt in 1 2 3 4 5 6; do
 done
 
 if ss -tln 2>/dev/null | grep -q ":${API_PORT} "; then
-  echo "[kill-stale] ERROR: port ${API_PORT} still in use." >&2
+  if pgrep -u "${MY_UID}" -f "${REPO_ROOT}/dist/index.js" >/dev/null 2>&1; then
+    echo "[kill-stale] ERROR: port ${API_PORT} still in use by api-csgo node." >&2
+    pgrep -u "${MY_UID}" -af 'node|api-csgo' 2>/dev/null || true
+    echo "Manual: kill -9 \$(pgrep -u ${MY_UID} -f '${REPO_ROOT}/dist/index.js')" >&2
+    exit 1
+  fi
+  echo "[kill-stale] WARN: port ${API_PORT} still shows LISTEN but no ${REPO_ROOT}/dist/index.js — continuing (pm2 will bind)." >&2
   pgrep -u "${MY_UID}" -af 'node|api-csgo' 2>/dev/null || true
-  echo "Manual: kill -9 \$(pgrep -u ${MY_UID} -f '${REPO_ROOT}/dist/index.js')" >&2
-  exit 1
 fi
 
 echo "[kill-stale] OK — port ${API_PORT} free (killed ${KILLED} process(es))"
