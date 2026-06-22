@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.1.1"
+#define PLUGIN_VERSION "1.1.2"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -266,11 +266,20 @@ void ApplyClientSkins(int client) {
             int weapon = FindPlayerWeapon(client, weaponKey);
             if (weapon != -1) {
                 ApplyWeaponSkinEntity(client, weapon, paintkit, wear, seed, stattrak, nametag);
+                ApplySkinToMatchingViewModels(
+                    client,
+                    weaponKey,
+                    paintkit,
+                    wear,
+                    seed,
+                    stattrak,
+                    nametag
+                );
                 if (g_cvDebug.BoolValue) {
                     char classname[64];
                     GetEntityClassname(weapon, classname, sizeof(classname));
                     LogMessage(
-                        "[Clutch] Applied %s paintkit %d on %s for %N",
+                        "[Clutch] Applied %s paintkit %d on %s (+viewmodels) for %N",
                         weaponKey,
                         paintkit,
                         classname,
@@ -300,6 +309,7 @@ void ApplyWeaponSkinEntity(
 ) {
     SetEntProp(weapon, Prop_Send, "m_iItemIDHigh", -1);
     SetEntProp(weapon, Prop_Send, "m_iItemIDLow", -1);
+    SetEntProp(weapon, Prop_Send, "m_iEntityQuality", 4);
     SetEntProp(weapon, Prop_Send, "m_nFallbackPaintKit", paintkit);
     SetEntPropFloat(weapon, Prop_Send, "m_flFallbackWear", wear);
     SetEntProp(weapon, Prop_Send, "m_nFallbackSeed", seed);
