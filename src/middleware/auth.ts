@@ -5,12 +5,12 @@ const SYNC_HEADER = 'x-skins-sync-key';
 const API_KEY_HEADER = 'x-api-key';
 
 export function getProvidedAuthKey(req: Request): string | null {
-  const syncHeader = req.headers[SYNC_HEADER];
-  if (typeof syncHeader === 'string') return syncHeader;
-  const apiHeader = req.headers[API_KEY_HEADER];
-  if (typeof apiHeader === 'string') return apiHeader;
-  const auth = req.headers.authorization;
-  if (typeof auth === 'string') return auth.replace(/^Bearer\s+/i, '');
+  const sync = req.get(SYNC_HEADER);
+  if (sync) return sync;
+  const api = req.get(API_KEY_HEADER);
+  if (api) return api;
+  const auth = req.get('authorization');
+  if (auth) return auth.replace(/^Bearer\s+/i, '');
   return null;
 }
 

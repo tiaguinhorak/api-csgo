@@ -63,8 +63,6 @@ async function reloadViaScreen(): Promise<boolean> {
   }
 
   try {
-    await sendViaScreen(session, 'sm_reloadclutchskins');
-    await new Promise((r) => setTimeout(r, 400));
     await sendViaScreen(session, 'sm_clutch_applyskins');
     console.log(`[clutch-rcon] applied via screen session ${session}`);
     return true;
@@ -81,12 +79,6 @@ export async function reloadClutchSkinsInGame(): Promise<boolean> {
   }
 
   try {
-    await rconService.sendCommand(
-      target.host,
-      target.port,
-      target.password,
-      'sm_reloadclutchskins',
-    );
     await rconService.sendCommand(
       target.host,
       target.port,
