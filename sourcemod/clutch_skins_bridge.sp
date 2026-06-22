@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.1.1"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -178,6 +178,8 @@ void ScheduleApplyClientSkins(int client) {
     CreateTimer(2.75, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
     CreateTimer(4.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
     CreateTimer(6.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(8.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(10.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
@@ -244,6 +246,12 @@ void ApplyClientSkins(int client) {
             char weaponKey[64];
             KvGetSectionName(g_hSkinsKv, weaponKey, sizeof(weaponKey));
 
+            // Gloves not supported in v1 — skip silently.
+            if (StrContains(weaponKey, "gloves", false) != -1
+                || StrContains(weaponKey, "handwraps", false) != -1) {
+                continue;
+            }
+
             int paintkit = KvGetNum(g_hSkinsKv, "paintkit", 0);
             if (paintkit <= 0) {
                 continue;
@@ -277,6 +285,8 @@ void ApplyClientSkins(int client) {
     }
 
     KvGoBack(g_hSkinsKv);
+
+    CS_UpdateClientModel(client);
 }
 
 void ApplyWeaponSkinEntity(

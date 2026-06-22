@@ -34,7 +34,9 @@ send_cmd() {
   sleep 0.4
 }
 
-send_cmd "sm plugins reload z_clutch_skins_bridge"
+send_cmd "sm plugins unload clutch_skins_bridge"
+send_cmd "sm plugins unload z_clutch_skins_bridge"
+send_cmd "sm plugins load z_clutch_skins_bridge"
 send_cmd "sm plugins info z_clutch_skins_bridge"
 send_cmd "clutch_skins_file \"${SKINS_PATH}\""
 send_cmd "clutch_skins_debug 1"
