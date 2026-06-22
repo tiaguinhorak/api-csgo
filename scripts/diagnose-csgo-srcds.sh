@@ -20,6 +20,26 @@ echo "SERVER_ROOT=${SERVER_ROOT}"
 echo "SCREEN=${SCREEN_NAME}  PORT=${PORT}"
 echo ""
 
+echo "--- srcds_linux binary ---"
+if [[ -f "${SERVER_ROOT}/bin/srcds_linux" ]]; then
+  ls -la "${SERVER_ROOT}/bin/srcds_linux"
+  ldd "${SERVER_ROOT}/bin/srcds_linux" 2>&1 | grep -i 'not found' || echo "(ldd: no missing libs)"
+else
+  echo "MISSING: ${SERVER_ROOT}/bin/srcds_linux"
+fi
+echo ""
+
+if [[ -f "${SERVER_ROOT}/game/bin/linuxsteamrt64/cs2" ]] || [[ -f "${SERVER_ROOT}/game/csgo/bin/linuxsteamrt64/cs2" ]]; then
+  echo "WARN: CS2 binary detected — ./srcds_run -game csgo is likely wrong for this install."
+  echo "      Use Valve cs2.sh or reinstall legacy CSGO dedicated (Steam app 740)."
+  echo ""
+fi
+
+if ls "${SERVER_ROOT}"/csgo/crash*" "${SERVER_ROOT}"/core* 2>/dev/null | head -3; then
+  echo "(recent crash dumps above)"
+fi
+echo ""
+
 echo "--- srcds_run ---"
 if [[ -x "${SERVER_ROOT}/srcds_run" ]]; then
   ls -la "${SERVER_ROOT}/srcds_run"
@@ -64,5 +84,5 @@ echo "--- SourceMod errors (if any) ---"
 ls -t "${SERVER_ROOT}/csgo/addons/sourcemod/logs"/errors_*.log 2>/dev/null | head -1 | xargs tail -15 2>/dev/null || echo "(no errors log)"
 echo ""
 
-echo "If srcds dies instantly, run WITHOUT screen to see the error:"
-echo "  cd ${SERVER_ROOT} && ./srcds_run -game csgo -console +map de_dust2"
+echo "If srcds dies instantly, run:"
+echo "  cd ~/api-csgo && bash scripts/test-srcds-foreground.sh"
