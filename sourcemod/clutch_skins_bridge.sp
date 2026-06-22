@@ -15,7 +15,7 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.3.1"
+#define PLUGIN_VERSION "3.3.2"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -1226,8 +1226,9 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
 
     CS_UpdateClientModel(client);
 
+    ScheduleForceReapply(client, force);
+
     if (knifeClass[0] == '\0' || knifePaintkit <= 0) {
-        ScheduleForceReapply(client, force);
         return;
     }
 
@@ -1262,8 +1263,6 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
     pack.WriteCell(knifeTrakCount);
     pack.WriteString(knifeTag);
     CreateTimer(0.35, Timer_ApplyKnifeSkinDelayed, pack, TIMER_FLAG_NO_MAPCHANGE);
-
-    ScheduleForceReapply(client, force);
 }
 
 public void ApplyClientSkinsFrame(any userid) {

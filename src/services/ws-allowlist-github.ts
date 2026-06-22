@@ -1,19 +1,12 @@
 /** kgns weapon/glove lists from GitHub — no VPS config files required. */
 
-import { GLOVE_WEAPON_ID_TO_DEFINDEX } from './weapons-db-map';
+import { parseGlovesCfgEntries } from './parse-gloves-cfg';
 import type { WsSkinAllowEntry } from './ws-weapons-config';
 
 const KGNS_WEAPONS_CFG =
   'https://raw.githubusercontent.com/kgns/weapons/master/addons/sourcemod/configs/weapons';
 const KGNS_GLOVES_CFG =
   'https://raw.githubusercontent.com/kgns/gloves/master/addons/sourcemod/configs/gloves';
-
-const DEFINDEX_TO_GLOVE_WEAPON_ID: Record<number, string> = Object.fromEntries(
-  Object.entries(GLOVE_WEAPON_ID_TO_DEFINDEX).map(([weaponId, defIndex]) => [
-    defIndex,
-    weaponId,
-  ]),
-);
 
 function parseWeaponsCfg(content: string): WsSkinAllowEntry[] {
   const entries: WsSkinAllowEntry[] = [];
@@ -43,47 +36,6 @@ function parseWeaponsCfg(content: string): WsSkinAllowEntry[] {
   return entries;
 }
 
-function parseGlovesCfg(content: string): WsSkinAllowEntry[] {
-  const entries: WsSkinAllowEntry[] = [];
-  let depth = 0;
-  let gloveDefIndex: number | null = null;
-  let pendingSkinName = '';
-
-  for (const rawLine of content.split('\n')) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    const nameMatch = line.match(/^"([^"]+)"$/);
-    if (nameMatch && !line.includes('{')) {
-      pendingSkinName = nameMatch[1];
-    }
-
-    const indexMatch = line.match(/"index"\s+"(\d+)"/);
-    if (indexMatch) {
-      const index = Number(indexMatch[1]);
-      if (!Number.isFinite(index) || index <= 0) continue;
-
-      if (depth === 1) {
-        gloveDefIndex = index;
-      } else if (depth === 2 && gloveDefIndex !== null) {
-        const weaponId = DEFINDEX_TO_GLOVE_WEAPON_ID[gloveDefIndex];
-        if (weaponId) {
-          entries.push({
-            weaponId,
-            paintkit: index,
-            name: pendingSkinName || weaponId,
-          });
-        }
-      }
-    }
-
-    if (line.includes('{')) depth += (line.match(/\{/g) ?? []).length;
-    if (line.includes('}')) depth -= (line.match(/\}/g) ?? []).length;
-  }
-
-  return entries;
-}
-
 export async function fetchWsAllowlistFromGithub(
   lang = 'english',
 ): Promise<WsSkinAllowEntry[]> {
@@ -101,7 +53,11 @@ export async function fetchWsAllowlistFromGithub(
   try {
     const glovesRes = await fetch(glovesUrl);
     if (glovesRes.ok) {
-      gloveEntries = parseGlovesCfg(await glovesRes.text());
+      gloveEntries = parseGlovesCfgEntries(await glovesRes.text()).map((e) => ({
+        weaponId: e.weaponId,
+        paintkit: e.paintkit,
+        name: e.name ?? e.weaponId,
+      }));
     }
   } catch {
     // gloves optional

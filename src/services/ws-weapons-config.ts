@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fetchWsAllowlistFromGithub } from './ws-allowlist-github';
-import { GLOVE_WEAPON_ID_TO_DEFINDEX } from './weapons-db-map';
+import { parseGlovesCfgEntries } from './parse-gloves-cfg';
 import { getSourceModRoots } from './weapons-db-path';
 
 export type WsSkinAllowEntry = {
@@ -16,54 +16,6 @@ const DEFAULT_LANG = 'english';
 
 function glovesCfgPath(smRoot: string, lang: string): string {
   return path.join(smRoot, 'configs/gloves', `gloves_${lang}.cfg`);
-}
-
-const DEFINDEX_TO_GLOVE_WEAPON_ID: Record<number, string> = Object.fromEntries(
-  Object.entries(GLOVE_WEAPON_ID_TO_DEFINDEX).map(([weaponId, defIndex]) => [
-    defIndex,
-    weaponId,
-  ]),
-);
-
-function parseGlovesCfg(content: string): WsSkinAllowEntry[] {
-  const entries: WsSkinAllowEntry[] = [];
-  let depth = 0;
-  let gloveDefIndex: number | null = null;
-  let pendingSkinName = '';
-
-  for (const rawLine of content.split('\n')) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    const nameMatch = line.match(/^"([^"]+)"$/);
-    if (nameMatch && !line.includes('{')) {
-      pendingSkinName = nameMatch[1];
-    }
-
-    const indexMatch = line.match(/"index"\s+"(\d+)"/);
-    if (indexMatch) {
-      const index = Number(indexMatch[1]);
-      if (!Number.isFinite(index) || index <= 0) continue;
-
-      if (depth === 1) {
-        gloveDefIndex = index;
-      } else if (depth === 2 && gloveDefIndex !== null) {
-        const weaponId = DEFINDEX_TO_GLOVE_WEAPON_ID[gloveDefIndex];
-        if (weaponId) {
-          entries.push({
-            weaponId,
-            paintkit: index,
-            name: pendingSkinName || weaponId,
-          });
-        }
-      }
-    }
-
-    if (line.includes('{')) depth += (line.match(/\{/g) ?? []).length;
-    if (line.includes('}')) depth -= (line.match(/\}/g) ?? []).length;
-  }
-
-  return entries;
 }
 
 function parseWeaponsCfg(content: string): WsSkinAllowEntry[] {
@@ -148,7 +100,11 @@ function loadWsWeaponsAllowlistFromVps(): {
     process.env.WS_WEAPONS_LANG?.trim() || DEFAULT_LANG,
   );
   if (fs.existsSync(glovesPath)) {
-    gloveEntries = parseGlovesCfg(fs.readFileSync(glovesPath, 'utf8'));
+    gloveEntries = parseGlovesCfgEntries(fs.readFileSync(glovesPath, 'utf8')).map((e) => ({
+      weaponId: e.weaponId,
+      paintkit: e.paintkit,
+      name: e.name ?? e.weaponId,
+    }));
   }
 
   return {
