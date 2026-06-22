@@ -8,6 +8,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+chmod +x "${REPO_ROOT}/scripts/"*.sh 2>/dev/null || true
+
 echo "=== api-csgo deploy (skins v3) ==="
 
 if [[ -d .git ]]; then
@@ -36,6 +38,7 @@ else
 fi
 
 echo "Installing SourceMod plugin..."
+chmod +x "${REPO_ROOT}/scripts/"*.sh 2>/dev/null || true
 "${REPO_ROOT}/scripts/install-clutch-skins-bridge.sh"
 
 echo ""

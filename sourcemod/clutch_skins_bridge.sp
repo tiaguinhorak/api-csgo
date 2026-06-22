@@ -222,28 +222,88 @@ bool IsMeleeClassname(const char[] classname) {
 
 void KnifeClassFromIndex(int idx, char[] out, int maxlen) {
     switch (idx) {
-        case 0: strcopy(out, maxlen, "weapon_knife"); return;
-        case 33: strcopy(out, maxlen, "weapon_knife_karambit"); return;
-        case 34: strcopy(out, maxlen, "weapon_knife_m9_bayonet"); return;
-        case 35: strcopy(out, maxlen, "weapon_bayonet"); return;
-        case 36: strcopy(out, maxlen, "weapon_knife_survival_bowie"); return;
-        case 37: strcopy(out, maxlen, "weapon_knife_butterfly"); return;
-        case 38: strcopy(out, maxlen, "weapon_knife_flip"); return;
-        case 39: strcopy(out, maxlen, "weapon_knife_push"); return;
-        case 40: strcopy(out, maxlen, "weapon_knife_tactical"); return;
-        case 41: strcopy(out, maxlen, "weapon_knife_falchion"); return;
-        case 42: strcopy(out, maxlen, "weapon_knife_gut"); return;
-        case 43: strcopy(out, maxlen, "weapon_knife_ursus"); return;
-        case 44: strcopy(out, maxlen, "weapon_knife_gypsy_jackknife"); return;
-        case 45: strcopy(out, maxlen, "weapon_knife_stiletto"); return;
-        case 46: strcopy(out, maxlen, "weapon_knife_widowmaker"); return;
-        case 48: strcopy(out, maxlen, "weapon_knife_css"); return;
-        case 49: strcopy(out, maxlen, "weapon_knife_cord"); return;
-        case 50: strcopy(out, maxlen, "weapon_knife_canis"); return;
-        case 51: strcopy(out, maxlen, "weapon_knife_outdoor"); return;
-        case 52: strcopy(out, maxlen, "weapon_knife_skeleton"); return;
-        default: out[0] = '\0';
+        case 0: {
+            strcopy(out, maxlen, "weapon_knife");
+            return;
+        }
+        case 33: {
+            strcopy(out, maxlen, "weapon_knife_karambit");
+            return;
+        }
+        case 34: {
+            strcopy(out, maxlen, "weapon_knife_m9_bayonet");
+            return;
+        }
+        case 35: {
+            strcopy(out, maxlen, "weapon_bayonet");
+            return;
+        }
+        case 36: {
+            strcopy(out, maxlen, "weapon_knife_survival_bowie");
+            return;
+        }
+        case 37: {
+            strcopy(out, maxlen, "weapon_knife_butterfly");
+            return;
+        }
+        case 38: {
+            strcopy(out, maxlen, "weapon_knife_flip");
+            return;
+        }
+        case 39: {
+            strcopy(out, maxlen, "weapon_knife_push");
+            return;
+        }
+        case 40: {
+            strcopy(out, maxlen, "weapon_knife_tactical");
+            return;
+        }
+        case 41: {
+            strcopy(out, maxlen, "weapon_knife_falchion");
+            return;
+        }
+        case 42: {
+            strcopy(out, maxlen, "weapon_knife_gut");
+            return;
+        }
+        case 43: {
+            strcopy(out, maxlen, "weapon_knife_ursus");
+            return;
+        }
+        case 44: {
+            strcopy(out, maxlen, "weapon_knife_gypsy_jackknife");
+            return;
+        }
+        case 45: {
+            strcopy(out, maxlen, "weapon_knife_stiletto");
+            return;
+        }
+        case 46: {
+            strcopy(out, maxlen, "weapon_knife_widowmaker");
+            return;
+        }
+        case 48: {
+            strcopy(out, maxlen, "weapon_knife_css");
+            return;
+        }
+        case 49: {
+            strcopy(out, maxlen, "weapon_knife_cord");
+            return;
+        }
+        case 50: {
+            strcopy(out, maxlen, "weapon_knife_canis");
+            return;
+        }
+        case 51: {
+            strcopy(out, maxlen, "weapon_knife_outdoor");
+            return;
+        }
+        case 52: {
+            strcopy(out, maxlen, "weapon_knife_skeleton");
+            return;
+        }
     }
+    out[0] = '\0';
 }
 
 int FindPlayerWeapon(int client, const char[] weaponKey) {
