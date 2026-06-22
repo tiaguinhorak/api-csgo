@@ -11,6 +11,7 @@ set -euo pipefail
 CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
 SM="${CSGO_ROOT}/addons/sourcemod"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SP_SRC="${REPO_ROOT}/sourcemod/clutch_skins_bridge.sp"
 CFG_SRC="${REPO_ROOT}/sourcemod/clutch_skins_bridge.cfg"
 
@@ -32,6 +33,10 @@ if [[ ! -x "${SPCOMP}" ]]; then
   echo "spcomp not found in ${SM}/scripting/" >&2
   exit 1
 fi
+
+chmod +x "${SCRIPT_DIR}/install-clutch-skins-bridge.sh" 2>/dev/null || true
+chmod +x "${SCRIPT_DIR}/verify-clutch-skins-bridge.sh" 2>/dev/null || true
+chmod +x "${SCRIPT_DIR}/reload-clutch-skins-ingame.sh" 2>/dev/null || true
 
 echo "Copying source..."
 cp -f "${SP_SRC}" "${SM}/scripting/clutch_skins_bridge.sp"
@@ -82,13 +87,15 @@ fi
 echo ""
 echo "OK — clutch_skins_bridge.smx installed."
 echo ""
-echo "No console do CS (screen -r):"
-echo "  sm plugins reload"
-echo "  sm plugins list | grep -i clutch   # deve mostrar v1.0.8"
-echo "  sm_reloadclutchskins"
+echo "Recarregar no CS sem colar logs no console:"
+echo "  ./scripts/reload-clutch-skins-ingame.sh"
 echo ""
-echo "Se ainda 'missing', use caminho absoluto:"
-echo "  clutch_skins_file \"/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt\""
+echo "Ou manualmente (UM comando por linha, dentro de screen -r):"
+echo "  sm plugins reload clutch_skins_bridge"
+echo "  sm plugins info clutch_skins_bridge"
+echo "  clutch_skins_file \"${REMOTE_PATH:-/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt}\""
+echo "  clutch_skins_debug 1"
 echo "  sm_reloadclutchskins"
+echo "  sm_clutch_applyskins"
 echo ""
 echo "Diagnóstico: ./scripts/verify-clutch-skins-bridge.sh"
