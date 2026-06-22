@@ -15,14 +15,14 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.4.3"
+#define PLUGIN_VERSION "3.4.4"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
 #define ENTITY_APPLY_COOLDOWN 1.5
 #define REAPPLY_PASS_COUNT 6
 #define SPAWN_APPLY_DELAY 0.35
-#define SPAWN_GLOVE_QUERY_DELAY 1.0
+#define SPAWN_GLOVE_QUERY_DELAY 1.5
 #define FORCE_GLOVE_AFTER_WEAPONS_DELAY 3.5
 
 ConVar g_cvDebug;
@@ -1278,6 +1278,24 @@ public void OnFrame_FixArmsAfterGloves(any userid) {
     // Do not clear m_szArmsModel here — it reverts glove view to default mesh.
 }
 
+public void OnFrame_FinalizeGloveBody(any userid) {
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || !IsPlayerAlive(client)) {
+        return;
+    }
+    if (g_iLastGloveGroup[client] <= 0 || g_iLastGlovePaint[client] <= 0) {
+        return;
+    }
+
+    int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
+    if (wearable == -1 || !IsValidEntity(wearable)) {
+        return;
+    }
+
+    SetEntProp(client, Prop_Send, "m_nBody", 1);
+    ClutchNetworkUpdate(wearable);
+}
+
 public Action Timer_RetryGlovesAfterTeam(Handle timer, DataPack pack) {
     pack.Reset();
     int userid = pack.ReadCell();
@@ -1354,6 +1372,13 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
+    int team = GetClientTeam(client);
+    if (team != CS_TEAM_T && team != CS_TEAM_CT) {
+        g_bGlovesPending[client] = false;
+        g_bForceGloveApply[client] = false;
+        return Plugin_Stop;
+    }
+
     if (group <= 0 || paintkit <= 0) {
         g_bGlovesPending[client] = false;
         return Plugin_Stop;
@@ -1392,17 +1417,19 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
 
     DispatchSpawn(ent);
 
-    // EquipPlayerWeapon registers the wearable as THE active glove, replacing
-    // the default model instead of layering a second wearable on top of it.
+    // CS:GO Legacy (app 4465480): EquipPlayerWeapon(wearable_item) can segfault — attach via props.
+    SetEntPropEnt(ent, Prop_Data, "m_hOwnerEntity", client);
+    SetEntPropEnt(ent, Prop_Data, "m_hParent", client);
     SetEntProp(client, Prop_Send, "m_nBody", 1);
-    EquipPlayerWeapon(client, ent);
+    SetEntPropEnt(client, Prop_Send, "m_hMyWearables", ent);
 
     g_iLastGloveGroup[client] = group;
     g_iLastGlovePaint[client] = paintkit;
     g_bGlovesPending[client] = false;
     g_bForceGloveApply[client] = false;
 
-    CS_UpdateClientModel(client);
+    ClutchNetworkUpdate(ent);
+    RequestFrame(OnFrame_FinalizeGloveBody, GetClientUserId(client));
 
     LogMessage("[Clutch] Applied gloves group %d paintkit %d for %N", group, paintkit, client);
     return Plugin_Stop;
