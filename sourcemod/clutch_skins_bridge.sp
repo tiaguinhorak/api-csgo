@@ -15,7 +15,7 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.3.8"
+#define PLUGIN_VERSION "3.3.9"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -36,6 +36,8 @@ float g_fLastApplyTime[MAXPLAYERS + 1];
 int g_iLastKnifePaint[MAXPLAYERS + 1];
 int g_iItemIdHigh = 16384;
 bool g_bGlovesTableReady = false;
+bool g_bGlovesPending[MAXPLAYERS + 1];
+int g_iGloveQueryGen[MAXPLAYERS + 1];
 int g_iLastGloveGroup[MAXPLAYERS + 1];
 int g_iLastGlovePaint[MAXPLAYERS + 1];
 Handle g_hRefreshTimer = null;
@@ -320,6 +322,8 @@ public void OnClientDisconnect(int client) {
     g_iLastKnifePaint[client] = 0;
     g_iLastGloveGroup[client] = 0;
     g_iLastGlovePaint[client] = 0;
+    g_bGlovesPending[client] = false;
+    g_iGloveQueryGen[client] = 0;
     g_CachedKnifeClass[client][0] = '\0';
 
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
@@ -382,6 +386,11 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     if (client <= 0 || IsFakeClient(client)) {
         return;
     }
+    g_bGlovesPending[client] = false;
+    g_iGloveQueryGen[client]++;
+    g_iLastGloveGroup[client] = 0;
+    g_iLastGlovePaint[client] = 0;
+    ClutchClearWearableGloves(client);
     ScheduleApplyClientSkins(client);
 }
 
@@ -548,7 +557,7 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
         LogMessage("[Clutch] Applied cached paintkit %d on %s for %N", paintkit, classname, client);
     }
 
-    if (isKnife) {
+    if (isKnife && ClutchShouldUpdateClientModel(client)) {
         CS_UpdateClientModel(client);
     }
 
@@ -607,7 +616,6 @@ public Action Timer_ApplyKnifeSkinDelayed(Handle timer, DataPack pack) {
                 client
             );
         }
-        CS_UpdateClientModel(client);
     }
 
     return Plugin_Stop;
@@ -843,7 +851,7 @@ void SetClutchWeaponProps(
     }
 
     ClutchNetworkUpdate(weapon);
-    if (isKnife) {
+    if (isKnife && ClutchShouldUpdateClientModel(client)) {
         CS_UpdateClientModel(client);
     }
 }
@@ -893,7 +901,9 @@ void ApplyAllCachedWeaponsToClient(int client, bool force) {
         ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force);
     }
 
-    CS_UpdateClientModel(client);
+    if (ClutchShouldUpdateClientModel(client)) {
+        CS_UpdateClientModel(client);
+    }
 }
 
 void ScheduleForceReapply(int client, bool force) {
@@ -1023,6 +1033,10 @@ void QueryPlayerGloves(int client, const char[] steamId, int altAttempt) {
         EnsureGlovesTable();
     }
 
+    g_bGlovesPending[client] = true;
+    g_iGloveQueryGen[client]++;
+    int queryGen = g_iGloveQueryGen[client];
+
     char escaped[64];
     g_hWeaponsDb.Escape(steamId, escaped, sizeof(escaped));
 
@@ -1030,6 +1044,7 @@ void QueryPlayerGloves(int client, const char[] steamId, int altAttempt) {
     pack.WriteCell(GetClientUserId(client));
     pack.WriteString(steamId);
     pack.WriteCell(altAttempt);
+    pack.WriteCell(queryGen);
 
     char query[256];
     Format(
@@ -1048,6 +1063,7 @@ public void T_ApplyGlovesFromDbCallback(Database database, DBResultSet results, 
     char steamId[32];
     pack.ReadString(steamId, sizeof(steamId));
     int altAttempt = pack.ReadCell();
+    int queryGen = pack.ReadCell();
     delete pack;
 
     int client = GetClientOfUserId(userid);
@@ -1055,10 +1071,7 @@ public void T_ApplyGlovesFromDbCallback(Database database, DBResultSet results, 
         return;
     }
 
-    if (results == null) {
-        if (g_cvDebug.BoolValue) {
-            LogError("[Clutch] gloves DB query failed: %s", error);
-        }
+    if (queryGen != g_iGloveQueryGen[client]) {
         return;
     }
 
@@ -1066,6 +1079,7 @@ public void T_ApplyGlovesFromDbCallback(Database database, DBResultSet results, 
         if (g_cvDebug.BoolValue) {
             LogError("[Clutch] gloves DB query failed: %s", error);
         }
+        g_bGlovesPending[client] = false;
         return;
     }
 
@@ -1086,6 +1100,37 @@ public void T_ApplyGlovesFromDbCallback(Database database, DBResultSet results, 
     ApplyGlovesFromDbRow(client, results);
 }
 
+bool ClutchShouldUpdateClientModel(int client) {
+    if (g_bGlovesPending[client]) {
+        return false;
+    }
+    if (g_iLastGloveGroup[client] > 0 && g_iLastGlovePaint[client] > 0) {
+        return false;
+    }
+    return true;
+}
+
+void ClutchDestroyWearableEntity(int entity) {
+    if (entity == -1 || !IsValidEntity(entity)) {
+        return;
+    }
+
+    if (HasEntProp(entity, Prop_Data, "m_hOwnerEntity")) {
+        SetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity", -1);
+    }
+    if (HasEntProp(entity, Prop_Data, "m_hParent")) {
+        SetEntPropEnt(entity, Prop_Data, "m_hParent", -1);
+    }
+    if (HasEntProp(entity, Prop_Data, "m_hMoveParent")) {
+        SetEntPropEnt(entity, Prop_Data, "m_hMoveParent", -1);
+    }
+
+    AcceptEntityInput(entity, "KillHierarchy");
+    if (IsValidEntity(entity)) {
+        RemoveEntity(entity);
+    }
+}
+
 void ClutchFixCustomArms(int client) {
     char armsModel[2];
     GetEntPropString(client, Prop_Send, "m_szArmsModel", armsModel, sizeof(armsModel));
@@ -1095,10 +1140,6 @@ void ClutchFixCustomArms(int client) {
 }
 
 void ClutchClearWearableGloves(int client) {
-    int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
-    if (wearable != -1 && IsValidEntity(wearable)) {
-        AcceptEntityInput(wearable, "KillHierarchy");
-    }
     SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
 
     int entity = -1;
@@ -1111,7 +1152,7 @@ void ClutchClearWearableGloves(int client) {
             GetEntPropEnt(entity, Prop_Data, "m_hParent") == client ||
             GetEntPropEnt(entity, Prop_Data, "m_hMoveParent") == client
         ) {
-            AcceptEntityInput(entity, "KillHierarchy");
+            ClutchDestroyWearableEntity(entity);
         }
     }
 
@@ -1174,23 +1215,53 @@ void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
     if (group <= 0 || paintkit <= 0) {
         ClutchFixCustomArms(client);
         ClutchClearWearableGloves(client);
+        g_bGlovesPending[client] = false;
         return;
     }
 
     if (ClutchShouldSkipGloveReapply(client, group, paintkit)) {
+        g_bGlovesPending[client] = false;
         return;
     }
 
     ClutchFixCustomArms(client);
     ClutchClearWearableGloves(client);
 
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteCell(group);
+    pack.WriteCell(paintkit);
+    pack.WriteFloat(wear);
+    CreateTimer(0.05, Timer_ApplyGlovesAfterClear, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int group = pack.ReadCell();
+    int paintkit = pack.ReadCell();
+    float wear = pack.ReadFloat();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return Plugin_Stop;
+    }
+
+    if (group <= 0 || paintkit <= 0) {
+        g_bGlovesPending[client] = false;
+        return Plugin_Stop;
+    }
+
     bool worldModel = g_cvGlovesWorldModel.BoolValue;
     int ent = CreateEntityByName("wearable_item");
     if (ent == -1) {
-        return;
+        g_bGlovesPending[client] = false;
+        return Plugin_Stop;
     }
 
     SetEntProp(ent, Prop_Send, "m_iItemIDLow", -1);
+    SetEntProp(ent, Prop_Send, "m_iItemIDHigh", -1);
     SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", group);
     SetEntProp(ent, Prop_Send, "m_nFallbackPaintKit", paintkit);
 
@@ -1202,6 +1273,8 @@ void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
     }
     SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", appliedWear);
     SetEntProp(ent, Prop_Send, "m_nFallbackSeed", GetRandomInt(1, 1000));
+    SetEntProp(ent, Prop_Send, "m_iEntityQuality", 3);
+    SetEntProp(ent, Prop_Send, "m_iAccountID", GetSteamAccountID(client));
     SetEntPropEnt(ent, Prop_Data, "m_hOwnerEntity", client);
     SetEntPropEnt(ent, Prop_Data, "m_hParent", client);
     if (worldModel) {
@@ -1217,10 +1290,12 @@ void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
 
     g_iLastGloveGroup[client] = group;
     g_iLastGlovePaint[client] = paintkit;
+    g_bGlovesPending[client] = false;
 
     RequestFrame(OnFrame_FixArmsAfterGloves, GetClientUserId(client));
 
     LogMessage("[Clutch] Applied gloves group %d paintkit %d for %N", group, paintkit, client);
+    return Plugin_Stop;
 }
 
 void ApplyGlovesFromDbRow(int client, DBResultSet results) {
@@ -1403,8 +1478,6 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
         }
     }
 
-    CS_UpdateClientModel(client);
-
     ScheduleForceReapply(client, force);
 
     if (knifePaintkit <= 0) {
@@ -1466,11 +1539,6 @@ void ApplyClientSkins(int client, bool force) {
         return;
     }
     g_fLastApplyTime[client] = now;
-
-    if (force) {
-        g_iLastGloveGroup[client] = 0;
-        g_iLastGlovePaint[client] = 0;
-    }
 
     char steamId[32];
     if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
