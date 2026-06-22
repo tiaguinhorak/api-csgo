@@ -6,6 +6,9 @@ set -euo pipefail
 # Uso na VPS:
 #   ./scripts/reload-clutch-skins-ingame.sh
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+EXPECTED_VERSION="$(grep -E '#define PLUGIN_VERSION' "${REPO_ROOT}/sourcemod/clutch_skins_bridge.sp" | sed 's/.*"\(.*\)".*/\1/')"
+
 SCREEN_NAME="${CLUTCH_CS_SCREEN:-csgo-clutch-#1}"
 
 if ! screen -ls | grep -qF ".${SCREEN_NAME}"; then
@@ -37,6 +40,6 @@ send_cmd "sm_reloadclutchskins"
 send_cmd "sm_clutch_applyskins"
 
 echo ""
-echo "Done. Expect z_clutch_skins_bridge Version: 3.3.9"
+echo "Done. Expect z_clutch_skins_bridge Version: ${EXPECTED_VERSION}"
 echo "If weapons reload failed, change map (sm_map de_dust2) then re-run this script."
 echo "Respawn in-game after apply. New errors after reload: tail addons/sourcemod/logs/errors_*.log"

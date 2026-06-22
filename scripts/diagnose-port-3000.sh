@@ -27,7 +27,17 @@ pm2 list 2>/dev/null || echo "pm2 not running"
 echo ""
 
 echo "--- curl health ---"
-curl -s -m 2 "http://127.0.0.1:${PORT}/health" || echo "(no response)"
+HEALTH="$(curl -s -m 2 "http://127.0.0.1:${PORT}/health" || true)"
+if [[ -n "${HEALTH}" ]]; then
+  echo "${HEALTH}"
+  if echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
+    echo "(OK: glovesPlayerSync present — current api-csgo build)"
+  else
+    echo "(WARN: glovesPlayerSync missing — stale node on :${PORT} or api failed to bind)"
+  fi
+else
+  echo "(no response)"
+fi
 echo ""
 
 if ss -tln 2>/dev/null | grep -q ":${PORT} "; then
