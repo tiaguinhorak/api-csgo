@@ -42,13 +42,28 @@ if [[ -z "${HEALTH}" ]]; then
   echo "WARN: ${API_URL}/health unreachable — is pm2 running api-csgo?"
 else
   echo "${HEALTH}"
-  if ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
+fi
+
+# Prefer player-sync probe over /health marker (orphan node on :3000 may lack glovesPlayerSync).
+if [[ -n "${SYNC_KEY}" ]]; then
+  PROBE="$(curl -sf -X POST "${API_URL}/api/csgo/skins/player-sync" \
+    -H "x-skins-sync-key: ${SYNC_KEY}" \
+    -H "Content-Type: application/json" \
+    -d '{"steamId":"STEAM_1:0:0","weapons":[]}' 2>/dev/null || true)"
+  if [[ -n "${PROBE}" ]] && echo "${PROBE}" | grep -q '"gloves"'; then
+    echo "OK: player-sync has gloves field."
+  elif [[ -n "${HEALTH}" ]] && echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
+    echo "OK: /health has glovesPlayerSync marker."
+  else
     echo ""
-    echo "ERROR: API is outdated (no glovesPlayerSync in /health)."
-    echo "  On VPS run: cd ~/api-csgo && ./scripts/deploy-vps.sh"
-    echo "  Need commit a77152a or newer (gloves table sync in player-sync)."
+    echo "ERROR: API missing gloves sync (stale process on :3000?)."
+    echo "  Run: cd ~/api-csgo && ./scripts/pm2-recover.sh"
     exit 1
   fi
+elif [[ -z "${HEALTH}" ]] || ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
+  echo ""
+  echo "ERROR: cannot verify gloves sync (no CSGO_SKINS_SYNC_KEY and /health has no marker)."
+  exit 1
 fi
 
 if [[ "${MODE}" == "--clear" ]]; then

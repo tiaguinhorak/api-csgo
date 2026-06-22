@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start or restart api-csgo in pm2; recover from stale "Process 0 not found".
+# Start or restart api-csgo in pm2; recover from stale "Process 0 not found" or wrong node on :3000.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,6 +9,15 @@ if ! command -v pm2 >/dev/null 2>&1; then
   echo "pm2 not found" >&2
   exit 1
 fi
+
+PORT="${PORT:-3000}"
+API_URL="${CLUTCH_API_URL:-http://127.0.0.1:${PORT}}"
+
+health_has_gloves_marker() {
+  local health
+  health="$(curl -sf "${API_URL}/health" 2>/dev/null || true)"
+  [[ -n "${health}" ]] && echo "${health}" | grep -q 'glovesPlayerSync'
+}
 
 restart_ok=0
 if pm2 describe api-csgo >/dev/null 2>&1; then
@@ -25,5 +34,18 @@ if [[ "${restart_ok}" -eq 0 ]]; then
   pm2 start ecosystem.config.js --update-env
 fi
 
-sleep 2
+sleep 3
+
+if ! health_has_gloves_marker; then
+  echo "[pm2-ensure] /health missing glovesPlayerSync — likely stale node on :${PORT}, running kill-stale"
+  bash "${REPO_ROOT}/scripts/kill-stale-api-csgo.sh"
+  pm2 start ecosystem.config.js --update-env
+  sleep 5
+  if ! health_has_gloves_marker; then
+    echo "[pm2-ensure] WARN: /health still missing glovesPlayerSync after kill-stale" >&2
+    curl -sf "${API_URL}/health" 2>/dev/null || echo "(no /health response)"
+    echo ""
+  fi
+fi
+
 pm2 status api-csgo 2>/dev/null || pm2 list
