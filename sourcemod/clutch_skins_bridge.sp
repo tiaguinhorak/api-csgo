@@ -5,13 +5,15 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.0.7"
+#define PLUGIN_VERSION "1.0.8"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
 ConVar g_cvRefreshSeconds;
+ConVar g_cvDebug;
 Handle g_hSkinsKv = null;
 char g_sSkinsFile[PLATFORM_MAX_PATH];
+bool g_bLoggedMissingLoadout[MAXPLAYERS + 1];
 
 public Plugin myinfo = {
     name = "Clutch Skins Bridge",
@@ -38,10 +40,21 @@ public void OnPluginStart() {
         true,
         300.0
     );
+    g_cvDebug = CreateConVar(
+        "clutch_skins_debug",
+        "0",
+        "Log skin apply details (1 = yes)",
+        FCVAR_NOTIFY,
+        true,
+        0.0,
+        true,
+        1.0
+    );
 
     AutoExecConfig(true, "clutch_skins_bridge");
 
     RegAdminCmd("sm_reloadclutchskins", Command_ReloadSkins, ADMFLAG_ROOT, "Reload clutch_skins.txt");
+    RegAdminCmd("sm_clutch_applyskins", Command_ApplySkins, ADMFLAG_ROOT, "Re-apply clutch skins to all players");
 
     LoadSkinsFile(true);
     CreateTimer(g_cvRefreshSeconds.FloatValue, Timer_RefreshSkins, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
@@ -59,6 +72,16 @@ public Action Timer_RefreshSkins(Handle timer) {
 public Action Command_ReloadSkins(int client, int args) {
     LoadSkinsFile(true);
     ReplyToCommand(client, "[Clutch] clutch_skins.txt recarregado.");
+    return Plugin_Handled;
+}
+
+public Action Command_ApplySkins(int client, int args) {
+    for (int i = 1; i <= MaxClients; i++) {
+        if (IsClientInGame(i) && !IsFakeClient(i)) {
+            ScheduleApplyClientSkins(i);
+        }
+    }
+    ReplyToCommand(client, "[Clutch] Reaplicando skins nos jogadores.");
     return Plugin_Handled;
 }
 
@@ -122,16 +145,20 @@ void LoadSkinsFile(bool announce) {
 
     for (int client = 1; client <= MaxClients; client++) {
         if (IsClientInGame(client) && !IsFakeClient(client)) {
-            RequestFrame(ApplyClientSkinsFrame, GetClientUserId(client));
+            ScheduleApplyClientSkins(client);
         }
     }
+}
+
+public void OnClientDisconnect(int client) {
+    g_bLoggedMissingLoadout[client] = false;
 }
 
 public void OnClientPutInServer(int client) {
     if (IsFakeClient(client)) {
         return;
     }
-    RequestFrame(ApplyClientSkinsFrame, GetClientUserId(client));
+    ScheduleApplyClientSkins(client);
 }
 
 public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
@@ -139,10 +166,16 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     if (client <= 0 || IsFakeClient(client)) {
         return;
     }
+    ScheduleApplyClientSkins(client);
+}
+
+void ScheduleApplyClientSkins(int client) {
     int userid = GetClientUserId(client);
     RequestFrame(ApplyClientSkinsFrame, userid);
-    CreateTimer(0.15, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
-    CreateTimer(0.6, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(0.2, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(0.65, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(1.35, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(2.75, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
@@ -177,6 +210,13 @@ void ApplyClientSkins(int client) {
     }
 
     if (!JumpToPlayerLoadoutKv(client)) {
+        if (!g_bLoggedMissingLoadout[client]) {
+            char steamId[32];
+            if (GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+                LogMessage("[Clutch] Sem loadout no arquivo para %s (%N)", steamId, client);
+            }
+            g_bLoggedMissingLoadout[client] = true;
+        }
         return;
     }
 
@@ -199,6 +239,19 @@ void ApplyClientSkins(int client) {
             int weapon = FindPlayerWeapon(client, weaponKey);
             if (weapon != -1) {
                 ApplyWeaponSkinEntity(client, weapon, paintkit, wear, seed, stattrak, nametag);
+                if (g_cvDebug.BoolValue) {
+                    char classname[64];
+                    GetEntityClassname(weapon, classname, sizeof(classname));
+                    LogMessage(
+                        "[Clutch] Applied %s paintkit %d on %s for %N",
+                        weaponKey,
+                        paintkit,
+                        classname,
+                        client
+                    );
+                }
+            } else if (g_cvDebug.BoolValue) {
+                LogMessage("[Clutch] Weapon not found for key %s (%N)", weaponKey, client);
             }
         } while (KvGotoNextKey(g_hSkinsKv, false));
         KvGoBack(g_hSkinsKv);
