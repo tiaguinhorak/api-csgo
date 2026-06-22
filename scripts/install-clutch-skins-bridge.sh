@@ -58,6 +58,7 @@ LEGACY_SMX="clutch_skins_bridge.smx"
 echo "Compiling..."
 if ! (cd "${SM}/scripting" && "${SPCOMP}" clutch_skins_bridge.sp -o"${SM}/plugins/${PLUGIN_SMX}"); then
   echo "Compile failed — fix errors above. Run: cd ~/api-csgo && git pull" >&2
+  rm -f "${SM}/plugins/${PLUGIN_SMX}"
   exit 1
 fi
 

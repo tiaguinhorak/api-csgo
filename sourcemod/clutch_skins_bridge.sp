@@ -8,7 +8,7 @@
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
 
-#define PLUGIN_VERSION "2.0.0"
+#define PLUGIN_VERSION "2.0.1"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -467,7 +467,9 @@ void SetClutchWeaponProps(
 void ClutchSetClientKnife(int client, const char[] knifeClass) {
 #if defined _weapons_included_
     if (LibraryExists("weapons")) {
-        Weapons_SetClientKnife(client, knifeClass, false);
+        char knife[64];
+        strcopy(knife, sizeof(knife), knifeClass);
+        Weapons_SetClientKnife(client, knife, false);
     }
 #endif
 }
