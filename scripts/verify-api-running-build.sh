@@ -5,10 +5,15 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 PORT="${PORT:-3000}"
 API_URL="${CLUTCH_API_URL:-http://127.0.0.1:${PORT}}"
-
-if [[ ! -f dist/routes/csgo-skins-push.js ]]; then
   echo "ERROR: dist/ missing — run: npm run build" >&2
   exit 1
 fi

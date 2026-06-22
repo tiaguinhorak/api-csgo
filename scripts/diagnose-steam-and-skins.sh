@@ -18,7 +18,8 @@ if [[ -f "${REPO_ROOT}/.env" ]]; then
 fi
 
 SYNC_KEY="${CSGO_SKINS_SYNC_KEY:-}"
-API_URL="${CLUTCH_API_URL:-http://127.0.0.1:3000}"
+PORT="${PORT:-3000}"
+API_URL="${CLUTCH_API_URL:-http://127.0.0.1:${PORT}}"
 
 echo "=== Steam + Skins diagnose ==="
 echo ""

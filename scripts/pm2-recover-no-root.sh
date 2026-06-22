@@ -24,12 +24,17 @@ set_env_port() {
   else
     echo "PORT=${port}" >> .env
   fi
+  if grep -q '^CLUTCH_API_URL=' .env; then
+    sed -i "s/^CLUTCH_API_URL=.*/CLUTCH_API_URL=http://127.0.0.1:${port}/" .env
+  else
+    echo "CLUTCH_API_URL=http://127.0.0.1:${port}" >> .env
+  fi
 }
 
 echo "[no-root] Port 3000 is often held by another user's process on shared VPS."
 echo "[no-root] Finding a free port for api-csgo (3001-3099)..."
 
-FREE_PORT="$("${SCRIPTS_DIR}/find-free-api-port.sh" 3001 3099)"
+FREE_PORT="$(bash "${SCRIPTS_DIR}/find-free-api-port.sh" 3001 3099)"
 echo "[no-root] Using PORT=${FREE_PORT}"
 
 set_env_port "${FREE_PORT}"

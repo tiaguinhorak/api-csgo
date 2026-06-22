@@ -20,7 +20,8 @@ if [[ -f "${REPO_ROOT}/.env" ]]; then
   set +a
 fi
 
-API_URL="${CLUTCH_API_URL:-http://127.0.0.1:3000}"
+PORT="${PORT:-3000}"
+API_URL="${CLUTCH_API_URL:-http://127.0.0.1:${PORT}}"
 SYNC_KEY="${CSGO_SKINS_SYNC_KEY:-}"
 API_KEY="${API_KEY:-${CSGO_API_KEY:-}}"
 

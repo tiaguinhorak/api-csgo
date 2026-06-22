@@ -19,7 +19,8 @@ fi
 
 STEAM_ID="${1:-}"
 MODE="${2:-apply}"
-API_URL="${CLUTCH_API_URL:-http://127.0.0.1:3000}"
+PORT="${PORT:-3000}"
+API_URL="${CLUTCH_API_URL:-http://127.0.0.1:${PORT}}"
 SYNC_KEY="${CSGO_SKINS_SYNC_KEY:-}"
 DB_PATH="${WEAPONS_DB_PATH:-/home/csgo/server/csgo/addons/sourcemod/data/sqlite/sourcemod-local.sq3}"
 PREFIX="${WEAPONS_TABLE_PREFIX:-}"
@@ -56,8 +57,8 @@ if [[ -n "${SYNC_KEY}" ]]; then
     echo "OK: /health has glovesPlayerSync marker."
   else
     echo ""
-    echo "ERROR: API missing gloves sync (stale process on :3000?)."
-    echo "  Run: cd ~/api-csgo && ./scripts/pm2-recover.sh"
+    echo "ERROR: API missing gloves sync (stale process on :${PORT:-3000}?)."
+    echo "  Run: bash scripts/pm2-recover-no-root.sh"
     exit 1
   fi
 elif [[ -z "${HEALTH}" ]] || ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
