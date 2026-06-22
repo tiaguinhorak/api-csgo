@@ -589,7 +589,7 @@ int FindPlayerWeapon(int client, const char[] weaponKey) {
     }
 
     for (int i = 0; i < 64; i++) {
-        weapon = GetEntDataEnt(client, offset + (i * 4));
+        weapon = GetEntDataEnt2(client, offset + (i * 4));
         if (!IsPaintableWeaponEntity(weapon)) {
             continue;
         }
