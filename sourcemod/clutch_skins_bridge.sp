@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.0.3"
+#define PLUGIN_VERSION "1.0.4"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -62,29 +62,48 @@ public Action Command_ReloadSkins(int client, int args) {
     return Plugin_Handled;
 }
 
+void ResolveSkinsFilePath(const char[] configured, char[] path, int maxlen) {
+    char relative[PLATFORM_MAX_PATH];
+    strcopy(relative, sizeof(relative), configured);
+
+    if (StrContains(relative, "addons/sourcemod/", false) == 0) {
+        strcopy(relative, sizeof(relative), configured[17]);
+    }
+
+    if (relative[0] == '/') {
+        strcopy(path, maxlen, relative);
+        return;
+    }
+
+    if (StrContains(relative, "csgo/", false) == 0 || StrContains(relative, "csgo\\", false) == 0) {
+        BuildPath(Path_Game, path, maxlen, relative);
+        return;
+    }
+
+    BuildPath(Path_SM, path, maxlen, relative);
+}
+
 void LoadSkinsFile(bool announce) {
     g_cvSkinsFile.GetString(g_sSkinsFile, sizeof(g_sSkinsFile));
 
-    char relative[PLATFORM_MAX_PATH];
-    strcopy(relative, sizeof(relative), g_sSkinsFile);
-
-    // Legacy configs used addons/sourcemod/data/... which doubled Path_SM.
-    if (StrContains(relative, "addons/sourcemod/", false) == 0) {
-        strcopy(relative, sizeof(relative), g_sSkinsFile[17]);
-    }
-
     char path[PLATFORM_MAX_PATH];
-    if (relative[0] == '/') {
-        strcopy(path, sizeof(path), relative);
-    } else if (StrContains(relative, "csgo/", false) == 0 || StrContains(relative, "csgo\\", false) == 0) {
-        BuildPath(Path_Game, path, sizeof(path), relative);
-    } else {
-        BuildPath(Path_SM, path, sizeof(path), relative);
+    ResolveSkinsFilePath(g_sSkinsFile, path, sizeof(path));
+
+    if (!FileExists(path)) {
+        char fallback[PLATFORM_MAX_PATH];
+        BuildPath(Path_SM, fallback, sizeof(fallback), "data/clutch_skins.txt");
+        if (StrEqual(path, fallback, false) == false && FileExists(fallback)) {
+            strcopy(path, sizeof(path), fallback);
+        }
     }
 
     if (!FileExists(path)) {
         if (announce) {
-            LogMessage("[Clutch] Skins file missing: %s", path);
+            LogMessage(
+                "[Clutch] Skins file missing. Resolved: %s | configured: %s",
+                path,
+                g_sSkinsFile
+            );
         }
         return;
     }
