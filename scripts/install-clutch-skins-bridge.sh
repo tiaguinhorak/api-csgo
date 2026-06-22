@@ -4,9 +4,9 @@ set -euo pipefail
 # Instala e compila clutch_skins_bridge na VPS (rode como csgo na máquina do CS).
 #
 # Uso:
-#   cd ~/api-csgo/scripts
-#   chmod +x install-clutch-skins-bridge.sh
-#   ./install-clutch-skins-bridge.sh
+#   cd ~/api-csgo && git pull
+#   ./scripts/install-clutch-skins-bridge.sh
+#   (ou: bash scripts/install-clutch-skins-bridge.sh)
 
 CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
 SM="${CSGO_ROOT}/addons/sourcemod"
