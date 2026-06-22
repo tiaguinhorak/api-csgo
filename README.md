@@ -1,6 +1,6 @@
 # API CS:GO
 
-API REST para gerenciamento de servidores CS:GO, partidas competitivas com sistema de veto e skins. Desenvolvida para integrar com plataformas web (similar à Gamers Club).
+API REST para gerenciamento de servidores CS:GO, partidas competitivas com sistema de veto e skins. Desenvolvida para integrar com plataformas web competitivas.
 
 ## Stack
 
@@ -376,6 +376,8 @@ await fetch(`/api/matches/${match.id}/start`, {
 ---
 
 ## 5. Skins
+
+**Bridge site → servidor (loadout automático):** ver [SKINS-BRIDGE.md](./SKINS-BRIDGE.md).
 
 ### 5.1 Catálogo de skins
 
