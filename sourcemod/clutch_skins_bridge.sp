@@ -15,7 +15,7 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.3.4"
+#define PLUGIN_VERSION "3.3.5"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -1134,9 +1134,7 @@ void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
     SetEntPropEnt(client, Prop_Send, "m_hMyWearables", ent);
     SetEntProp(client, Prop_Send, "m_nBody", 1);
 
-    if (g_cvDebug.BoolValue) {
-        LogMessage("[Clutch] Applied gloves group %d paintkit %d for %N", group, paintkit, client);
-    }
+    LogMessage("[Clutch] Applied gloves group %d paintkit %d for %N", group, paintkit, client);
 }
 
 void ApplyGlovesFromDbRow(int client, DBResultSet results) {
@@ -1163,6 +1161,8 @@ void ApplyGlovesFromDbRow(int client, DBResultSet results) {
     ClutchGivePlayerGloves(client, group, paintkit, wear);
     if (group > 0 && paintkit > 0) {
         ScheduleGlovesReapply(client, group, paintkit, wear);
+    } else if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] DB gloves empty for %N (team %d)", client, team);
     }
 }
 

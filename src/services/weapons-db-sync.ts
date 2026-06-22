@@ -3,6 +3,7 @@ import {
   buildGlovesLoadoutSql,
   buildPlayerLoadoutSql,
   isMeleeWeaponId,
+  type GlovesLoadoutSqlResult,
   type SyncLoadoutOptions,
   type SyncWeaponPayload,
 } from './weapons-db-map';
@@ -157,6 +158,7 @@ export async function syncPlayerLoadoutToWeaponsDb(
   updated: boolean;
   columns: number;
   dbPath: string;
+  gloves: GlovesLoadoutSqlResult | null;
 }> {
   return enqueueWrite(async () => {
     const db = openWeaponsDatabase();
@@ -167,6 +169,7 @@ export async function syncPlayerLoadoutToWeaponsDb(
     const steamIds = collectSteamIdsToUpdate(db, steamId);
     let updated = false;
     let columnCount = 0;
+    let glovesResult: GlovesLoadoutSqlResult | null = null;
 
     await runWithRetryAsync(() => {
       ensureGlovesTable(db, tablePrefix);
@@ -191,11 +194,19 @@ export async function syncPlayerLoadoutToWeaponsDb(
             weapons,
             syncOptions.clearWeaponIds,
           );
+          glovesResult = glovesSql;
           db.exec(glovesSql.insertSql);
           if (glovesSql.updateSql) {
             db.exec(glovesSql.updateSql);
             updated = true;
             columnCount += glovesSql.updateSql.split(',').length;
+            console.log(
+              `[csgo-skins] gloves ${glovesSql.action} steam=${targetSteam} group=${glovesSql.group ?? 0} paint=${glovesSql.paintkit ?? 0} weapon=${glovesSql.weaponId ?? '-'}`,
+            );
+          } else if (glovesSql.action === "skipped") {
+            console.warn(
+              `[csgo-skins] gloves skipped steam=${targetSteam} weapon=${glovesSql.weaponId} paint=${glovesSql.paintkit}`,
+            );
           }
         }
       });
@@ -213,6 +224,7 @@ export async function syncPlayerLoadoutToWeaponsDb(
       updated,
       columns: columnCount,
       dbPath,
+      gloves: glovesResult,
     };
   });
 }

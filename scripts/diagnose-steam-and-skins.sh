@@ -64,6 +64,20 @@ if [[ -f "${DB_PATH}" ]]; then
       else
         echo "WARN no 'weapons' table — use !ws once in-game or check databases.cfg"
       fi
+      GLOVE_TABLE="${WEAPONS_TABLE_PREFIX:-}gloves"
+      GLOVE_TABLES="$(sqlite3 "${DB_PATH}" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%gloves%';" 2>/dev/null || true)"
+      echo ""
+      echo "Gloves table(s): ${GLOVE_TABLES:-none}"
+      if [[ -n "${GLOVE_TABLES}" ]]; then
+        echo "Rows with glove paintkit > 0:"
+        sqlite3 "${DB_PATH}" \
+          "SELECT steamid,t_group,t_glove,ct_group,ct_glove FROM ${GLOVE_TABLE} WHERE t_glove>0 OR ct_glove>0 LIMIT 10;" \
+          2>/dev/null || true
+        echo "All glove rows (limit 5):"
+        sqlite3 "${DB_PATH}" \
+          "SELECT steamid,t_group,t_glove,ct_group,ct_glove FROM ${GLOVE_TABLE} LIMIT 5;" \
+          2>/dev/null || true
+      fi
     fi
   else
     echo "WARN exists but not rw — fix:"

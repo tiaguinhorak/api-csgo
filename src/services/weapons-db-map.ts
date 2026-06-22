@@ -492,75 +492,65 @@ function glovesTableName(tablePrefix: string): string {
 
 
 
+export type GlovesLoadoutSqlResult = {
+  insertSql: string;
+  updateSql: string;
+  action: "none" | "clear" | "apply" | "skipped";
+  group?: number;
+  paintkit?: number;
+  weaponId?: string;
+};
+
 export function buildGlovesLoadoutSql(
-
   tablePrefix: string,
-
   steamId: string,
-
   weapons: SyncWeaponPayload[],
-
   clearWeaponIds?: string[],
-
-): { insertSql: string; updateSql: string } {
-
+): GlovesLoadoutSqlResult {
   const escapedSteam = steamId.replace(/'/g, "''");
-
   const table = glovesTableName(tablePrefix);
-
   const insertSql = `INSERT OR IGNORE INTO ${table} (steamid) VALUES ('${escapedSteam}')`;
 
-
-
   const shouldClear =
-
     (clearWeaponIds ?? []).some((id) => isGlovesWeaponId(id)) ||
-
     !weapons.some((w) => isGlovesWeaponId(w.weaponId) && w.paintkit > 0);
 
-
-
   if (shouldClear) {
-
     const updateSql = `UPDATE ${table} SET t_group=0, t_glove=0, t_float=0, ct_group=0, ct_glove=0, ct_float=0 WHERE steamid='${escapedSteam}'`;
-
-    return { insertSql, updateSql };
-
+    return { insertSql, updateSql, action: "clear" };
   }
-
-
 
   const equipped = weapons.find((w) => isGlovesWeaponId(w.weaponId) && w.paintkit > 0);
-
   if (!equipped) {
-
-    return { insertSql, updateSql: '' };
-
+    return { insertSql, updateSql: "", action: "none" };
   }
-
-
 
   const group = resolveGloveDefIndex(equipped.weaponId, equipped.defIndex);
-
   if (!group) {
     console.warn(
-      `[csgo-skins] glove defindex unresolved for weaponId=${equipped.weaponId} defIndex=${equipped.defIndex ?? 'n/a'} paintkit=${equipped.paintkit}`,
+      `[csgo-skins] glove defindex unresolved for weaponId=${equipped.weaponId} defIndex=${equipped.defIndex ?? "n/a"} paintkit=${equipped.paintkit}`,
     );
-    return { insertSql, updateSql: '' };
+    return {
+      insertSql,
+      updateSql: "",
+      action: "skipped",
+      weaponId: equipped.weaponId,
+      paintkit: equipped.paintkit,
+    };
   }
 
-
-
   const wear = (equipped.wear ?? WEAR_DEFAULT).toFixed(2);
-
   const paint = equipped.paintkit;
-
   const updateSql = `UPDATE ${table} SET t_group=${group}, t_glove=${paint}, t_float=${wear}, ct_group=${group}, ct_glove=${paint}, ct_float=${wear} WHERE steamid='${escapedSteam}'`;
 
-
-
-  return { insertSql, updateSql };
-
+  return {
+    insertSql,
+    updateSql,
+    action: "apply",
+    group,
+    paintkit: paint,
+    weaponId: equipped.weaponId,
+  };
 }
 
 

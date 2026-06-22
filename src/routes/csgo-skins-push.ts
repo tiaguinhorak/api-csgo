@@ -72,6 +72,7 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       weapons: body.weapons.length,
       columns: result.columns,
       updated: result.updated,
+      gloves: result.gloves,
       rconReload,
     });
   } catch (err: unknown) {

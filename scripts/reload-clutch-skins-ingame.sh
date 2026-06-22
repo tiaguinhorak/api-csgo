@@ -37,6 +37,6 @@ send_cmd "sm_reloadclutchskins"
 send_cmd "sm_clutch_applyskins"
 
 echo ""
-echo "Done. Expect z_clutch_skins_bridge Version: 3.3.4"
+echo "Done. Expect z_clutch_skins_bridge Version: 3.3.5"
 echo "If weapons reload failed, change map (sm_map de_dust2) then re-run this script."
 echo "Respawn in-game after apply. New errors after reload: tail addons/sourcemod/logs/errors_*.log"
