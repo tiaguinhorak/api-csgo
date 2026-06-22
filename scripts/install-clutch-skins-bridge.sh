@@ -134,13 +134,20 @@ else
   echo "  \"FollowCSGOServerGuidelines\" \"no\""
 fi
 
+WEAPONS_SP="${SM}/scripting/weapons.sp"
+if [[ -f "${WEAPONS_SP}" ]]; then
+  echo ""
+  echo "Patching weapons.smx (Weapons_ReloadClientData native)..."
+  CSGO_ROOT="${CSGO_ROOT}" bash "${REPO_ROOT}/scripts/patch-weapons-reload-native.sh" || {
+    echo "WARNING: patch-weapons-reload-native.sh failed — colors may not sync until you run it manually." >&2
+  }
+else
+  echo "NOTE: ${WEAPONS_SP} not found — skip weapons native patch (knife colors may not update from site DB)."
+fi
+
 echo ""
 echo "OK — ${PLUGIN_SMX} installed (loads after weapons.smx)."
 echo "Expected plugin version: $(grep -E '#define PLUGIN_VERSION' "${SP_SRC}" | sed 's/.*"\(.*\)".*/\1/')"
-echo ""
-echo "For paint/colors from the site (not just knife model), also run:"
-echo "  bash ${REPO_ROOT}/scripts/patch-weapons-reload-native.sh"
-echo "  (adds Weapons_ReloadClientData to weapons.smx — one-time on VPS)"
 echo ""
 echo "Installed to: ${SM}/plugins/${PLUGIN_SMX}"
 ls -la "${SM}/plugins/${PLUGIN_SMX}"

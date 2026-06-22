@@ -60,7 +60,15 @@ fi
 
 echo "Compiling weapons.smx..."
 cd "${SCRIPTING}"
-"${SPCOMP}" weapons.sp -o"${SM}/plugins/weapons.smx"
+if ! "${SPCOMP}" weapons.sp -o"${SM}/plugins/weapons.smx"; then
+  echo "weapons.smx compile failed — fix errors above" >&2
+  exit 1
+fi
+
+if ! grep -q 'Weapons_ReloadClientData' "${WEAPONS_SP}"; then
+  echo "ERROR: patch did not apply to weapons.sp" >&2
+  exit 1
+fi
 
 echo "Done. weapons.smx updated with Weapons_ReloadClientData native."
-echo "Restart map or: sm plugins reload weapons"
+echo "Restart map or in screen: sm plugins reload weapons"

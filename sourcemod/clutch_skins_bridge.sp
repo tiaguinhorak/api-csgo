@@ -12,9 +12,10 @@
 
 #if defined _weapons_included_
     bool g_bWeaponsReloadNative = false;
+    bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.3.0"
+#define PLUGIN_VERSION "3.3.1"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -143,7 +144,7 @@ public void OnPluginStart() {
 public void OnLibraryAdded(const char[] name) {
 #if defined _weapons_included_
     if (StrEqual(name, "weapons")) {
-        g_bWeaponsReloadNative = true;
+        RefreshWeaponsReloadNativeFlag();
     }
 #endif
 }
@@ -178,9 +179,7 @@ public void OnAllPluginsLoaded() {
         LogMessage("[Clutch] weapons.smx not loaded — knife models need kgns Weapons & Knives + PTaH");
     }
 #if defined _weapons_included_
-    if (LibraryExists("weapons")) {
-        g_bWeaponsReloadNative = true;
-    }
+    RefreshWeaponsReloadNativeFlag();
 #endif
 }
 
@@ -793,6 +792,18 @@ void ClutchNetworkUpdate(int entity) {
 }
 
 #if defined _weapons_included_
+void RefreshWeaponsReloadNativeFlag() {
+    g_bWeaponsReloadNative = LibraryExists("weapons")
+        && GetFeatureStatus(FeatureType_Native, "Weapons_ReloadClientData") == FeatureStatus_Available;
+
+    if (LibraryExists("weapons") && !g_bWeaponsReloadNative && !g_bLoggedMissingReloadNative) {
+        g_bLoggedMissingReloadNative = true;
+        LogMessage(
+            "[Clutch] weapons.smx has no Weapons_ReloadClientData native — paint may stay stale. Run: bash scripts/patch-weapons-reload-native.sh"
+        );
+    }
+}
+
 void TryReloadWeaponsPluginData(int client) {
     if (!LibraryExists("weapons") || !g_bWeaponsReloadNative) {
         return;

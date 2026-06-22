@@ -36,9 +36,22 @@ else
   echo "MISSING ${CORE}"
 fi
 
+WEAPONS_SP="${SM}/scripting/weapons.sp"
+NATIVES_SP="${SM}/scripting/weapons/natives.sp"
+if [[ -f "${WEAPONS_SP}" ]]; then
+  if grep -q 'Weapons_ReloadClientData' "${WEAPONS_SP}" && grep -q 'Weapons_ReloadClientData_Native' "${NATIVES_SP}" 2>/dev/null; then
+    echo "OK  weapons native patch present in source"
+  else
+    echo "MISSING Weapons_ReloadClientData in weapons source — run:"
+    echo "  CSGO_ROOT=${CSGO_ROOT} bash scripts/patch-weapons-reload-native.sh"
+  fi
+else
+  echo "WARN weapons.sp not found — cannot verify native patch"
+fi
+
 echo ""
 echo "Recent SM errors (clutch / clutch_skins):"
-grep -i clutch "${SM}/logs/errors_"*.log 2>/dev/null | tail -10 || echo "  (none or no log yet)"
+grep -iE 'clutch|Weapons_ReloadClientData|Native is not bound' "${SM}/logs/errors_"*.log 2>/dev/null | tail -10 || echo "  (none or no log yet)"
 
 echo ""
 echo "=== Reload (SSH) ==="
