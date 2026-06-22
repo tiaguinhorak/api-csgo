@@ -45,4 +45,8 @@ mv -f "${TMP}" "${OUT}"
 chmod 644 "${OUT}" 2>/dev/null || true
 
 echo "Synced $(wc -c < "${OUT}") bytes to ${OUT}"
-echo "Run in server console: sm_reloadclutchskins"
+
+if [[ "${CLUTCH_AUTO_RELOAD:-0}" == "1" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  "${SCRIPT_DIR}/reload-clutch-skins-ingame.sh" || true
+fi

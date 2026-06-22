@@ -5,6 +5,7 @@ import { config } from './config';
 import matchesRouter from './routes/matches';
 import serversRouter from './routes/servers';
 import skinsRouter from './routes/skins';
+import csgoSkinsPushRouter from './routes/csgo-skins-push';
 import { skinManager } from './services/skin-manager';
 
 const app = express();
@@ -22,6 +23,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/matches', matchesRouter);
 app.use('/api/servers', serversRouter);
 app.use('/api/skins', skinsRouter);
+app.use('/api/csgo/skins', csgoSkinsPushRouter);
 
 skinManager.initializeDefaultSkins();
 
