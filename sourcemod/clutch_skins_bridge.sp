@@ -12,6 +12,7 @@
 #define PLUGIN_VERSION "3.2.0"
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
+#define CLUTCH_KNIFE_CLASS_LEN 64
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -34,7 +35,7 @@ int g_CachedTrak[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 int g_CachedTrakCount[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 char g_CachedTag[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][64];
 int g_iAppliedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
-char g_CachedKnifeClass[MAXPLAYERS + 1][64];
+char g_CachedKnifeClass[MAXPLAYERS + 1][CLUTCH_KNIFE_CLASS_LEN];
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -1036,7 +1037,7 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
         return;
     }
 
-    strcopy(g_CachedKnifeClass[client], knifeClass, sizeof(g_CachedKnifeClass[]));
+    strcopy(g_CachedKnifeClass[client], sizeof(g_CachedKnifeClass[]), knifeClass);
 
     for (int k = 0; k < CLUTCH_WEAPON_SLOTS; k++) {
         if (StrEqual(g_ClutchWeaponKeys[k], knifeClass, false)) {
