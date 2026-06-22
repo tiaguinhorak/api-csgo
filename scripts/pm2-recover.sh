@@ -16,8 +16,8 @@ if ! bash scripts/kill-stale-api-csgo.sh; then
   stale_rc=$?
   if [[ "${stale_rc}" -eq 2 ]]; then
     echo "[pm2-recover] Port ${API_PORT} held by another user — cannot recover as csgo." >&2
-    echo "Run: sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh" >&2
-    echo "Then: bash scripts/pm2-recover.sh" >&2
+    echo "Run: bash ${REPO_ROOT}/scripts/pm2-recover-no-root.sh" >&2
+    echo "Or (needs root): sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh" >&2
     exit 2
   fi
 fi
@@ -50,7 +50,8 @@ if ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
   else
   stale_rc=$?
   if [[ "${stale_rc}" -eq 2 ]]; then
-    echo "[pm2-recover] Run: sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh" >&2
+    echo "[pm2-recover] Run: bash ${REPO_ROOT}/scripts/pm2-recover-no-root.sh" >&2
+    echo "Or (needs root): sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh" >&2
     exit 2
   fi
   fi

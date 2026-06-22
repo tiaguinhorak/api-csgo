@@ -58,8 +58,11 @@ fi
 echo ""
 
 if ss -tln 2>/dev/null | grep -q ":${PORT} "; then
-  echo "--- Suggested fix ---"
-  echo "  1) sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh"
-  echo "  2) cd ~/api-csgo && bash scripts/pm2-recover.sh"
-  echo "  3) curl -s http://127.0.0.1:${PORT}/health  # expect glovesPlayerSync:true"
+  echo "--- Suggested fix (no root) ---"
+  echo "  cd ~/api-csgo && bash scripts/pm2-recover-no-root.sh"
+  echo "  Then update site CSGO_API_URL to http://<vps-ip>:<new-port>"
+  echo ""
+  echo "--- Suggested fix (with root) ---"
+  echo "  sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh"
+  echo "  cd ~/api-csgo && bash scripts/pm2-recover.sh"
 fi

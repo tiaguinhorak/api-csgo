@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "pm2:start": "npm run build && pm2 start ecosystem.config.js --update-env",
     "pm2:recover": "bash scripts/pm2-recover.sh",
+    "pm2:recover:no-root": "bash scripts/pm2-recover-no-root.sh",
     "pm2:diagnose": "bash scripts/diagnose-port-3000.sh",
     "pm2:restart": "bash scripts/pm2-ensure-api-csgo.sh",
     "pm2:stop": "pm2 stop api-csgo",
