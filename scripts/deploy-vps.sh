@@ -69,10 +69,22 @@ echo ""
 echo ">>> npm run build"
 npm run build
 
+if ! grep -q 'gloves: result.gloves' dist/routes/csgo-skins-push.js; then
+  echo "ERROR: dist build missing gloves sync — check git pull / build errors" >&2
+  exit 1
+fi
+
 if command -v pm2 >/dev/null 2>&1; then
   echo ""
-  echo ">>> pm2 restart api-csgo"
-  pm2 restart api-csgo --update-env 2>/dev/null || pm2 restart all --update-env 2>/dev/null || true
+  echo ">>> pm2 (api-csgo)"
+  if pm2 describe api-csgo >/dev/null 2>&1; then
+    pm2 restart api-csgo --update-env
+  else
+    echo "api-csgo not registered in pm2 — starting ecosystem.config.js"
+    pm2 start ecosystem.config.js --update-env
+  fi
+  sleep 3
+  pm2 status api-csgo 2>/dev/null || pm2 list
 else
   echo "WARN: pm2 not found — restart api-csgo manually"
 fi
@@ -82,6 +94,20 @@ if [[ -f "${REPO_ROOT}/.env" ]]; then
   # shellcheck disable=SC1091
   source "${REPO_ROOT}/.env"
   set +a
+fi
+
+echo ""
+echo ">>> verify live API matches dist"
+if ! "${REPO_ROOT}/scripts/verify-api-running-build.sh"; then
+  if command -v pm2 >/dev/null 2>&1; then
+    echo ""
+    echo ">>> stale process detected — running pm2-recover.sh"
+    "${REPO_ROOT}/scripts/pm2-recover.sh"
+    sleep 2
+    "${REPO_ROOT}/scripts/verify-api-running-build.sh"
+  else
+    exit 1
+  fi
 fi
 
 if [[ -z "${CSGO_SKINS_SYNC_KEY:-}" && -z "${API_KEY:-}" ]]; then
@@ -99,6 +125,14 @@ echo ""
 echo "=== Health check ==="
 sleep 1
 curl -sf "http://127.0.0.1:${PORT:-3000}/health" && echo "" || echo "WARN: api-csgo not responding on :${PORT:-3000}"
+
+echo ""
+echo "=== Gloves sync test (optional) ==="
+if [[ -n "${CSGO_SKINS_SYNC_KEY:-}" ]]; then
+  "${REPO_ROOT}/scripts/test-gloves-sync.sh" "STEAM_1:0:203852188" || true
+else
+  echo "Skip (no CSGO_SKINS_SYNC_KEY)"
+fi
 
 if [[ "${SKIP_INGAME}" -eq 0 ]]; then
   echo ""

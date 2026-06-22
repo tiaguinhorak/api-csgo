@@ -28,7 +28,12 @@ app.use(express.json({ limit: '64kb' }));
 
 // Health check (no auth — bind to private network in production)
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    /** Present when player-sync writes the gloves SQLite table (commit a77152a+). */
+    glovesPlayerSync: true,
+  });
 });
 
 app.use(requireApiAuth);
