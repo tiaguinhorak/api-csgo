@@ -55,6 +55,12 @@ if [[ -f "${DB_PATH}" ]]; then
         sqlite3 "${DB_PATH}" \
           "SELECT steamid, knife, knife_butterfly, bayonet FROM weapons WHERE knife_butterfly > 0 OR bayonet > 0 LIMIT 5;" \
           2>/dev/null || true
+        DUPES="$(sqlite3 "${DB_PATH}" \
+          "SELECT REPLACE(steamid,'STEAM_0:','STEAM_X:') FROM weapons GROUP BY REPLACE(steamid,'STEAM_0:','STEAM_X:'), REPLACE(steamid,'STEAM_1:','STEAM_X:') HAVING COUNT(*) > 1;" \
+          2>/dev/null || true)"
+        if [[ -n "${DUPES}" ]]; then
+          echo "WARN duplicate STEAM_0/STEAM_1 rows — equip on site again after api-csgo update (syncs both)"
+        fi
       else
         echo "WARN no 'weapons' table — use !ws once in-game or check databases.cfg"
       fi

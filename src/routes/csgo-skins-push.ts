@@ -89,6 +89,7 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       ok: true,
       mode: 'db',
       steamId: result.steamId,
+      steamIds: result.steamIds,
       weapons: body.weapons.length,
       columns: result.columns,
       updated: result.updated,

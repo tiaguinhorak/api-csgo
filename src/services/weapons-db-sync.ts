@@ -89,19 +89,30 @@ async function runWithRetryAsync<T>(fn: () => T): Promise<T> {
   throw new Error('SQLite retry exhausted');
 }
 
-function findExistingSteamRow(db: Database.Database, steamId: string): string | null {
+function steamIdVariants(steamId: string): string[] {
+  const trimmed = steamId.trim();
+  const alt = alternateSteam2(trimmed);
+  const variants = alt ? [trimmed, alt] : [trimmed];
+  return [...new Set(variants)];
+}
+
+function findExactSteamRow(db: Database.Database, steamId: string): string | null {
   const table = getTableName();
-  const candidates = [steamId.trim()];
-  const alt = alternateSteam2(steamId);
-  if (alt) candidates.push(alt);
+  const row = db
+    .prepare(`SELECT steamid FROM ${table} WHERE steamid = ? LIMIT 1`)
+    .get(steamId.trim()) as { steamid?: string } | undefined;
+  return row?.steamid ?? null;
+}
 
-  const stmt = db.prepare(`SELECT steamid FROM ${table} WHERE steamid = ? LIMIT 1`);
-
-  for (const id of candidates) {
-    const row = stmt.get(id) as { steamid?: string } | undefined;
-    if (row?.steamid) return row.steamid;
+/** Both STEAM_0 and STEAM_1 rows must stay in sync — kgns and SourceMod use either format. */
+function collectSteamIdsToUpdate(db: Database.Database, steamId: string): string[] {
+  const ids = new Set<string>();
+  for (const variant of steamIdVariants(steamId)) {
+    ids.add(variant);
+    const existing = findExactSteamRow(db, variant);
+    if (existing) ids.add(existing);
   }
-  return null;
+  return [...ids];
 }
 
 function normalizeSyncOptions(
@@ -124,39 +135,52 @@ export async function syncPlayerLoadoutToWeaponsDb(
   steamId: string,
   weapons: SyncWeaponPayload[],
   options?: SyncLoadoutOptions,
-): Promise<{ steamId: string; updated: boolean; columns: number; dbPath: string }> {
+): Promise<{
+  steamId: string;
+  steamIds: string[];
+  updated: boolean;
+  columns: number;
+  dbPath: string;
+}> {
   return enqueueWrite(async () => {
     const db = openWeaponsDatabase();
     const dbPath = resolvedDbPath ?? resolveWeaponsDbPath();
     const tablePrefix = process.env.WEAPONS_TABLE_PREFIX?.trim() || '';
     const syncOptions = normalizeSyncOptions(weapons, options);
 
-    const existing = findExistingSteamRow(db, steamId);
-    const targetSteam = existing ?? steamId.trim();
-
-    const { insertSql, updateSql } = buildPlayerLoadoutSql(
-      tablePrefix,
-      targetSteam,
-      weapons,
-      syncOptions,
-    );
-
-    const columnCount = updateSql ? updateSql.split(',').length : 0;
+    const steamIds = collectSteamIdsToUpdate(db, steamId);
+    let updated = false;
+    let columnCount = 0;
 
     await runWithRetryAsync(() => {
       const tx = db.transaction(() => {
-        db.exec(insertSql);
-        if (updateSql) {
-          db.exec(updateSql);
+        for (const targetSteam of steamIds) {
+          const { insertSql, updateSql } = buildPlayerLoadoutSql(
+            tablePrefix,
+            targetSteam,
+            weapons,
+            syncOptions,
+          );
+          db.exec(insertSql);
+          if (updateSql) {
+            db.exec(updateSql);
+            updated = true;
+            columnCount = updateSql.split(',').length;
+          }
         }
       });
       tx();
       return undefined;
     });
 
+    if (steamIds.length > 1) {
+      console.log(`[csgo-skins] synced loadout to ${steamIds.join(', ')}`);
+    }
+
     return {
-      steamId: targetSteam,
-      updated: Boolean(updateSql),
+      steamId: steamIds[0],
+      steamIds,
+      updated,
       columns: columnCount,
       dbPath,
     };
