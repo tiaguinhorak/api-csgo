@@ -5,15 +5,18 @@ cd "$(dirname "$0")/.."
 
 API_PORT="${PORT:-3000}"
 
-echo "[pm2-recover] Stopping PM2 app api-csgo..."
+echo "[pm2-recover] Stopping PM2 daemon and all apps..."
 pm2 delete api-csgo 2>/dev/null || true
+pm2 kill 2>/dev/null || true
+sleep 2
+
+echo "[pm2-recover] Killing stray node / api-csgo processes..."
+pkill -9 -f "api-csgo/dist/index.js" 2>/dev/null || true
+pkill -9 -f "node.*dist/index.js" 2>/dev/null || true
 sleep 1
 
 echo "[pm2-recover] Freeing port ${API_PORT}..."
-for attempt in 1 2 3 4 5; do
-  pkill -9 -f "api-csgo/dist/index.js" 2>/dev/null || true
-  pkill -9 -f "node.*dist/index.js" 2>/dev/null || true
-
+for attempt in 1 2 3 4 5 6; do
   if command -v fuser >/dev/null 2>&1; then
     fuser -k "${API_PORT}/tcp" 2>/dev/null || true
   fi
@@ -21,35 +24,44 @@ for attempt in 1 2 3 4 5; do
   if command -v lsof >/dev/null 2>&1; then
     PIDS=$(lsof -ti :"${API_PORT}" 2>/dev/null || true)
     if [ -n "${PIDS}" ]; then
-      echo "[pm2-recover] attempt ${attempt}: killing PIDs on :${API_PORT}: ${PIDS}"
+      echo "[pm2-recover] attempt ${attempt}: kill PIDs ${PIDS}"
       kill -9 ${PIDS} 2>/dev/null || true
     fi
   fi
 
-  sleep 1
+  sleep 2
 
-  if ! lsof -ti :"${API_PORT}" >/dev/null 2>&1; then
+  if command -v ss >/dev/null 2>&1; then
+    if ! ss -tln | grep -q ":${API_PORT} "; then
+      break
+    fi
+  elif ! lsof -ti :"${API_PORT}" >/dev/null 2>&1; then
     break
   fi
 done
 
-if command -v lsof >/dev/null 2>&1 && lsof -ti :"${API_PORT}" >/dev/null 2>&1; then
+if command -v ss >/dev/null 2>&1 && ss -tln | grep -q ":${API_PORT} "; then
   echo "[pm2-recover] ERROR: port ${API_PORT} still in use:" >&2
-  lsof -i :"${API_PORT}" >&2 || true
+  ss -tlnp | grep ":${API_PORT}" >&2 || true
+  echo "Run: bash scripts/diagnose-port-3000.sh" >&2
   exit 1
 fi
 
 npm run build
 
+echo "[pm2-recover] Starting api-csgo..."
 pm2 start ecosystem.config.js --update-env
-sleep 2
+sleep 5
 
 if ! curl -sf "http://127.0.0.1:${API_PORT}/health" >/dev/null; then
-  echo "[pm2-recover] WARNING: health check failed — check pm2 logs api-csgo" >&2
-  pm2 logs api-csgo --lines 15 --nostream 2>/dev/null || true
+  echo "[pm2-recover] health check failed:" >&2
+  pm2 logs api-csgo --lines 20 --nostream 2>/dev/null || true
   exit 1
 fi
 
 pm2 save
-echo "[pm2-recover] OK — api-csgo online on :${API_PORT}"
+
+echo "[pm2-recover] OK"
 pm2 status
+curl -s "http://127.0.0.1:${API_PORT}/health"
+echo ""
