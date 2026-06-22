@@ -52,6 +52,27 @@ if [[ ! -f "${DATA_FILE}" ]]; then
   echo "Warning: ${DATA_FILE} missing — upload via WinSCP or run sync-clutch-skins.sh"
 fi
 
+CORE_CFG="${SM}/configs/core.cfg"
+if [[ -f "${CORE_CFG}" ]]; then
+  if grep -q 'FollowCSGOServerGuidelines' "${CORE_CFG}"; then
+    if grep -q '"FollowCSGOServerGuidelines"[[:space:]]*"no"' "${CORE_CFG}"; then
+      echo "core.cfg OK (FollowCSGOServerGuidelines = no)"
+    else
+      echo "WARNING: ${CORE_CFG} has FollowCSGOServerGuidelines but not \"no\"."
+      echo "  Edit it to: \"FollowCSGOServerGuidelines\" \"no\""
+      echo "  Then restart srcds completely."
+    fi
+  else
+    echo "Adding FollowCSGOServerGuidelines to ${CORE_CFG} ..."
+    printf '\n"FollowCSGOServerGuidelines" "no"\n' >> "${CORE_CFG}"
+    echo "  Added — restart srcds completely for skins to apply."
+  fi
+else
+  echo "WARNING: ${CORE_CFG} not found."
+  echo "  Create it or install SourceMod configs, then set:"
+  echo "  \"FollowCSGOServerGuidelines\" \"no\""
+fi
+
 echo ""
 echo "OK — clutch_skins_bridge.smx installed."
 echo ""
@@ -64,6 +85,4 @@ echo "  sm_reloadclutchskins"
 echo ""
 echo "Ou aguarde ~30s (clutch_skins_refresh) e respawn."
 echo ""
-echo "Se skins não aparecem, confira core.cfg:"
-echo "  \"FollowCSGOServerGuidelines\" \"no\""
-echo "  (restart completo do srcds após mudar)"
+echo "core.cfg path: ${CORE_CFG}"
