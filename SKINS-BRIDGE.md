@@ -1,18 +1,20 @@
 # Skins Bridge — Site ↔ Servidor CS:GO
 
-Fluxo completo: o jogador **equipa** uma skin no inventário do site → Postgres (`CsgoPlayerSkin`) → export KeyValues → arquivo na VPS → plugin SourceMod aplica no spawn.
+Fluxo (v3 — **sem arquivo**): o jogador equipa no site → Postgres → **API JSON** → SQLite do `!ws` (kgns weapons) → plugin lê o DB no spawn.
 
 ```
-Site (equip) → CsgoPlayerSkin (equipped)
+Site (equip/unequip) → POST /api/csgo/skins/player-sync (api-csgo na VPS)
      ↓
-GET /api/csgo/skins/export  (sync key)
+local.sq3 (weapons table, mesmo DB do !ws)
      ↓
-clutch_skins.txt  (cron ~30s na VPS)
+RCON sm_clutch_applyskins
      ↓
-clutch_skins_bridge.smx  (PTaH no spawn)
+z_clutch_skins_bridge.smx v3 (lê DB no spawn)
 ```
 
-O menu `!ws` / `!knife` (Weapons plugin) continua disponível como override manual até o próximo spawn/reload.
+O menu `!ws` / `!knife` continua disponível como override manual até o próximo spawn/reload.
+
+**Legado:** `POST /api/csgo/skins/push` e `clutch_skins.txt` ainda existem mas não são usados pelo site.
 
 ---
 
@@ -21,10 +23,22 @@ O menu `!ws` / `!knife` (Weapons plugin) continua disponível como override manu
 ### Site (`site/.env`)
 
 ```env
+CSGO_API_URL=http://188.220.168.233:3000
 CSGO_SKINS_SYNC_KEY=uma-chave-longa-aleatoria-compartilhada-com-a-vps
 ```
 
-### VPS (cron / script — **produção**, site no ar)
+### api-csgo na VPS (`api-csgo/.env`)
+
+```env
+CSGO_SKINS_SYNC_KEY=mesma-chave-do-site
+WEAPONS_DB_PATH=/home/csgo/server/csgo/addons/sourcemod/data/sqlite/local.sq3
+WEAPONS_TABLE_PREFIX=
+CSGO_SERVER_HOST=127.0.0.1
+CSGO_RCON_PORT=27015
+CSGO_RCON_PASSWORD=...
+```
+
+### VPS (cron — **opcional / legado**)
 
 ```env
 CLUTCH_SITE_URL=https://clutchclube.com
@@ -33,20 +47,47 @@ CSGO_SKINS_SYNC_KEY=mesma-chave-do-site
 
 ### Desenvolvimento (site local, CS na VPS)
 
-O script na VPS **não** alcança `localhost` do seu PC. Rode o sync **no seu computador** e envie o arquivo via SCP:
-
-| Variável | Exemplo dev |
-|----------|-------------|
-| `CLUTCH_SITE_URL` | `http://127.0.0.1:3000` |
-| `CSGO_SKINS_SYNC_KEY` | igual `site/.env` |
-| `CLUTCH_SSH_TARGET` | `csgo@188.220.168.233` |
-| `CLUTCH_SSH_REMOTE` | `/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt` |
-
-Scripts: `scripts/sync-clutch-skins-dev.sh` (Git Bash) ou `scripts/sync-clutch-skins-dev.ps1` (PowerShell).
+Não precisa SCP de `clutch_skins.txt`. O site local faz POST em `CSGO_API_URL` após equip.
 
 ---
 
-## 2. API de export (site)
+## 2. API player-sync (api-csgo)
+
+| Endpoint | Auth | Body |
+|----------|------|------|
+| `POST /api/csgo/skins/player-sync` | `x-skins-sync-key` | JSON `{ steamId, weapons[] }` |
+
+Exemplo:
+
+```json
+{
+  "steamId": "STEAM_1:0:203852188",
+  "weapons": [
+    {
+      "weaponId": "weapon_ak47",
+      "paintkit": 1207,
+      "wear": 0.15,
+      "seed": 0,
+      "stattrak": false
+    }
+  ]
+}
+```
+
+Resposta: `{ ok, mode: "db", steamId, weapons, updated, rconReload }`
+
+Teste:
+
+```bash
+curl -X POST "http://127.0.0.1:3000/api/csgo/skins/player-sync" \
+  -H "x-skins-sync-key: $CSGO_SKINS_SYNC_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"steamId":"STEAM_1:0:12345","weapons":[{"weaponId":"weapon_ak47","paintkit":1207,"wear":0.15,"seed":0}]}'
+```
+
+---
+
+## 2b. API de export (site — legado / debug)
 
 | Endpoint | Auth | Resposta |
 |----------|------|----------|

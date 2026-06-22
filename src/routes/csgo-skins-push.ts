@@ -2,7 +2,9 @@ import { Router, Request, Response } from 'express';
 import express from 'express';
 import fs from 'fs/promises';
 import path from 'path';
-import { rconService } from '../services/rcon';
+import { reloadClutchSkinsInGame } from '../services/clutch-rcon';
+import type { SyncWeaponPayload } from '../services/weapons-db-map';
+import { syncPlayerLoadoutToWeaponsDb } from '../services/weapons-db-sync';
 
 const router = Router();
 
@@ -19,6 +21,47 @@ function isAuthorized(req: Request): boolean {
   return provided === expected;
 }
 
+type PlayerSyncBody = {
+  steamId: string;
+  weapons: SyncWeaponPayload[];
+  clearKnifeSlot?: boolean;
+  clearWeaponIds?: string[];
+};
+
+router.post('/player-sync', async (req: Request, res: Response) => {
+  if (!isAuthorized(req)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const body = req.body as PlayerSyncBody;
+  if (!body?.steamId || !Array.isArray(body.weapons)) {
+    return res.status(400).json({ error: 'Expected { steamId, weapons[] }' });
+  }
+
+  try {
+    const result = await syncPlayerLoadoutToWeaponsDb(body.steamId, body.weapons, {
+      clearKnifeSlot: body.clearKnifeSlot,
+      clearWeaponIds: body.clearWeaponIds,
+    });
+    const rconReload = await reloadClutchSkinsInGame();
+
+    return res.json({
+      ok: true,
+      mode: 'db',
+      steamId: result.steamId,
+      weapons: body.weapons.length,
+      columns: result.columns,
+      updated: result.updated,
+      rconReload,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'sync failed';
+    console.error('[csgo-skins player-sync]', message);
+    return res.status(500).json({ error: message });
+  }
+});
+
+/** Legacy: full KeyValues file export (deprecated — use POST /player-sync). */
 router.post(
   '/push',
   express.text({ type: ['text/*', 'application/octet-stream'], limit: '2mb' }),
@@ -42,33 +85,20 @@ router.post(
       await fs.writeFile(tmp, body, 'utf8');
       await fs.rename(tmp, outPath);
 
-      const host = process.env.CSGO_SERVER_HOST?.trim() || '127.0.0.1';
-      const rconPort = parseInt(
-        process.env.CSGO_RCON_PORT || process.env.CSGO_SERVER_PORT || '27015',
-        10,
-      );
-      const rconPassword = process.env.CSGO_RCON_PASSWORD?.trim() || '';
-
-      let rconOk = false;
-      if (rconPassword && Number.isFinite(rconPort)) {
-        try {
-          await rconService.sendCommand(host, rconPort, rconPassword, 'sm_reloadclutchskins');
-          await rconService.sendCommand(host, rconPort, rconPassword, 'sm_clutch_applyskins');
-          rconOk = true;
-        } catch (rconErr: any) {
-          console.warn('[csgo-skins-push] RCON reload failed:', rconErr?.message ?? rconErr);
-        }
-      }
+      const rconReload = await reloadClutchSkinsInGame();
 
       return res.json({
         ok: true,
+        mode: 'file',
+        deprecated: true,
         bytes: Buffer.byteLength(body, 'utf8'),
         path: outPath,
-        rconReload: rconOk,
+        rconReload,
       });
-    } catch (err: any) {
-      console.error('[csgo-skins-push] write failed:', err);
-      return res.status(500).json({ error: err?.message ?? 'Write failed' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Write failed';
+      console.error('[csgo-skins-push] write failed:', message);
+      return res.status(500).json({ error: message });
     }
   },
 );

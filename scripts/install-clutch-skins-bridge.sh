@@ -80,8 +80,8 @@ if [[ -f "${CFG_DEPLOY}" ]]; then
 fi
 
 DATA_FILE="${SM}/data/clutch_skins.txt"
-if [[ ! -f "${DATA_FILE}" ]]; then
-  echo "Warning: ${DATA_FILE} missing — upload via WinSCP or run sync-clutch-skins.sh"
+if [[ -f "${DATA_FILE}" ]]; then
+  echo "Note: clutch_skins.txt exists but v3 plugin ignores it (uses weapons DB only)."
 fi
 
 CORE_CFG="${SM}/configs/core.cfg"
@@ -107,14 +107,15 @@ fi
 
 echo ""
 echo "OK — ${PLUGIN_SMX} installed (loads after weapons.smx)."
+echo "Expected plugin version: $(grep -E '#define PLUGIN_VERSION' "${SP_SRC}" | sed 's/.*"\(.*\)".*/\1/')"
 echo ""
-echo "Recarregar no CS sem colar logs no console:"
+echo "Full deploy (api + plugin): ./scripts/deploy-skins-v3.sh"
+echo "Recarregar no CS:"
 echo "  ./scripts/reload-clutch-skins-ingame.sh"
 echo ""
-echo "Ou manualmente (UM comando por linha, dentro de screen -r):"
+echo "Ou manualmente (dentro de screen -r):"
 echo "  sm plugins reload z_clutch_skins_bridge"
 echo "  sm plugins info z_clutch_skins_bridge"
-echo "  clutch_skins_file \"${REMOTE_PATH:-/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt}\""
 echo "  clutch_skins_debug 1"
 echo "  sm_reloadclutchskins"
 echo "  sm_clutch_applyskins"

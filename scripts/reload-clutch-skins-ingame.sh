@@ -1,24 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Envia comandos ao console do srcds via screen (evita colar logs no CS por engano).
+# Recarrega plugin v3 (DB-only) no srcds via screen.
 #
 # Uso na VPS:
 #   ./scripts/reload-clutch-skins-ingame.sh
-#
-# Env:
-#   CLUTCH_CS_SCREEN — default csgo-clutch-#1
 
 SCREEN_NAME="${CLUTCH_CS_SCREEN:-csgo-clutch-#1}"
-SKINS_PATH="${CLUTCH_SKINS_OUT:-/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt}"
 
-# screen -ls shows e.g. "153240.csgo-clutch-#1" — match suffix, not exact session name.
 if ! screen -ls | grep -qF ".${SCREEN_NAME}"; then
   echo "Screen session matching '*${SCREEN_NAME}' not found. List: screen -ls" >&2
   exit 1
 fi
 
-# Resolve full session id (pid.name) for screen -S
 FULL_SCREEN="$(screen -ls | grep -F ".${SCREEN_NAME}" | head -1 | awk '{print $1}')"
 if [[ -z "${FULL_SCREEN}" ]]; then
   echo "Could not resolve screen session id" >&2
@@ -38,14 +32,14 @@ send_cmd "sm plugins unload clutch_skins_bridge"
 send_cmd "sm plugins unload z_clutch_skins_bridge"
 send_cmd "sm plugins load z_clutch_skins_bridge"
 send_cmd "sm plugins info z_clutch_skins_bridge"
-send_cmd "clutch_skins_file \"${SKINS_PATH}\""
 send_cmd "clutch_skins_debug 1"
 send_cmd "sm_reloadclutchskins"
 send_cmd "sm_clutch_applyskins"
 
 echo ""
-echo "Done. Check server log above in screen -r for:"
-echo "  Clutch Skins Bridge (2.0.0+)"
-echo "  [Clutch] Applied weapon_bayonet paintkit ..."
+echo "Done. Expect plugin Version: 3.0.0 and log:"
+echo "  [Clutch] Connected to weapons database (v3.0.0 DB-only mode)"
+echo "  [Clutch] Applied weapon_ak47 paintkit ..."
 echo ""
+echo "If Version is 2.x: cd ~/api-csgo && git pull && ./scripts/install-clutch-skins-bridge.sh"
 echo "Then respawn in game (kill)."
