@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Dev: site local (npm run dev) + CS na VPS.
-# 1) Baixa export do Next.js local
-# 2) Envia clutch_skins.txt para a VPS via SCP
+# Dev: rode no seu PC (não na VPS do CS).
+# Site local (npm run dev) → SCP do export para o servidor de jogo.
+#
+# Na VPS do CS use: ./sync-clutch-skins.sh (sem SCP).
 #
 # Env:
-#   CLUTCH_SITE_URL     — default http://127.0.0.1:3000
+#   CLUTCH_SITE_URL     — default http://127.0.0.1:3000 (Next.js no PC)
 #   CSGO_SKINS_SYNC_KEY — igual ao site/.env
 #   CLUTCH_SSH_TARGET   — default csgo@188.220.168.233
 #   CLUTCH_SSH_REMOTE   — path no servidor CS:GO
@@ -17,6 +18,7 @@ SYNC_KEY="${CSGO_SKINS_SYNC_KEY:-}"
 SSH_TARGET="${CLUTCH_SSH_TARGET:-csgo@188.220.168.233}"
 REMOTE_PATH="${CLUTCH_SSH_REMOTE:-/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt}"
 SSH_KEY="${CLUTCH_SSH_KEY:-}"
+EXPORT_URL="${SITE_URL%/}/api/csgo/skins/export"
 
 if [[ -z "${SYNC_KEY}" ]]; then
   echo "CSGO_SKINS_SYNC_KEY is required (same as site/.env)" >&2
@@ -33,14 +35,27 @@ if [[ -n "${SSH_KEY}" ]]; then
   SCP_OPTS+=(-i "${SSH_KEY}")
 fi
 
-echo "Fetching ${SITE_URL}/api/csgo/skins/export ..."
-curl -fsS \
+echo "Fetching ${EXPORT_URL} ..."
+HTTP_CODE="$(curl -sS -o "${LOCAL_TMP}" -w "%{http_code}" \
   -H "x-skins-sync-key: ${SYNC_KEY}" \
-  "${SITE_URL}/api/csgo/skins/export" \
-  -o "${LOCAL_TMP}"
+  "${EXPORT_URL}" || echo "000")"
+
+if [[ "${HTTP_CODE}" != "200" ]]; then
+  rm -f "${LOCAL_TMP}"
+  echo "Export failed (HTTP ${HTTP_CODE})." >&2
+  if [[ "${SITE_URL}" == "http://127.0.0.1:3000" ]] || [[ "${SITE_URL}" == "http://localhost:3000" ]]; then
+    echo "" >&2
+    echo "Este script roda no seu PC com npm run dev (Next.js na porta 3000)." >&2
+    echo "Na VPS do CS, 127.0.0.1:3000 é outro serviço (api-csgo) — use:" >&2
+    echo "  CSGO_SKINS_SYNC_KEY=... CLUTCH_SITE_URL=https://seu-site ./sync-clutch-skins.sh" >&2
+  else
+    echo "Confira: site deployado com /api/csgo/skins/export e CSGO_SKINS_SYNC_KEY correto." >&2
+  fi
+  exit 1
+fi
 
 if [[ ! -s "${LOCAL_TMP}" ]]; then
-  echo "Export empty — equip a skin on the local site first." >&2
+  echo "Export empty — equip a skin on the site first." >&2
   rm -f "${LOCAL_TMP}"
   exit 1
 fi

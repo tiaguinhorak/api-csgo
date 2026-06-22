@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pull equipped skins KeyValues from clutchclube and write clutch_skins.txt for SourceMod.
+# Rode NA VPS do CS (ou cron): baixa export do site e grava clutch_skins.txt local.
+# Não use sync-clutch-skins-dev.sh aqui — esse é PC → SCP.
 #
 # Env:
-#   CLUTCH_SITE_URL      — e.g. https://clutchclube.com (no trailing slash)
-#   CSGO_SKINS_SYNC_KEY  — same value as site CSGO_SKINS_SYNC_KEY
-#   CLUTCH_SKINS_OUT     — optional output path (default: SourceMod data on VPS)
+#   CLUTCH_SITE_URL      — URL pública do Next.js (ex. https://clutchclube.com)
+#   CSGO_SKINS_SYNC_KEY  — igual ao site/.env
+#   CLUTCH_SKINS_OUT     — opcional (default: SourceMod data)
 
 SITE_URL="${CLUTCH_SITE_URL:-https://clutchclube.com}"
 SYNC_KEY="${CSGO_SKINS_SYNC_KEY:-}"
 OUT="${CLUTCH_SKINS_OUT:-/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt}"
+EXPORT_URL="${SITE_URL%/}/api/csgo/skins/export"
 
 if [[ -z "${SYNC_KEY}" ]]; then
   echo "CSGO_SKINS_SYNC_KEY is required" >&2
@@ -20,13 +22,21 @@ fi
 TMP="${OUT}.tmp"
 mkdir -p "$(dirname "${OUT}")"
 
-curl -fsS \
+echo "Fetching ${EXPORT_URL} ..."
+HTTP_CODE="$(curl -sS -o "${TMP}" -w "%{http_code}" \
   -H "x-skins-sync-key: ${SYNC_KEY}" \
-  "${SITE_URL}/api/csgo/skins/export" \
-  -o "${TMP}"
+  "${EXPORT_URL}" || echo "000")"
+
+if [[ "${HTTP_CODE}" != "200" ]]; then
+  rm -f "${TMP}"
+  echo "Export failed (HTTP ${HTTP_CODE})." >&2
+  echo "Deploy o site com /api/csgo/skins/export ou aponte CLUTCH_SITE_URL ao Next.js certo." >&2
+  echo "Dev local (PC): use sync-clutch-skins-dev.sh no Windows, não na VPS." >&2
+  exit 1
+fi
 
 if [[ ! -s "${TMP}" ]]; then
-  echo "Export empty or failed" >&2
+  echo "Export empty — equip skins on the site first." >&2
   rm -f "${TMP}"
   exit 1
 fi
@@ -35,3 +45,4 @@ mv -f "${TMP}" "${OUT}"
 chmod 644 "${OUT}" 2>/dev/null || true
 
 echo "Synced $(wc -c < "${OUT}") bytes to ${OUT}"
+echo "Run in server console: sm_reloadclutchskins"
