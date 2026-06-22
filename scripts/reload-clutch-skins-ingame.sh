@@ -12,15 +12,25 @@ set -euo pipefail
 SCREEN_NAME="${CLUTCH_CS_SCREEN:-csgo-clutch-#1}"
 SKINS_PATH="${CLUTCH_SKINS_OUT:-/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt}"
 
-if ! screen -ls | grep -q "[[:space:]]${SCREEN_NAME}[[:space:]]"; then
-  echo "Screen session '${SCREEN_NAME}' not found. List: screen -ls" >&2
+# screen -ls shows e.g. "153240.csgo-clutch-#1" — match suffix, not exact session name.
+if ! screen -ls | grep -qF ".${SCREEN_NAME}"; then
+  echo "Screen session matching '*${SCREEN_NAME}' not found. List: screen -ls" >&2
   exit 1
 fi
+
+# Resolve full session id (pid.name) for screen -S
+FULL_SCREEN="$(screen -ls | grep -F ".${SCREEN_NAME}" | head -1 | awk '{print $1}')"
+if [[ -z "${FULL_SCREEN}" ]]; then
+  echo "Could not resolve screen session id" >&2
+  exit 1
+fi
+
+echo "Using screen session: ${FULL_SCREEN}"
 
 send_cmd() {
   local cmd="$1"
   echo ">>> ${cmd}"
-  screen -S "${SCREEN_NAME}" -p 0 -X stuff "${cmd}^M"
+  screen -S "${FULL_SCREEN}" -p 0 -X stuff "${cmd}^M"
   sleep 0.4
 }
 

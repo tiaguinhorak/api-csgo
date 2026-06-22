@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.0.8"
+#define PLUGIN_VERSION "1.0.9"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -194,7 +194,24 @@ bool JumpToPlayerLoadoutKv(int client) {
         return false;
     }
 
-    return KvJumpToKey(g_hSkinsKv, steamId);
+    if (KvJumpToKey(g_hSkinsKv, steamId)) {
+        return true;
+    }
+
+    // CS:GO often returns STEAM_1:x:y; site export uses STEAM_0:x:y (same account).
+    if (steamId[6] == '1') {
+        steamId[6] = '0';
+        if (KvJumpToKey(g_hSkinsKv, steamId)) {
+            return true;
+        }
+    } else if (steamId[6] == '0') {
+        steamId[6] = '1';
+        if (KvJumpToKey(g_hSkinsKv, steamId)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 public void ApplyClientSkinsFrame(any userid) {
@@ -288,8 +305,18 @@ void ApplyWeaponSkinEntity(
     SetEntProp(weapon, Prop_Send, "m_OriginalOwnerXuidHigh", 0);
 }
 
+bool IsMeleeWeaponKey(const char[] weaponKey) {
+    return StrContains(weaponKey, "knife", false) != -1
+        || StrContains(weaponKey, "bayonet", false) != -1;
+}
+
+bool IsMeleeClassname(const char[] classname) {
+    return StrContains(classname, "knife", false) != -1
+        || StrContains(classname, "bayonet", false) != -1;
+}
+
 int FindPlayerWeapon(int client, const char[] weaponKey) {
-    bool matchKnife = StrContains(weaponKey, "knife", false) != -1;
+    bool matchMelee = IsMeleeWeaponKey(weaponKey);
 
     for (int slot = 0; slot <= 5; slot++) {
         int weapon = GetPlayerWeaponSlot(client, slot);
@@ -300,8 +327,8 @@ int FindPlayerWeapon(int client, const char[] weaponKey) {
         char classname[64];
         GetEntityClassname(weapon, classname, sizeof(classname));
 
-        if (matchKnife) {
-            if (StrContains(classname, "knife", false) != -1) {
+        if (matchMelee) {
+            if (IsMeleeClassname(classname)) {
                 return weapon;
             }
             continue;
