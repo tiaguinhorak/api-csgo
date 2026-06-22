@@ -1,54 +1,73 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Diagnóstico rápido: Steam auth + clutch_skins.txt + push api-csgo
+# Diagnóstico rápido: Steam auth + weapons DB + player-sync
 #
 # Uso na VPS:
-#   cd ~/api-csgo && chmod +x scripts/diagnose-steam-and-skins.sh
-#   ./scripts/diagnose-steam-and-skins.sh
+#   cd ~/api-csgo && ./scripts/diagnose-steam-and-skins.sh
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
 DATA="${CLUTCH_SKINS_OUT:-${CSGO_ROOT}/addons/sourcemod/data/clutch_skins.txt}"
 SYNC_KEY="${CSGO_SKINS_SYNC_KEY:-}"
 API_URL="${CLUTCH_API_URL:-http://127.0.0.1:3000}"
 
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${REPO_ROOT}/.env"
+  set +a
+fi
+
 echo "=== Steam + Skins diagnose ==="
 echo ""
 
-echo "--- 1) clutch_skins.txt ---"
+echo "--- 1) clutch_skins.txt (legacy, v3 ignores) ---"
 if [[ -f "${DATA}" ]]; then
   echo "OK  ${DATA} ($(wc -c < "${DATA}") bytes)"
-  head -20 "${DATA}"
+  head -12 "${DATA}"
 else
-  echo "MISSING ${DATA}"
+  echo "MISSING ${DATA} (ok for v3)"
 fi
 
 echo ""
-echo "--- 2) weapons SQLite (kgns !ws DB) ---"
-DB_PATH="${WEAPONS_DB_PATH:-}"
-if [[ -z "${DB_PATH}" && -f "${REPO_ROOT}/.env" ]]; then
-  DB_PATH="$(grep -E '^WEAPONS_DB_PATH=' "${REPO_ROOT}/.env" | cut -d= -f2- | tr -d '"' || true)"
+echo "--- 2) weapons SQLite (!ws / storage-local) ---"
+SQLITE_DIR="${CSGO_ROOT}/addons/sourcemod/data/sqlite"
+if [[ -d "${SQLITE_DIR}" ]]; then
+  echo "Files in ${SQLITE_DIR}:"
+  ls -la "${SQLITE_DIR}"/*.sq3 2>/dev/null || echo "  (no .sq3 files)"
+else
+  echo "MISSING dir ${SQLITE_DIR}"
 fi
-if [[ -z "${DB_PATH}" ]]; then
-  DB_PATH="/home/csgo/server/csgo/addons/sourcemod/data/sqlite/local.sq3"
-fi
+
+DB_PATH="${WEAPONS_DB_PATH:-/home/csgo/server/csgo/addons/sourcemod/data/sqlite/sourcemod-local.sq3}"
+echo ""
+echo "WEAPONS_DB_PATH=${DB_PATH}"
 if [[ -f "${DB_PATH}" ]]; then
   if [[ -r "${DB_PATH}" && -w "${DB_PATH}" ]]; then
-    echo "OK  ${DB_PATH} (readable + writable)"
+    echo "OK  readable + writable"
+    if command -v sqlite3 >/dev/null 2>&1; then
+      TABLES="$(sqlite3 "${DB_PATH}" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%weapons%';" 2>/dev/null || true)"
+      if [[ -n "${TABLES}" ]]; then
+        echo "OK  weapons table(s): ${TABLES}"
+      else
+        echo "WARN no 'weapons' table — use !ws once in-game or check databases.cfg"
+      fi
+    fi
   else
-    echo "WARN ${DB_PATH} exists but not rw for this user — fix:"
+    echo "WARN exists but not rw — fix:"
     echo "  chmod 664 \"${DB_PATH}\" && chmod 775 \"$(dirname "${DB_PATH}")\""
   fi
 else
-  echo "MISSING ${DB_PATH}"
-  echo "  Find: find /home/csgo -name 'local.sq3' 2>/dev/null"
-  echo "  Set WEAPONS_DB_PATH in ~/api-csgo/.env"
+  echo "MISSING — try:"
+  echo "  find /home/csgo -name '*.sq3' 2>/dev/null"
+  echo "  Typical: .../addons/sourcemod/data/sqlite/sourcemod-local.sq3"
 fi
 
 echo ""
 echo "--- 3) api-csgo player-sync ---"
 if [[ -z "${SYNC_KEY}" ]]; then
-  echo "WARN  CSGO_SKINS_SYNC_KEY not set in shell — export before test"
+  echo "WARN  CSGO_SKINS_SYNC_KEY not set — source ~/api-csgo/.env first"
 else
   HTTP="$(curl -sS -o /tmp/clutch-sync-test.out -w "%{http_code}" \
     -X POST "${API_URL}/api/csgo/skins/player-sync" \
@@ -57,33 +76,24 @@ else
     -d '{"steamId":"STEAM_0:0:0","weapons":[]}' || echo "000")"
   echo "POST ${API_URL}/api/csgo/skins/player-sync → HTTP ${HTTP}"
   if [[ -f /tmp/clutch-sync-test.out ]]; then
-    head -c 300 /tmp/clutch-sync-test.out; echo
+    head -c 400 /tmp/clutch-sync-test.out; echo
   fi
   if [[ "${HTTP}" == "401" ]]; then
     echo "  → Key mismatch between site .env and api-csgo .env"
   fi
+  if [[ "${HTTP}" == "500" ]]; then
+    echo "  → Check WEAPONS_DB_PATH and chmod on .sq3 file"
+  fi
   if [[ "${HTTP}" == "000" ]]; then
-    echo "  → api-csgo not running on ${API_URL} (pm2 restart?)"
+    echo "  → api-csgo not running on ${API_URL} (pm2 restart --update-env?)"
   fi
 fi
 
 echo ""
-echo "--- 3) Steam server log (last screen / srcds) ---"
-echo "In screen -r, at SERVER START look for:"
-echo "  GOOD: 'Logged into Steam game server account' (no error after)"
-echo "  BAD:  'Could not establish connection to Steam servers'"
+echo "--- 4) Steam / spawn ---"
+echo "  BAD log: Could not establish connection to Steam servers → fix GSLT"
+echo "  BAD log: PutClientInServer: no info_player_start → changelevel de_mirage"
 echo ""
-echo "If BAD → regenerate GSLT (App 730, IP do VPS) and check outbound firewall."
-echo "  https://steamcommunity.com/dev/managegameservers"
-echo ""
-echo "--- 4) Spawn / map ---"
-echo "If log shows: PutClientInServer: no info_player_start"
-echo "  In server console: changelevel de_mirage"
-echo "  Then: mp_restartgame 1"
-echo ""
-echo "--- 5) In-game after equip on site ---"
-echo "  sm_reloadclutchskins"
-echo "  sm_clutch_applyskins"
-echo "  kill"
-echo ""
-echo "Knife test: equip AK/M4 on site (easier than bayonet)."
+echo "--- 5) In-game ---"
+echo "  sm plugins info z_clutch_skins_bridge  (must be 3.0.0)"
+echo "  sm_clutch_applyskins && kill"

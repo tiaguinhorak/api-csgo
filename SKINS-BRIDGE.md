@@ -31,7 +31,7 @@ CSGO_SKINS_SYNC_KEY=uma-chave-longa-aleatoria-compartilhada-com-a-vps
 
 ```env
 CSGO_SKINS_SYNC_KEY=mesma-chave-do-site
-WEAPONS_DB_PATH=/home/csgo/server/csgo/addons/sourcemod/data/sqlite/local.sq3
+WEAPONS_DB_PATH=/home/csgo/server/csgo/addons/sourcemod/data/sqlite/sourcemod-local.sq3
 WEAPONS_TABLE_PREFIX=
 CSGO_SERVER_HOST=127.0.0.1
 CSGO_RCON_PORT=27015
