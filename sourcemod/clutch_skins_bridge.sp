@@ -786,7 +786,7 @@ void SetClutchWeaponProps(
 }
 
 void ClutchNetworkUpdate(int entity) {
-    int offset = FindNetworkPropInfo("CBaseEntity", "m_nModelIndex");
+    int offset = FindSendPropInfo("CBaseEntity", "m_nModelIndex");
     if (offset != -1) {
         ChangeEdictState(entity, offset);
     }
