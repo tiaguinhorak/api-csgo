@@ -330,15 +330,17 @@ npm run db:seed
 
 ---
 
-## 8. Cobertura (v3.1)
+## 8. Cobertura (v3.2)
 
 | Tipo | Status |
 |------|--------|
-| Armas (53 slots kgns) | Sync + apply no buy/spawn/round |
-| Facas (todos modelos kgns 1.7.8) | Modelo via weapons.smx + paintkit bridge |
-| Luvas (8 tipos CSGO-API) | Tabela `gloves` + wearable no bridge |
+| Armas (53 slots kgns) | Sync + apply no buy/spawn/round + PTaH post-hook |
+| Facas (todos modelos kgns 1.7.8) | Modelo via weapons.smx + paintkit bridge (re-apply após !ws) |
+| Luvas (8 tipos CSGO-API) | Tabela `gloves` (API + plugin) + wearable no bridge |
 | Wear / seed / nametag / StatTrak | `_float`, `_seed`, `_tag`, `_trak`, `_trak_count` |
 | Kukri | Não no kgns 1.7.8 — aguarda update do !ws |
 | Agentes | Fora do kgns weapons/gloves — não suportado |
+
+v3.2: PTaH `GiveNamedItemPost` re-aplica após weapons.smx; cria `gloves` se ausente; `clutch_skins_refresh 0` por padrão; detecta paintkit/seed divergente na entidade.
 
 Requisitos servidor: **PTaH**, `FollowCSGOServerGuidelines "no"`, **weapons.smx**, recomendado **gloves.smx**.

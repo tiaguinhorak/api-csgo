@@ -7,9 +7,10 @@
 
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
+#include <PTaH>
 
-#define PLUGIN_VERSION "3.1.0"
-#define APPLY_COOLDOWN_SECONDS 2.0
+#define PLUGIN_VERSION "3.2.0"
+#define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 
 ConVar g_cvDebug;
@@ -21,9 +22,19 @@ Database g_hWeaponsDb = null;
 char g_sTablePrefix[16];
 bool g_bLoggedMissingLoadout[MAXPLAYERS + 1];
 float g_fLastApplyTime[MAXPLAYERS + 1];
-float g_fLastItemEquipApply[MAXPLAYERS + 1];
 int g_iLastKnifePaint[MAXPLAYERS + 1];
 int g_iItemIdHigh = 16384;
+bool g_bGlovesTableReady = false;
+Handle g_hRefreshTimer = null;
+
+int g_CachedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
+float g_CachedWear[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
+int g_CachedSeed[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
+int g_CachedTrak[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
+int g_CachedTrakCount[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
+char g_CachedTag[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][64];
+int g_iAppliedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
+char g_CachedKnifeClass[MAXPLAYERS + 1][64];
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -107,12 +118,27 @@ public void OnPluginStart() {
     ConnectWeaponsDatabase();
 
     HookEvent("player_spawn", OnPlayerSpawn, EventHookMode_Post);
-    HookEvent("item_equip", Event_ItemEquip, EventHookMode_Post);
     HookEvent("round_start", Event_RoundStart, EventHookMode_Post);
+
+    PTaH(PTaH_GiveNamedItemPost, Hook, Clutch_GiveNamedItemPost);
+
+    UpdateRefreshTimer();
+}
+
+public void OnConfigsExecuted() {
+    g_cvWeaponsTablePrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
+    UpdateRefreshTimer();
+}
+
+void UpdateRefreshTimer() {
+    if (g_hRefreshTimer != null) {
+        KillTimer(g_hRefreshTimer);
+        g_hRefreshTimer = null;
+    }
 
     float refresh = g_cvRefreshSeconds.FloatValue;
     if (refresh > 0.0) {
-        CreateTimer(refresh, Timer_RefreshFromDb, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+        g_hRefreshTimer = CreateTimer(refresh, Timer_RefreshFromDb, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
     }
 }
 
@@ -149,9 +175,35 @@ public void WeaponsDatabaseConnected(Database database, const char[] error, any 
     }
 
     g_hWeaponsDb = database;
+    g_bGlovesTableReady = false;
+    EnsureGlovesTable();
+
     if (g_cvDebug.BoolValue) {
-        LogMessage("[Clutch] Connected to weapons database (v%s DB-only mode)", PLUGIN_VERSION);
+        LogMessage("[Clutch] Connected to weapons database (v%s)", PLUGIN_VERSION);
     }
+}
+
+void EnsureGlovesTable() {
+    if (g_hWeaponsDb == null) {
+        return;
+    }
+
+    char query[512];
+    Format(
+        query,
+        sizeof(query),
+        "CREATE TABLE IF NOT EXISTS %sgloves (steamid varchar(32) NOT NULL PRIMARY KEY, t_group int(5) NOT NULL DEFAULT 0, t_glove int(5) NOT NULL DEFAULT 0, t_float decimal(3,2) NOT NULL DEFAULT 0.0, ct_group int(5) NOT NULL DEFAULT 0, ct_glove int(5) NOT NULL DEFAULT 0, ct_float decimal(3,2) NOT NULL DEFAULT 0.0)",
+        g_sTablePrefix
+    );
+    g_hWeaponsDb.Query(T_EnsureGlovesTableCallback, query, _, DBPrio_High);
+}
+
+public void T_EnsureGlovesTableCallback(Database database, DBResultSet results, const char[] error, any data) {
+    if (results == null) {
+        LogError("[Clutch] gloves table create failed: %s", error);
+        return;
+    }
+    g_bGlovesTableReady = true;
 }
 
 public Action Timer_RefreshFromDb(Handle timer) {
@@ -186,8 +238,14 @@ public Action Command_ApplySkins(int client, int args) {
 public void OnClientDisconnect(int client) {
     g_bLoggedMissingLoadout[client] = false;
     g_fLastApplyTime[client] = 0.0;
-    g_fLastItemEquipApply[client] = 0.0;
     g_iLastKnifePaint[client] = 0;
+    g_CachedKnifeClass[client][0] = '\0';
+
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        g_CachedPaintkit[client][i] = 0;
+        g_iAppliedPaintkit[client][i] = 0;
+        g_CachedTag[client][i][0] = '\0';
+    }
 }
 
 public void OnClientPutInServer(int client) {
@@ -205,42 +263,138 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     ScheduleApplyClientSkins(client);
 }
 
-public void Event_ItemEquip(Event event, const char[] name, bool dontBroadcast) {
-    int client = GetClientOfUserId(event.GetInt("userid"));
-    if (client <= 0 || IsFakeClient(client)) {
-        return;
-    }
-
-    float now = GetGameTime();
-    if ((now - g_fLastItemEquipApply[client]) < 1.0) {
-        return;
-    }
-    g_fLastItemEquipApply[client] = now;
-
-    int userid = GetClientUserId(client);
-    CreateTimer(0.25, Timer_ApplySkinsBypassCooldown, userid, TIMER_FLAG_NO_MAPCHANGE);
-}
-
-public Action Timer_ApplySkinsBypassCooldown(Handle timer, any userid) {
-    int client = GetClientOfUserId(userid);
-    if (client > 0) {
-        ApplyClientSkins(client, false, true);
-    }
-    return Plugin_Stop;
-}
-
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
-    CreateTimer(1.5, Timer_ApplyAllPlayersSkins, _, TIMER_FLAG_NO_MAPCHANGE);
-    CreateTimer(4.0, Timer_ApplyAllPlayersBypass, _, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(3.0, Timer_ApplyAllPlayersSkins, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
-public Action Timer_ApplyAllPlayersBypass(Handle timer) {
-    for (int client = 1; client <= MaxClients; client++) {
-        if (IsClientInGame(client) && !IsFakeClient(client)) {
-            ApplyClientSkins(client, false, true);
+public void Clutch_GiveNamedItemPost(
+    int client,
+    const char[] classname,
+    const CEconItemView item,
+    int entity,
+    bool originIsNull,
+    const float origin[3]
+) {
+    if (client <= 0 || IsFakeClient(client) || entity <= 0) {
+        return;
+    }
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteCell(entity);
+    CreateTimer(0.15, Timer_ApplyCachedEntity, pack, TIMER_FLAG_NO_MAPCHANGE);
+
+    DataPack packLate = new DataPack();
+    packLate.WriteCell(GetClientUserId(client));
+    packLate.WriteCell(entity);
+    CreateTimer(0.6, Timer_ApplyCachedEntity, packLate, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplyCachedEntity(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int entity = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || !IsValidEntity(entity)) {
+        return Plugin_Stop;
+    }
+
+    char classname[64];
+    GetEntityClassname(entity, classname, sizeof(classname));
+    int idx = GetClutchIndexForClassname(client, classname);
+    if (idx == -1) {
+        return Plugin_Stop;
+    }
+
+    if (IsMeleeClassname(classname)) {
+        if (g_CachedKnifeClass[client][0] != '\0') {
+            ClutchSetClientKnife(client, g_CachedKnifeClass[client]);
         }
     }
+
+    ApplyCachedSkinToEntity(client, entity, idx, IsMeleeClassname(classname));
     return Plugin_Stop;
+}
+
+int GetClutchIndexForClassname(int client, const char[] classname) {
+    bool melee = IsMeleeClassname(classname);
+
+    if (melee && client > 0 && g_CachedKnifeClass[client][0] != '\0') {
+        for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+            if (StrEqual(g_ClutchWeaponKeys[i], g_CachedKnifeClass[client], false)) {
+                return i;
+            }
+        }
+    }
+
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        if (melee) {
+            if (IsMeleeWeaponKey(g_ClutchWeaponKeys[i])) {
+                return i;
+            }
+        } else if (StrEqual(classname, g_ClutchWeaponKeys[i], false)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void UpdateSlotCache(
+    int client,
+    int idx,
+    int paintkit,
+    float wear,
+    int seed,
+    int trak,
+    int trakCount,
+    const char[] tag
+) {
+    g_CachedPaintkit[client][idx] = paintkit;
+    g_CachedWear[client][idx] = wear;
+    g_CachedSeed[client][idx] = seed;
+    g_CachedTrak[client][idx] = trak;
+    g_CachedTrakCount[client][idx] = trakCount;
+    strcopy(g_CachedTag[client][idx], sizeof(g_CachedTag[][]), tag);
+}
+
+bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife) {
+    int paintkit = g_CachedPaintkit[client][idx];
+    if (paintkit <= 0 || !IsPaintableWeaponEntity(entity)) {
+        return false;
+    }
+
+    if (g_iAppliedPaintkit[client][idx] == paintkit
+        && GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit") == paintkit
+        && GetEntProp(entity, Prop_Send, "m_nFallbackSeed") == g_CachedSeed[client][idx]) {
+        return false;
+    }
+
+    SetClutchWeaponProps(
+        client,
+        entity,
+        paintkit,
+        g_CachedWear[client][idx],
+        g_CachedSeed[client][idx],
+        g_CachedTrak[client][idx],
+        g_CachedTrakCount[client][idx],
+        g_CachedTag[client][idx],
+        isKnife
+    );
+    g_iAppliedPaintkit[client][idx] = paintkit;
+
+    if (g_cvDebug.BoolValue) {
+        char classname[64];
+        GetEntityClassname(entity, classname, sizeof(classname));
+        LogMessage("[Clutch] Applied cached paintkit %d on %s for %N", paintkit, classname, client);
+    }
+
+    if (isKnife) {
+        CS_UpdateClientModel(client);
+    }
+
+    return true;
 }
 
 public Action Timer_ApplyAllPlayersSkins(Handle timer) {
@@ -254,8 +408,7 @@ public Action Timer_ApplyAllPlayersSkins(Handle timer) {
 
 void ScheduleApplyClientSkins(int client) {
     int userid = GetClientUserId(client);
-    CreateTimer(1.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
-    CreateTimer(3.5, Timer_ApplySkinsBypassCooldown, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(2.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
@@ -847,9 +1000,20 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
         char nametag[64];
         DbFetchString(results, tagCol, nametag, sizeof(nametag));
 
+        UpdateSlotCache(client, i, paintkit, wear, seed, stattrak, stattrakCount, nametag);
+
         int weapon = FindPlayerWeapon(client, weaponKey);
-        if (weapon != -1) {
+        bool needsApply = force || g_iAppliedPaintkit[client][i] != paintkit;
+        if (!needsApply && weapon != -1) {
+            if (GetEntProp(weapon, Prop_Send, "m_nFallbackPaintKit") != paintkit) {
+                needsApply = true;
+            } else if (GetEntProp(weapon, Prop_Send, "m_nFallbackSeed") != seed) {
+                needsApply = true;
+            }
+        }
+        if (weapon != -1 && needsApply) {
             SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, stattrakCount, nametag, false);
+            g_iAppliedPaintkit[client][i] = paintkit;
             if (g_cvDebug.BoolValue) {
                 char classname[64];
                 GetEntityClassname(weapon, classname, sizeof(classname));
@@ -861,7 +1025,7 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
                     client
                 );
             }
-        } else if (g_cvDebug.BoolValue) {
+        } else if (weapon == -1 && g_cvDebug.BoolValue && force) {
             LogMessage("[Clutch] Weapon not found for key %s (%N)", weaponKey, client);
         }
     }
@@ -872,8 +1036,22 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
         return;
     }
 
+    strcopy(g_CachedKnifeClass[client], knifeClass, sizeof(g_CachedKnifeClass[]));
+
+    for (int k = 0; k < CLUTCH_WEAPON_SLOTS; k++) {
+        if (StrEqual(g_ClutchWeaponKeys[k], knifeClass, false)) {
+            UpdateSlotCache(client, k, knifePaintkit, knifeWear, knifeSeed, knifeTrak, knifeTrakCount, knifeTag);
+            break;
+        }
+    }
+
     if (!force && g_iLastKnifePaint[client] == knifePaintkit) {
-        return;
+        int knifeWeapon = FindPlayerWeapon(client, knifeClass);
+        if (knifeWeapon != -1
+            && GetEntProp(knifeWeapon, Prop_Send, "m_nFallbackPaintKit") == knifePaintkit
+            && GetEntProp(knifeWeapon, Prop_Send, "m_nFallbackSeed") == knifeSeed) {
+            return;
+        }
     }
     g_iLastKnifePaint[client] = knifePaintkit;
 
@@ -898,18 +1076,16 @@ public void ApplyClientSkinsFrame(any userid) {
     }
 }
 
-void ApplyClientSkins(int client, bool force, bool bypassCooldown = false) {
+void ApplyClientSkins(int client, bool force) {
     if (!IsClientInGame(client) || IsFakeClient(client)) {
         return;
     }
 
     float now = GetGameTime();
-    if (!force && !bypassCooldown && (now - g_fLastApplyTime[client]) < APPLY_COOLDOWN_SECONDS) {
+    if (!force && (now - g_fLastApplyTime[client]) < APPLY_COOLDOWN_SECONDS) {
         return;
     }
-    if (!bypassCooldown) {
-        g_fLastApplyTime[client] = now;
-    }
+    g_fLastApplyTime[client] = now;
 
     char steamId[32];
     if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
