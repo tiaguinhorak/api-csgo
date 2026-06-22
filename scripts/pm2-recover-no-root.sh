@@ -12,6 +12,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 SCRIPTS_DIR="${REPO_ROOT}/scripts"
+chmod +x "${SCRIPTS_DIR}/"*.sh 2>/dev/null || true
 
 set_env_port() {
   local port="$1"
