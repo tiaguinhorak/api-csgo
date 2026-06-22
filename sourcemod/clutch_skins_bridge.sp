@@ -471,11 +471,40 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
     ApplyLoadoutFromDbRow(client, results);
 }
 
+int DbFieldNum(DBResultSet results, const char[] column) {
+    return results.FieldNum(column, false);
+}
+
+int DbFetchInt(DBResultSet results, const char[] column, int defaultValue = 0) {
+    int field = DbFieldNum(results, column);
+    if (field == -1) {
+        return defaultValue;
+    }
+    return results.FetchInt(field);
+}
+
+float DbFetchFloat(DBResultSet results, const char[] column, float defaultValue = 0.0) {
+    int field = DbFieldNum(results, column);
+    if (field == -1) {
+        return defaultValue;
+    }
+    return results.FetchFloat(field);
+}
+
+void DbFetchString(DBResultSet results, const char[] column, char[] buffer, int maxlen) {
+    int field = DbFieldNum(results, column);
+    if (field == -1) {
+        buffer[0] = '\0';
+        return;
+    }
+    results.FetchString(field, buffer, maxlen);
+}
+
 void ApplyLoadoutFromDbRow(int client, DBResultSet results) {
     char knifeClass[64];
     knifeClass[0] = '\0';
 
-    int knifeIdx = results.FetchInt("knife");
+    int knifeIdx = DbFetchInt(results, "knife", -1);
     if (knifeIdx >= 0) {
         KnifeClassFromIndex(knifeIdx, knifeClass, sizeof(knifeClass));
     }
@@ -484,30 +513,30 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results) {
         char column[32];
         strcopy(column, sizeof(column), g_ClutchDbColumns[i]);
 
-        int paintkit = results.FetchInt(column);
+        int paintkit = DbFetchInt(results, column, 0);
         if (paintkit <= 0) {
             continue;
         }
 
         char floatCol[40];
         Format(floatCol, sizeof(floatCol), "%s_float", column);
-        float wear = results.FetchFloat(floatCol);
+        float wear = DbFetchFloat(results, floatCol, 0.0);
         if (wear <= 0.0) {
             wear = 0.15;
         }
 
         char seedCol[40];
         Format(seedCol, sizeof(seedCol), "%s_seed", column);
-        int seed = results.FetchInt(seedCol);
+        int seed = DbFetchInt(results, seedCol, 0);
 
         char trakCol[40];
         Format(trakCol, sizeof(trakCol), "%s_trak", column);
-        int stattrak = results.FetchInt(trakCol);
+        int stattrak = DbFetchInt(results, trakCol, 0);
 
         char tagCol[40];
         Format(tagCol, sizeof(tagCol), "%s_tag", column);
         char nametag[64];
-        results.FetchString(tagCol, nametag, sizeof(nametag));
+        DbFetchString(results, tagCol, nametag, sizeof(nametag));
 
         char weaponKey[32];
         strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
