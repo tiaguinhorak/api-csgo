@@ -34,8 +34,8 @@ send_cmd() {
   sleep 0.4
 }
 
-send_cmd "sm plugins reload clutch_skins_bridge"
-send_cmd "sm plugins info clutch_skins_bridge"
+send_cmd "sm plugins reload z_clutch_skins_bridge"
+send_cmd "sm plugins info z_clutch_skins_bridge"
 send_cmd "clutch_skins_file \"${SKINS_PATH}\""
 send_cmd "clutch_skins_debug 1"
 send_cmd "sm_reloadclutchskins"
@@ -43,7 +43,7 @@ send_cmd "sm_clutch_applyskins"
 
 echo ""
 echo "Done. Check server log above in screen -r for:"
-echo "  Clutch Skins Bridge (1.0.8)"
+echo "  Clutch Skins Bridge (1.1.0)"
 echo "  [Clutch] Applied weapon_bayonet paintkit ..."
 echo ""
 echo "Then respawn in game (kill)."

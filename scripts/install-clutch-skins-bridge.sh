@@ -41,13 +41,19 @@ chmod +x "${SCRIPT_DIR}/reload-clutch-skins-ingame.sh" 2>/dev/null || true
 echo "Copying source..."
 cp -f "${SP_SRC}" "${SM}/scripting/clutch_skins_bridge.sp"
 
-echo "Compiling..."
-(cd "${SM}/scripting" && "${SPCOMP}" clutch_skins_bridge.sp -o"${SM}/plugins/clutch_skins_bridge.smx")
+PLUGIN_SMX="z_clutch_skins_bridge.smx"
+LEGACY_SMX="clutch_skins_bridge.smx"
 
-if [[ ! -f "${SM}/plugins/clutch_skins_bridge.smx" ]]; then
+echo "Compiling..."
+(cd "${SM}/scripting" && "${SPCOMP}" clutch_skins_bridge.sp -o"${SM}/plugins/${PLUGIN_SMX}")
+
+if [[ ! -f "${SM}/plugins/${PLUGIN_SMX}" ]]; then
   echo "Compile failed — no .smx output" >&2
   exit 1
 fi
+
+# Load after weapons.smx (alphabetical: z_ > weapons)
+rm -f "${SM}/plugins/${LEGACY_SMX}"
 
 mkdir -p "${CSGO_ROOT}/cfg/sourcemod"
 cp -f "${CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
@@ -85,14 +91,14 @@ else
 fi
 
 echo ""
-echo "OK — clutch_skins_bridge.smx installed."
+echo "OK — ${PLUGIN_SMX} installed (loads after weapons.smx)."
 echo ""
 echo "Recarregar no CS sem colar logs no console:"
 echo "  ./scripts/reload-clutch-skins-ingame.sh"
 echo ""
 echo "Ou manualmente (UM comando por linha, dentro de screen -r):"
-echo "  sm plugins reload clutch_skins_bridge"
-echo "  sm plugins info clutch_skins_bridge"
+echo "  sm plugins reload z_clutch_skins_bridge"
+echo "  sm plugins info z_clutch_skins_bridge"
 echo "  clutch_skins_file \"${REMOTE_PATH:-/home/csgo/server/csgo/addons/sourcemod/data/clutch_skins.txt}\""
 echo "  clutch_skins_debug 1"
 echo "  sm_reloadclutchskins"

@@ -3,7 +3,8 @@ set -euo pipefail
 
 CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
 SM="${CSGO_ROOT}/addons/sourcemod"
-SMX="${SM}/plugins/clutch_skins_bridge.smx"
+SMX="${SM}/plugins/z_clutch_skins_bridge.smx"
+LEGACY_SMX="${SM}/plugins/clutch_skins_bridge.smx"
 DATA="${SM}/data/clutch_skins.txt"
 CORE="${SM}/configs/core.cfg"
 
@@ -12,14 +13,18 @@ echo ""
 
 if [[ -f "${SMX}" ]]; then
   echo "OK  smx: ${SMX} ($(wc -c < "${SMX}") bytes)"
+elif [[ -f "${LEGACY_SMX}" ]]; then
+  echo "WARN legacy smx only: ${LEGACY_SMX} — run install (need z_clutch_skins_bridge.smx)"
 else
-  echo "MISSING smx: ${SMX}"
-  echo "  Run: ./scripts/install-clutch-skins-bridge.sh"
+  echo "MISSING smx — run: ./scripts/install-clutch-skins-bridge.sh"
 fi
 
 if [[ -f "${DATA}" ]]; then
   echo "OK  data: ${DATA} ($(wc -c < "${DATA}") bytes)"
-  head -5 "${DATA}"
+  head -8 "${DATA}"
+  if ! grep -q 'STEAM_1:' "${DATA}"; then
+    echo "  TIP: re-export from site for STEAM_0 + STEAM_1 keys (or use plugin 1.1.0+)"
+  fi
 else
   echo "MISSING data: ${DATA}"
 fi
@@ -36,11 +41,11 @@ echo "Recent SM errors (clutch / clutch_skins):"
 grep -i clutch "${SM}/logs/errors_"*.log 2>/dev/null | tail -10 || echo "  (none or no log yet)"
 
 echo ""
-echo "=== No console do CS (dentro de screen -r) ==="
-echo "  sm plugins reload"
-echo "  sm plugins load clutch_skins_bridge"
-echo "  sm plugins list"
-echo "  sm_reloadclutchskins"
+echo "=== Reload (SSH) ==="
+echo "  ./scripts/reload-clutch-skins-ingame.sh"
 echo ""
-echo "Se 'sm plugins load' falhar, mande o erro e:"
-echo "  tail -30 ${SM}/logs/errors_*.log"
+echo "=== Or screen -r (one command per line) ==="
+echo "  sm plugins reload z_clutch_skins_bridge"
+echo "  clutch_skins_debug 1"
+echo "  sm_reloadclutchskins"
+echo "  sm_clutch_applyskins"

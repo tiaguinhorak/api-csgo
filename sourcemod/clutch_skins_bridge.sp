@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.0.9"
+#define PLUGIN_VERSION "1.1.0"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -176,6 +176,8 @@ void ScheduleApplyClientSkins(int client) {
     CreateTimer(0.65, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
     CreateTimer(1.35, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
     CreateTimer(2.75, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(4.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(6.0, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
