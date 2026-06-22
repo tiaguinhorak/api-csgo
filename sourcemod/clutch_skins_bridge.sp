@@ -472,16 +472,10 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
 }
 
 int DbFieldNum(DBResultSet results, const char[] column) {
-    int count = results.FieldCount;
-    char name[48];
-
-    for (int i = 0; i < count; i++) {
-        results.FieldName(i, name, sizeof(name));
-        if (StrEqual(name, column, false)) {
-            return i;
-        }
+    int field = -1;
+    if (results.FieldNameToNum(column, field)) {
+        return field;
     }
-
     return -1;
 }
 
