@@ -5,7 +5,7 @@ Fluxo (v3 — **sem arquivo**): o jogador equipa no site → Postgres → **API 
 ```
 Site (equip/unequip) → POST /api/csgo/skins/player-sync (api-csgo na VPS)
      ↓
-local.sq3 (weapons table, mesmo DB do !ws)
+sourcemod-local.sq3 (weapons table, mesmo DB do !ws / storage-local)
      ↓
 RCON sm_clutch_applyskins
      ↓
