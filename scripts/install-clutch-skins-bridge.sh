@@ -70,6 +70,30 @@ fi
 # Load after weapons.smx (alphabetical: z_ > weapons)
 rm -f "${SM}/plugins/${LEGACY_SMX}"
 
+detect_live_csgo_root() {
+  local pid cwd exe dir
+  pid="$(pgrep -n -x srcds_linux 2>/dev/null || pgrep -n -f 'srcds_linux.*csgo' 2>/dev/null || true)"
+  if [[ -z "${pid}" ]]; then
+    return 1
+  fi
+  cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)"
+  if [[ -n "${cwd}" && -d "${cwd}/addons/sourcemod/plugins" ]]; then
+    echo "${cwd}"
+    return 0
+  fi
+  exe="$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)"
+  dir="$(dirname "${exe}")"
+  if [[ -d "${dir}/csgo/addons/sourcemod/plugins" ]]; then
+    echo "${dir}/csgo"
+    return 0
+  fi
+  if [[ -d "${dir}/addons/sourcemod/plugins" ]]; then
+    echo "${dir}"
+    return 0
+  fi
+  return 1
+}
+
 mkdir -p "${CSGO_ROOT}/cfg/sourcemod"
 cp -f "${CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
 
@@ -113,6 +137,32 @@ fi
 echo ""
 echo "OK — ${PLUGIN_SMX} installed (loads after weapons.smx)."
 echo "Expected plugin version: $(grep -E '#define PLUGIN_VERSION' "${SP_SRC}" | sed 's/.*"\(.*\)".*/\1/')"
+echo ""
+echo "Installed to: ${SM}/plugins/${PLUGIN_SMX}"
+ls -la "${SM}/plugins/${PLUGIN_SMX}"
+if command -v md5sum >/dev/null 2>&1; then
+  md5sum "${SM}/plugins/${PLUGIN_SMX}"
+elif command -v md5 >/dev/null 2>&1; then
+  md5 -q "${SM}/plugins/${PLUGIN_SMX}"
+fi
+
+LIVE_ROOT="$(detect_live_csgo_root || true)"
+if [[ -n "${LIVE_ROOT}" ]]; then
+  LIVE_SM="${LIVE_ROOT}/addons/sourcemod"
+  echo ""
+  echo "Running srcds game dir: ${LIVE_ROOT}"
+  if [[ "${LIVE_ROOT}" != "${CSGO_ROOT}" ]]; then
+    echo "WARNING: plugin installed to ${CSGO_ROOT} but srcds uses ${LIVE_ROOT}"
+    echo "  Re-run: CSGO_ROOT=${LIVE_ROOT} bash scripts/install-clutch-skins-bridge.sh"
+  elif [[ -f "${LIVE_SM}/plugins/${PLUGIN_SMX}" ]]; then
+    if command -v md5sum >/dev/null 2>&1; then
+      echo "Live plugins dir hash:"
+      md5sum "${LIVE_SM}/plugins/${PLUGIN_SMX}"
+    fi
+  fi
+else
+  echo "TIP: srcds not running — could not auto-detect live game directory."
+fi
 
 GLOVES_SMX="${SM}/plugins/gloves.smx"
 if [[ -f "${GLOVES_SMX}" ]]; then

@@ -765,6 +765,10 @@ void QueryPlayerGloves(int client, const char[] steamId, int altAttempt) {
         return;
     }
 
+    if (!g_bGlovesTableReady) {
+        EnsureGlovesTable();
+    }
+
     char escaped[64];
     g_hWeaponsDb.Escape(steamId, escaped, sizeof(escaped));
 
@@ -1037,7 +1041,7 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
         return;
     }
 
-    strcopy(g_CachedKnifeClass[client], sizeof(g_CachedKnifeClass[]), knifeClass);
+    strcopy(g_CachedKnifeClass[client], CLUTCH_KNIFE_CLASS_LEN, knifeClass);
 
     for (int k = 0; k < CLUTCH_WEAPON_SLOTS; k++) {
         if (StrEqual(g_ClutchWeaponKeys[k], knifeClass, false)) {
