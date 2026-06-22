@@ -2,6 +2,7 @@
 # Libera porta 3000 e sobe api-csgo com PM2 (uma instância só).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+REPO_ROOT="$(pwd)"
 
 API_PORT="${PORT:-3000}"
 
@@ -11,7 +12,15 @@ pm2 kill 2>/dev/null || true
 sleep 2
 
 echo "[pm2-recover] Killing stray api-csgo node (not managed by pm2)..."
-bash scripts/kill-stale-api-csgo.sh
+if ! bash scripts/kill-stale-api-csgo.sh; then
+  stale_rc=$?
+  if [[ "${stale_rc}" -eq 2 ]]; then
+    echo "[pm2-recover] Port ${API_PORT} held by another user — cannot recover as csgo." >&2
+    echo "Run: sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh" >&2
+    echo "Then: bash scripts/pm2-recover.sh" >&2
+    exit 2
+  fi
+fi
 
 npm run build
 
@@ -33,14 +42,22 @@ fi
 if ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
   echo "[pm2-recover] WARN: /health missing glovesPlayerSync (stale listener?)" >&2
   echo "${HEALTH}" >&2
-  bash scripts/kill-stale-api-csgo.sh || true
-  pm2 delete api-csgo 2>/dev/null || true
-  pm2 start ecosystem.config.js --update-env
-  sleep 5
-  HEALTH="$(curl -sf "http://127.0.0.1:${API_PORT}/health" 2>/dev/null || true)"
+  if bash scripts/kill-stale-api-csgo.sh; then
+    pm2 delete api-csgo 2>/dev/null || true
+    pm2 start ecosystem.config.js --update-env
+    sleep 5
+    HEALTH="$(curl -sf "http://127.0.0.1:${API_PORT}/health" 2>/dev/null || true)"
+  else
+  stale_rc=$?
+  if [[ "${stale_rc}" -eq 2 ]]; then
+    echo "[pm2-recover] Run: sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh" >&2
+    exit 2
+  fi
+  fi
   if [[ -z "${HEALTH}" ]] || ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
     echo "[pm2-recover] health still wrong after kill-stale:" >&2
     echo "${HEALTH:-<no response>}" >&2
+    echo "[pm2-recover] Run: bash scripts/diagnose-port-3000.sh" >&2
     pm2 logs api-csgo --lines 20 --nostream 2>/dev/null || true
     exit 1
   fi

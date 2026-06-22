@@ -38,9 +38,24 @@ kill_pid() {
   if ! kill -0 "${pid}" 2>/dev/null; then
     return 0
   fi
+  if ! kill -9 "${pid}" 2>/dev/null; then
+    echo "[kill-stale] WARN: could not kill pid ${pid} (other user?) — try: sudo bash scripts/fix-port-3000-as-root.sh" >&2
+    return 1
+  fi
   echo "[kill-stale] SIGKILL pid ${pid} ($(ps -p "${pid}" -o args= 2>/dev/null || echo '?'))"
-  kill -9 "${pid}" 2>/dev/null || true
   KILLED=$((KILLED + 1))
+}
+
+kill_pgrep_patterns_all_users() {
+  local pattern="$1"
+  local pid
+  while IFS= read -r pid; do
+    kill_pid "${pid}" || true
+  done < <(pgrep -f "${pattern}" 2>/dev/null || true)
+}
+
+port_still_listening() {
+  command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -q ":${API_PORT} "
 }
 
 kill_pgrep_patterns() {
@@ -88,15 +103,20 @@ fi
 echo "[kill-stale] Killing node listeners on :${API_PORT}..."
 kill_node_listeners_on_port
 
-echo "[kill-stale] Killing api-csgo node processes..."
+echo "[kill-stale] Killing api-csgo node processes (all users, best effort)..."
 for round in 1 2 3; do
   kill_pgrep_patterns "${REPO_ROOT}/dist/index.js"
   kill_pgrep_patterns 'api-csgo/dist/index.js'
   kill_pgrep_patterns 'api_csgo/dist/index.js'
   kill_pgrep_patterns 'dist/index.js'
+  kill_pgrep_patterns_all_users 'dist/index.js'
+  kill_pgrep_patterns_all_users 'api-csgo/dist/index.js'
   kill_node_listeners_on_port
   sleep 1
 done
+
+echo "[kill-stale] Processes matching dist/index.js (any user):"
+pgrep -af 'dist/index.js' 2>/dev/null || echo "(none visible)"
 
 echo "[kill-stale] Freeing TCP :${API_PORT}..."
 for attempt in 1 2 3 4 5 6; do
@@ -113,17 +133,15 @@ for attempt in 1 2 3 4 5 6; do
   fi
 done
 
-if ss -tln 2>/dev/null | grep -q ":${API_PORT} "; then
-  if pgrep -u "${MY_UID}" -af 'dist/index.js' >/dev/null 2>&1 \
-    || pgrep -u "${MY_UID}" -x node >/dev/null 2>&1; then
-    echo "[kill-stale] ERROR: port ${API_PORT} still in use." >&2
-    ss -tlnp 2>/dev/null | grep -E ":${API_PORT}\\s" || true
-    pgrep -u "${MY_UID}" -af 'node|api-csgo|dist/index' 2>/dev/null || true
-    echo "Manual: kill -9 \$(pgrep -u ${MY_UID} -x node)" >&2
-    exit 1
+if port_still_listening; then
+  echo "[kill-stale] FAIL: port ${API_PORT} still LISTEN." >&2
+  ss -tlnp 2>/dev/null | grep -E ":${API_PORT}\\s" || ss -tln 2>/dev/null | grep -E ":${API_PORT}\\s" || true
+  pgrep -af 'dist/index.js|api-csgo' 2>/dev/null || true
+  if ss -tlnp 2>/dev/null | grep -E ":${API_PORT}\\s" | grep -qv 'pid='; then
+    echo "[kill-stale] ss shows no pid — listener is another user's process." >&2
+    echo "Run as admin: sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh" >&2
   fi
-  echo "[kill-stale] WARN: port ${API_PORT} still shows LISTEN but no node api process — continuing." >&2
-  ss -tlnp 2>/dev/null | grep -E ":${API_PORT}\\s" || true
+  exit 2
 fi
 
 echo "[kill-stale] OK — port ${API_PORT} free (killed ${KILLED} process(es))"
