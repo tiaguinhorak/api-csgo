@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.0.1"
+#define PLUGIN_VERSION "1.0.2"
 #define KV_ROOT "ClutchSkins"
 
 ConVar g_cvSkinsFile;
@@ -114,7 +114,29 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     if (client <= 0 || IsFakeClient(client)) {
         return;
     }
-    RequestFrame(ApplyClientSkinsFrame, GetClientUserId(client));
+    int userid = GetClientUserId(client);
+    RequestFrame(ApplyClientSkinsFrame, userid);
+    CreateTimer(0.15, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(0.6, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
+    int client = GetClientOfUserId(userid);
+    if (client > 0) {
+        ApplyClientSkins(client);
+    }
+    return Plugin_Stop;
+}
+
+bool JumpToPlayerLoadoutKv(int client) {
+    KvRewind(g_hSkinsKv);
+
+    char steamId[32];
+    if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+        return false;
+    }
+
+    return KvJumpToKey(g_hSkinsKv, steamId);
 }
 
 public void ApplyClientSkinsFrame(any userid) {
@@ -129,12 +151,7 @@ void ApplyClientSkins(int client) {
         return;
     }
 
-    char steamId[32];
-    if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
-        return;
-    }
-
-    if (!KvJumpToKey(g_hSkinsKv, steamId)) {
+    if (!JumpToPlayerLoadoutKv(client)) {
         return;
     }
 
@@ -175,6 +192,7 @@ void ApplyWeaponSkinEntity(
     const char[] nametag
 ) {
     SetEntProp(weapon, Prop_Send, "m_iItemIDHigh", -1);
+    SetEntProp(weapon, Prop_Send, "m_iItemIDLow", -1);
     SetEntProp(weapon, Prop_Send, "m_nFallbackPaintKit", paintkit);
     SetEntPropFloat(weapon, Prop_Send, "m_flFallbackWear", wear);
     SetEntProp(weapon, Prop_Send, "m_nFallbackSeed", seed);
@@ -193,7 +211,7 @@ void ApplyWeaponSkinEntity(
 }
 
 int FindPlayerWeapon(int client, const char[] weaponKey) {
-    bool matchKnife = StrEqual(weaponKey, "weapon_knife", false);
+    bool matchKnife = StrContains(weaponKey, "knife", false) != -1;
 
     for (int slot = 0; slot <= 5; slot++) {
         int weapon = GetPlayerWeaponSlot(client, slot);
