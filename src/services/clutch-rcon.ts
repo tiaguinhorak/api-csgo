@@ -23,53 +23,74 @@ function resolveRconTarget(): {
   return { host, port, password };
 }
 
-async function resolveScreenSession(): Promise<string | null> {
+async function listScreenSessionIds(): Promise<string[]> {
+  const ids: string[] = [];
   const configured = process.env.CLUTCH_CS_SCREEN?.trim();
-  if (configured) {
-    try {
-      const { stdout } = await execFileAsync('screen', ['-ls'], { timeout: 5000 });
-      const line = stdout
-        .split('\n')
-        .find((l) => l.includes(`.${configured}`));
-      if (line) {
-        return line.trim().split(/\s+/)[0] ?? null;
-      }
-    } catch {
-      return null;
-    }
-  }
 
   try {
-    const { stdout } = await execFileAsync('screen', ['-ls'], { timeout: 5000 });
-    const line = stdout.split('\n').find((l) => /csgo-clutch/i.test(l));
-    if (!line) return null;
-    return line.trim().split(/\s+/)[0] ?? null;
-  } catch {
-    return null;
+    const { stdout } = await execFileAsync('screen', ['-ls'], { timeout: 8000 });
+    for (const line of stdout.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('There')) continue;
+
+      const id = trimmed.split(/\s+/)[0];
+      if (!id) continue;
+
+      if (configured && line.includes(`.${configured}`)) {
+        ids.push(id);
+      }
+      if (/csgo-clutch/i.test(line)) {
+        ids.push(id);
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[clutch-rcon] screen -ls failed:', message);
   }
+
+  if (configured) {
+    ids.push(configured);
+  }
+
+  return [...new Set(ids)];
 }
 
 async function sendViaScreen(sessionId: string, command: string): Promise<boolean> {
-  await execFileAsync('screen', ['-S', sessionId, '-p', '0', '-X', 'stuff', `${command}^M`], {
-    timeout: 5000,
-  });
-  return true;
+  const payload = `${command}^M`;
+  try {
+    await execFileAsync('screen', ['-S', sessionId, '-p', '0', '-X', 'stuff', payload], {
+      timeout: 8000,
+    });
+    return true;
+  } catch {
+    try {
+      await execFileAsync('screen', ['-S', sessionId, '-X', 'stuff', payload], {
+        timeout: 8000,
+      });
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[clutch-rcon] screen stuff failed (${sessionId}):`, message);
+      return false;
+    }
+  }
 }
 
 async function reloadViaScreen(): Promise<boolean> {
-  const session = await resolveScreenSession();
-  if (!session) {
+  const sessions = await listScreenSessionIds();
+  if (sessions.length === 0) {
+    console.warn('[clutch-rcon] no screen session found (screen -ls / CLUTCH_CS_SCREEN)');
     return false;
   }
 
-  try {
-    await sendViaScreen(session, 'sm_clutch_applyskins');
-    console.log(`[clutch-rcon] applied via screen session ${session}`);
-    return true;
-  } catch (err) {
-    console.warn('[clutch-rcon] screen fallback failed:', err);
-    return false;
+  for (const session of sessions) {
+    if (await sendViaScreen(session, 'sm_clutch_applyskins')) {
+      console.log(`[clutch-rcon] applied via screen session ${session}`);
+      return true;
+    }
   }
+
+  return false;
 }
 
 export async function reloadClutchSkinsInGame(): Promise<boolean> {
@@ -85,6 +106,7 @@ export async function reloadClutchSkinsInGame(): Promise<boolean> {
       target.password,
       'sm_clutch_applyskins',
     );
+    console.log(`[clutch-rcon] applied via RCON ${target.host}:${target.port}`);
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -94,7 +116,7 @@ export async function reloadClutchSkinsInGame(): Promise<boolean> {
     const viaScreen = await reloadViaScreen();
     if (!viaScreen) {
       console.warn(
-        '[clutch-rcon] DB updated but in-game apply skipped (server offline/hibernating?). Skins apply on spawn.',
+        '[clutch-rcon] DB updated but in-game apply skipped. Start CS + RCON, or run: ./scripts/reload-clutch-skins-ingame.sh',
       );
     }
     return viaScreen;

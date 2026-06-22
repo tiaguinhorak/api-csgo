@@ -9,9 +9,9 @@ module.exports = {
     exec_mode: 'fork',
     watch: false,
     autorestart: true,
-    max_restarts: 5,
-    min_uptime: '5s',
-    restart_delay: 5000,
+    max_restarts: 15,
+    min_uptime: '10s',
+    restart_delay: 8000,
     env_file: path.join(__dirname, '.env'),
     env: {
       NODE_ENV: 'production',
