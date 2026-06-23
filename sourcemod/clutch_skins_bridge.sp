@@ -15,7 +15,8 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.4.6"
+#define PLUGIN_VERSION "3.5.0"
+#define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
@@ -45,6 +46,7 @@ int g_iGloveApplyGen[MAXPLAYERS + 1];
 bool g_bForceGloveApply[MAXPLAYERS + 1];
 int g_iLastGloveGroup[MAXPLAYERS + 1];
 int g_iLastGlovePaint[MAXPLAYERS + 1];
+bool g_bGloveThinkHooked[MAXPLAYERS + 1];
 Handle g_hRefreshTimer = null;
 
 int g_CachedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
@@ -133,7 +135,7 @@ public void OnPluginStart() {
     g_cvGlovesWorldModel = CreateConVar(
         "clutch_skins_gloves_world_model",
         "0",
-        "0 = viewmodel gloves only (kgns default — do NOT set m_nBody). 1 = world model on hands (others see gloves; may stack with default mesh)",
+        "0 = glove skin in your view only (m_nBody=1, no m_hMoveParent). 1 = others also see gloves on your player model",
         FCVAR_NOTIFY,
         true,
         0.0,
@@ -335,6 +337,7 @@ public void OnClientDisconnect(int client) {
     g_iGloveApplyGen[client] = 0;
     g_bForceGloveApply[client] = false;
     g_CachedKnifeClass[client][0] = '\0';
+    ClutchDisableGloveThink(client);
 
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
         g_CachedPaintkit[client][i] = 0;
@@ -444,6 +447,9 @@ public void Clutch_GiveNamedItemPost(
     }
 
     ApplyCachedSkinToEntity(client, entity, idx, IsMeleeClassname(cn), true);
+    if (IsMeleeClassname(cn) && g_iLastGloveGroup[client] > 0) {
+        ClutchEnforceGloveState(client);
+    }
 }
 
 public Action Timer_ApplyCachedEntity(Handle timer, DataPack pack) {
@@ -572,10 +578,8 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
         LogMessage("[Clutch] Applied cached paintkit %d on %s for %N", paintkit, classname, client);
     }
 
-    if (isKnife && ClutchShouldUpdateClientModel(client)) {
-        CS_UpdateClientModel(client);
-    } else if (isKnife && g_iLastGloveGroup[client] > 0) {
-        ScheduleGloveViewMaintain(client, 0.15);
+    if (isKnife) {
+        ClutchRequestClientModelUpdate(client);
     }
 
     return true;
@@ -975,10 +979,8 @@ void SetClutchWeaponProps(
     }
 
     ClutchNetworkUpdate(weapon);
-    if (isKnife && ClutchShouldUpdateClientModel(client)) {
-        CS_UpdateClientModel(client);
-    } else if (isKnife && g_iLastGloveGroup[client] > 0) {
-        ScheduleGloveViewMaintain(client, 0.15);
+    if (isKnife) {
+        ClutchRequestClientModelUpdate(client);
     }
 }
 
@@ -1027,11 +1029,7 @@ void ApplyAllCachedWeaponsToClient(int client, bool force) {
         ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force);
     }
 
-    if (ClutchShouldUpdateClientModel(client)) {
-        CS_UpdateClientModel(client);
-    } else if (g_iLastGloveGroup[client] > 0) {
-        ScheduleGloveViewMaintain(client, 0.15);
-    }
+    ClutchRequestClientModelUpdate(client);
 }
 
 void ScheduleForceReapply(int client, bool force) {
@@ -1239,6 +1237,59 @@ bool ClutchShouldUpdateClientModel(int client) {
     return true;
 }
 
+void ClutchRequestClientModelUpdate(int client) {
+    if (!ClutchShouldUpdateClientModel(client)) {
+        ClutchEnforceGloveState(client);
+        return;
+    }
+    CS_UpdateClientModel(client);
+}
+
+void ClutchEnableGloveThink(int client) {
+    if (client <= 0 || IsFakeClient(client) || g_bGloveThinkHooked[client]) {
+        return;
+    }
+    SDKHook(client, SDKHook_PreThink, OnGlovePreThink);
+    g_bGloveThinkHooked[client] = true;
+}
+
+void ClutchDisableGloveThink(int client) {
+    if (client <= 0 || !g_bGloveThinkHooked[client]) {
+        return;
+    }
+    SDKUnhook(client, SDKHook_PreThink, OnGlovePreThink);
+    g_bGloveThinkHooked[client] = false;
+}
+
+public void OnGlovePreThink(int client) {
+    if (!IsPlayerAlive(client) || g_iLastGloveGroup[client] <= 0) {
+        return;
+    }
+    if ((GetGameTickCount() % GLOVE_THINK_TICK_MOD) != (client % GLOVE_THINK_TICK_MOD)) {
+        return;
+    }
+    ClutchEnforceGloveState(client);
+}
+
+void ClutchEnforceGloveState(int client) {
+    if (g_iLastGloveGroup[client] <= 0 || g_iLastGlovePaint[client] <= 0) {
+        return;
+    }
+
+    int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
+    if (wearable == -1 || !IsValidEntity(wearable)) {
+        return;
+    }
+
+    // PTaH / knife plugins re-set m_szArmsModel after gloves — that draws default glove mesh under the skin.
+    ClutchFixCustomArms(client);
+    ClutchScrubStrayWearables(client, wearable);
+
+    // m_nBody=1 hides the default glove bodygroup; wearable supplies the paintkit (view always).
+    SetEntProp(client, Prop_Send, "m_nBody", 1);
+    ClutchNetworkUpdate(wearable);
+}
+
 void ClutchDestroyWearableEntity(int entity) {
     if (entity == -1 || !IsValidEntity(entity)) {
         return;
@@ -1307,7 +1358,7 @@ void ClutchFixCustomArms(int client) {
 }
 
 void ClutchClearWearableGloves(int client) {
-    // Remove the default/custom glove the engine attached via the wearable list.
+    ClutchDisableGloveThink(client);
     int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
     int guard = 0;
     while (wearable != -1 && IsValidEntity(wearable) && guard < 64) {
@@ -1377,31 +1428,11 @@ public void OnFrame_FinalizeGloveBody(any userid) {
     if (client <= 0 || !IsClientInGame(client) || !IsPlayerAlive(client)) {
         return;
     }
-    ClutchMaintainGloveView(client);
+    ClutchEnforceGloveState(client);
 }
 
 void ClutchMaintainGloveView(int client) {
-    if (g_iLastGloveGroup[client] <= 0 || g_iLastGlovePaint[client] <= 0) {
-        return;
-    }
-
-    int wearable = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
-    if (wearable == -1 || !IsValidEntity(wearable)) {
-        return;
-    }
-
-    ClutchScrubStrayWearables(client, wearable);
-
-    if (g_cvGlovesWorldModel.BoolValue) {
-        SetEntProp(client, Prop_Send, "m_nBody", 1);
-        ClutchNetworkUpdate(wearable);
-        return;
-    }
-
-    // kgns sm_gloves_enable_world_model 0: wearable view only — no default bodygroup layer.
-    SetEntProp(client, Prop_Send, "m_nBody", 0);
-    ClutchFixCustomArms(client);
-    ClutchNetworkUpdate(wearable);
+    ClutchEnforceGloveState(client);
 }
 
 void ClutchKillActiveWearable(int client) {
@@ -1439,6 +1470,8 @@ void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
     if (ClutchShouldSkipGloveReapply(client, group, paintkit)) {
         g_bGlovesPending[client] = false;
         g_bForceGloveApply[client] = false;
+        ClutchEnableGloveThink(client);
+        ClutchEnforceGloveState(client);
         if (g_cvDebug.BoolValue) {
             LogMessage(
                 "[Clutch] Skipping glove reapply (already %d/%d) for %N",
@@ -1539,11 +1572,7 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
     DispatchSpawn(ent);
 
     SetEntPropEnt(client, Prop_Send, "m_hMyWearables", ent);
-    if (worldModel) {
-        SetEntProp(client, Prop_Send, "m_nBody", 1);
-    } else {
-        SetEntProp(client, Prop_Send, "m_nBody", 0);
-    }
+    SetEntProp(client, Prop_Send, "m_nBody", 1);
 
     ClutchScrubStrayWearables(client, ent);
     ClutchNetworkUpdate(ent);
@@ -1553,14 +1582,16 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
     g_bGlovesPending[client] = false;
     g_bForceGloveApply[client] = false;
 
+    ClutchEnableGloveThink(client);
     RequestFrame(OnFrame_FinalizeGloveBody, GetClientUserId(client));
 
     ScheduleGloveViewMaintain(client, 0.25);
     ScheduleGloveViewMaintain(client, 0.75);
     ScheduleGloveViewMaintain(client, 2.0);
+    ScheduleGloveViewMaintain(client, 5.0);
 
     LogMessage(
-        "[Clutch] Applied gloves group %d paintkit %d for %N (world_model=%d)",
+        "[Clutch] Applied gloves group %d paintkit %d for %N (world_model=%d body=1)",
         group,
         paintkit,
         client,
