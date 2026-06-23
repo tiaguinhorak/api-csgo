@@ -200,10 +200,11 @@ fi
 WEAPONS_SP="${SM}/scripting/weapons.sp"
 if [[ -f "${WEAPONS_SP}" ]]; then
   echo ""
-  echo "Patching weapons.smx (Weapons_ReloadClientData native)..."
+  echo "Patching weapons.smx (ReloadClientData + RefreshWeapon natives)..."
   CSGO_ROOT="${CSGO_ROOT}" bash "${REPO_ROOT}/scripts/patch-weapons-reload-native.sh" || {
-    echo "WARNING: patch-weapons-reload-native.sh failed — colors may not sync until you run it manually." >&2
+    echo "WARNING: patch-weapons-reload-native.sh failed — run it manually then: sm plugins reload weapons" >&2
   }
+  echo "After install, in screen run: sm plugins reload weapons  (not before — patched smx is built here)"
 else
   echo "NOTE: ${WEAPONS_SP} not found — skip weapons native patch (knife colors may not update from site DB)."
 fi
