@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.8"
+#define PLUGIN_VERSION "3.7.9"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -635,7 +635,7 @@ public void Clutch_GiveNamedItemPost(
     }
 
     int entityPaint = GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit");
-    if (entityPaint == paintkit) {
+    if (entityPaint == paintkit && !ClutchClientHasGlovesLoaded(client)) {
         g_iAppliedPaintkit[client][idx] = paintkit;
         return;
     }
@@ -778,6 +778,22 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
         return false;
     }
     g_fLastEntityApply[client][idx] = now;
+
+    if (!isKnife && (force || ClutchClientHasGlovesLoaded(client))) {
+        if (ClutchRefreshWeaponSlot(client, idx)) {
+            if (g_cvDebug.BoolValue) {
+                char classname[64];
+                GetEntityClassname(entity, classname, sizeof(classname));
+                LogMessage(
+                    "[Clutch] Refreshed %s paintkit %d for %N (re-give)",
+                    classname,
+                    paintkit,
+                    client
+                );
+            }
+            return true;
+        }
+    }
 
     SetClutchWeaponProps(
         client,
@@ -1139,6 +1155,7 @@ void SetClutchWeaponProps(
         }
     }
 
+    ClutchSetOriginalOwnerXuid(client, weapon);
     SetEntProp(weapon, Prop_Send, "m_iAccountID", GetSteamAccountID(client));
     if (HasEntProp(weapon, Prop_Send, "m_hOwnerEntity")) {
         SetEntPropEnt(weapon, Prop_Send, "m_hOwnerEntity", client);
@@ -1152,11 +1169,183 @@ void SetClutchWeaponProps(
     }
 
     ClutchNetworkUpdateWeaponSkin(weapon);
+    if (!isKnife) {
+        ClutchMirrorSkinToViewModels(client, weapon);
+    }
     if (isKnife && ClutchClientHasGlovesLoaded(client)) {
         return;
     } else if (isKnife) {
         ClutchRequestClientModelUpdate(client);
     }
+}
+
+void ClutchSetOriginalOwnerXuid(int client, int entity) {
+    int accountId = GetSteamAccountID(client);
+    if (HasEntProp(entity, Prop_Send, "m_OriginalOwnerXuidLow")) {
+        SetEntProp(entity, Prop_Send, "m_OriginalOwnerXuidLow", accountId);
+    }
+    if (HasEntProp(entity, Prop_Send, "m_OriginalOwnerXuidHigh")) {
+        SetEntProp(entity, Prop_Send, "m_OriginalOwnerXuidHigh", 0);
+    }
+}
+
+void ClutchCopyWeaponSkinProps(int source, int target) {
+    if (!IsPaintableWeaponEntity(source) || !IsPaintableWeaponEntity(target)) {
+        return;
+    }
+
+    SetEntProp(target, Prop_Send, "m_iItemIDLow", GetEntProp(source, Prop_Send, "m_iItemIDLow"));
+    SetEntProp(target, Prop_Send, "m_iItemIDHigh", GetEntProp(source, Prop_Send, "m_iItemIDHigh"));
+    SetEntProp(target, Prop_Send, "m_nFallbackPaintKit", GetEntProp(source, Prop_Send, "m_nFallbackPaintKit"));
+    SetEntPropFloat(target, Prop_Send, "m_flFallbackWear", GetEntPropFloat(source, Prop_Send, "m_flFallbackWear"));
+    SetEntProp(target, Prop_Send, "m_nFallbackSeed", GetEntProp(source, Prop_Send, "m_nFallbackSeed"));
+    SetEntProp(target, Prop_Send, "m_nFallbackStatTrak", GetEntProp(source, Prop_Send, "m_nFallbackStatTrak"));
+    SetEntProp(target, Prop_Send, "m_iEntityQuality", GetEntProp(source, Prop_Send, "m_iEntityQuality"));
+    SetEntProp(target, Prop_Send, "m_iAccountID", GetEntProp(source, Prop_Send, "m_iAccountID"));
+    ClutchNetworkUpdateWeaponSkin(target);
+}
+
+void ClutchMirrorSkinToViewModels(int client, int weapon) {
+    if (client <= 0 || weapon <= 0 || !IsValidEntity(weapon)) {
+        return;
+    }
+
+    if (HasEntProp(client, Prop_Send, "m_hViewModel")) {
+        for (int slot = 0; slot <= 1; slot++) {
+            int viewModel = GetEntPropEnt(client, Prop_Send, "m_hViewModel", _, slot);
+            if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
+                ClutchCopyWeaponSkinProps(weapon, viewModel);
+            }
+        }
+    }
+
+    int predicted = -1;
+    while ((predicted = FindEntityByClassname(predicted, "predicted_viewmodel")) != -1) {
+        if (!IsValidEntity(predicted)) {
+            continue;
+        }
+
+        int owner = GetEntPropEnt(predicted, Prop_Send, "m_hOwner");
+        if (owner != client) {
+            continue;
+        }
+
+        if (HasEntProp(predicted, Prop_Send, "m_hWeapon")) {
+            int linkedWeapon = GetEntPropEnt(predicted, Prop_Send, "m_hWeapon");
+            if (linkedWeapon != weapon) {
+                continue;
+            }
+        }
+
+        if (!IsPaintableWeaponEntity(predicted)) {
+            continue;
+        }
+
+        ClutchCopyWeaponSkinProps(weapon, predicted);
+    }
+}
+
+bool ClutchRefreshWeaponSlot(int client, int idx) {
+    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+        return false;
+    }
+
+    int paintkit = g_CachedPaintkit[client][idx];
+    if (paintkit <= 0 || !IsClientInGame(client) || IsFakeClient(client)) {
+        return false;
+    }
+
+    char weaponClass[32];
+    strcopy(weaponClass, sizeof(weaponClass), g_ClutchWeaponKeys[idx]);
+
+    int clip = -1;
+    int reserve = -1;
+    int ammoOffset = -1;
+    int ammo = -1;
+    bool found = false;
+
+    int size = GetEntPropArraySize(client, Prop_Send, "m_hMyWeapons");
+    for (int i = 0; i < size; i++) {
+        int existing = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
+        if (!IsValidEntity(existing)) {
+            continue;
+        }
+
+        char classname[64];
+        GetEntityClassname(existing, classname, sizeof(classname));
+        if (!StrEqual(classname, weaponClass, false)) {
+            continue;
+        }
+
+        int ammoType = GetEntProp(existing, Prop_Data, "m_iPrimaryAmmoType");
+        if (ammoType >= 0) {
+            ammoOffset = FindDataMapInfo(client, "m_iAmmo") + (ammoType * 4);
+            if (ammoOffset > 0) {
+                ammo = GetEntData(client, ammoOffset);
+            }
+        }
+        clip = GetEntProp(existing, Prop_Send, "m_iClip1");
+        reserve = GetEntProp(existing, Prop_Send, "m_iPrimaryReserveAmmoCount");
+
+        RemovePlayerItem(client, existing);
+        if (IsValidEntity(existing)) {
+            AcceptEntityInput(existing, "KillHierarchy");
+        }
+        found = true;
+        break;
+    }
+
+    if (!found) {
+        return false;
+    }
+
+    int newWeapon = GivePlayerItem(client, weaponClass);
+    if (newWeapon == -1) {
+        return false;
+    }
+
+    SetClutchWeaponProps(
+        client,
+        newWeapon,
+        paintkit,
+        g_CachedWear[client][idx],
+        g_CachedSeed[client][idx],
+        g_CachedTrak[client][idx],
+        g_CachedTrakCount[client][idx],
+        g_CachedTag[client][idx],
+        false
+    );
+    g_iAppliedPaintkit[client][idx] = paintkit;
+
+    if (clip != -1) {
+        SetEntProp(newWeapon, Prop_Send, "m_iClip1", clip);
+    }
+    if (reserve != -1) {
+        SetEntProp(newWeapon, Prop_Send, "m_iPrimaryReserveAmmoCount", reserve);
+    }
+    if (ammoOffset > 0 && ammo != -1) {
+        DataPack ammoPack = new DataPack();
+        ammoPack.WriteCell(GetClientUserId(client));
+        ammoPack.WriteCell(ammoOffset);
+        ammoPack.WriteCell(ammo);
+        CreateTimer(0.1, Timer_RestoreWeaponAmmo, ammoPack, TIMER_FLAG_NO_MAPCHANGE);
+    }
+
+    return true;
+}
+
+public Action Timer_RestoreWeaponAmmo(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int ammoOffset = pack.ReadCell();
+    int ammo = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && ammoOffset > 0) {
+        SetEntData(client, ammoOffset, ammo, 4, true);
+    }
+    return Plugin_Stop;
 }
 
 void ClutchNetworkUpdate(int entity) {
@@ -1535,8 +1724,7 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
 
         int weapon = FindPlayerWeapon(client, weaponId);
         if (weapon != -1) {
-            SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, stattrakCount, nametag, false);
-            g_iAppliedPaintkit[client][idx] = paintkit;
+            ApplyCachedSkinToEntity(client, weapon, idx, false, true);
         }
     }
 
@@ -2293,8 +2481,7 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
             }
         }
         if (weapon != -1 && needsApply) {
-            SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, stattrakCount, nametag, false);
-            g_iAppliedPaintkit[client][i] = paintkit;
+            ApplyCachedSkinToEntity(client, weapon, i, false, force);
             if (g_cvDebug.BoolValue) {
                 char classname[64];
                 GetEntityClassname(weapon, classname, sizeof(classname));
