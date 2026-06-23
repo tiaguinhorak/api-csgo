@@ -4,6 +4,7 @@
 # Uso:
 #   cd ~/api-csgo && git pull
 #   bash scripts/install-csgo-weaponstickers.sh
+#   WEAPONSTICKERS_FORCE=1 bash scripts/install-csgo-weaponstickers.sh  # replace broken .smx
 #
 # Requer: curl, unzip (+ unrar ou 7z para o release z1ntex .rar)
 
@@ -50,6 +51,8 @@ Z1NTEX_RAR_URL="https://github.com/z1ntex/CSGO_WeaponStickers/releases/download/
 QUASEMAGO_ZIP_URL="https://github.com/quasemago/CSGO_WeaponStickers/releases/download/v1.0.13c/weaponstickers_1.0.13c.zip"
 EITEMS_ZIP_URL="https://github.com/quasemago/eItems/releases/download/0.10_noapi/eItems_0.10.No.API.zip"
 PTAH_LINUX_URL="https://github.com/komashchenko/PTaH/releases/download/v1.1.4/linux.zip"
+RIPEXT_LINUX_URL="https://github.com/ErikMinekus/sm-ripext/releases/download/1.2.3/sm-ripext-1.2.3-linux.tar.gz"
+MULTICOLORS_ZIP_URL="https://github.com/Bara/Multi-Colors/archive/refs/heads/master.zip"
 
 if [[ ! -d "${SM}/plugins" ]]; then
   echo "SourceMod not found at ${SM}" >&2
@@ -63,6 +66,9 @@ extract_archive() {
   case "${file}" in
     *.zip)
       unzip -qo "${file}" -d "${dest}"
+      ;;
+    *.tar.gz)
+      tar -xzf "${file}" -C "${dest}"
       ;;
     *.rar)
       if command -v unrar >/dev/null 2>&1; then
@@ -138,6 +144,37 @@ has_ptah_extension() {
     || [[ -f "${SM}/extensions/PTaH.ext.so" ]]
 }
 
+has_ripext_extension() {
+  compgen -G "${SM}/extensions/rip.ext*.so" >/dev/null 2>&1 \
+    || [[ -f "${SM}/extensions/rip.ext.so" ]]
+}
+
+has_multicolors_include() {
+  [[ -f "${SM}/scripting/include/multicolors.inc" ]]
+}
+
+install_ripext() {
+  echo ""
+  echo ">>> REST in Pawn (sm-ripext) — required by eItems + WeaponStickers"
+  curl -fsSL "${RIPEXT_LINUX_URL}" -o "${TMP_DIR}/ripext.tar.gz"
+  extract_archive "${TMP_DIR}/ripext.tar.gz" "${TMP_DIR}/ripext"
+  merge_addons_tree "${TMP_DIR}/ripext"
+  # Force load even before dependent plugins are up.
+  touch "${SM}/extensions/rip.autoload" 2>/dev/null || true
+}
+
+install_multicolors() {
+  echo ""
+  echo ">>> Multi-Colors include (multicolors.inc)"
+  curl -fsSL "${MULTICOLORS_ZIP_URL}" -o "${TMP_DIR}/multicolors.zip"
+  extract_archive "${TMP_DIR}/multicolors.zip" "${TMP_DIR}/multicolors"
+  merge_addons_tree "${TMP_DIR}/multicolors"
+  # GitHub archive: Multi-Colors-master/addons/...
+  if [[ -d "${TMP_DIR}/multicolors/Multi-Colors-master/addons" ]]; then
+    cp -a "${TMP_DIR}/multicolors/Multi-Colors-master/addons/." "${CSGO_ROOT}/addons/"
+  fi
+}
+
 install_weaponstickers_z1ntex() {
   echo ""
   echo ">>> Download WeaponStickers v1.3.6 (z1ntex .rar)"
@@ -193,9 +230,22 @@ install_ptah() {
 echo "=== CSGO_WeaponStickers installer ==="
 echo "CSGO_ROOT=${CSGO_ROOT}"
 
+if [[ "${WEAPONSTICKERS_FORCE:-0}" == "1" ]]; then
+  echo "WEAPONSTICKERS_FORCE=1 — reinstalling csgo_weaponstickers.smx"
+  rm -f "${SM}/plugins/csgo_weaponstickers.smx"
+fi
+
+if ! has_ripext_extension; then
+  install_ripext
+fi
+
+if ! has_multicolors_include; then
+  install_multicolors
+fi
+
 if ! has_weaponstickers_plugin; then
   if ! install_weaponstickers_z1ntex; then
-    echo "WARN: z1ntex rar install failed (install unrar-free if needed)"
+    echo "WARN: z1ntex rar install failed (install p7zip-full or unrar-free)"
   fi
 fi
 
@@ -209,6 +259,11 @@ fi
 
 if ! has_ptah_extension; then
   install_ptah
+fi
+
+# Re-check deps after installs
+if ! has_ripext_extension; then
+  install_ripext
 fi
 
 echo ""
@@ -300,16 +355,31 @@ if has_ptah_extension; then
 else
   echo "WARN: PTaH extension missing"
 fi
+if has_ripext_extension; then
+  ls -la "${SM}/extensions/rip.ext"*.so 2>/dev/null | head -3
+else
+  echo "ERROR: rip.ext (REST in Pawn) missing — eItems and WeaponStickers will fail"
+fi
+if has_multicolors_include; then
+  ls -la "${SM}/scripting/include/multicolors.inc"
+else
+  echo "WARN: multicolors.inc missing"
+fi
 
-if ! has_weaponstickers_plugin || ! has_eitems_plugin; then
+if ! has_weaponstickers_plugin || ! has_eitems_plugin || ! has_ripext_extension; then
   echo ""
   echo "ERROR: install incomplete — fix errors above and re-run." >&2
+  echo "  Tip: sudo apt install -y p7zip-full" >&2
+  echo "  Tip: WEAPONSTICKERS_FORCE=1 bash scripts/install-csgo-weaponstickers.sh" >&2
   exit 1
 fi
 
 echo ""
 echo "=== Done ==="
-echo "In screen:"
-echo "  sm plugins load eItems"
-echo "  sm plugins load csgo_weaponstickers"
+echo "Restart srcds OR in server console (order matters):"
+echo "  sm exts list | grep -i rip"
+echo "  sm plugins reload eItems"
+echo "  sm plugins reload csgo_weaponstickers"
 echo "  sm plugins list | grep -iE 'eitems|weaponstickers'"
+echo ""
+echo "If plugins still fail, full map change or: changelevel de_dust2"
