@@ -15,17 +15,16 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.5.0"
+#define PLUGIN_VERSION "3.5.1"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
 #define ENTITY_APPLY_COOLDOWN 1.5
 #define REAPPLY_PASS_COUNT 6
-#define SPAWN_APPLY_DELAY 0.35
-#define SPAWN_GLOVE_QUERY_DELAY 3.6
-#define FORCE_GLOVE_AFTER_WEAPONS_DELAY 3.5
-#define SPAWN_WEARABLE_CULL_COUNT 4
+#define SPAWN_APPLY_AFTER_GLOVES_DELAY 1.25
+#define SPAWN_GLOVE_DB_REFRESH_DELAY 0.75
+#define FORCE_WEAPONS_AFTER_GLOVES_DELAY 1.5
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -47,6 +46,9 @@ bool g_bForceGloveApply[MAXPLAYERS + 1];
 int g_iLastGloveGroup[MAXPLAYERS + 1];
 int g_iLastGlovePaint[MAXPLAYERS + 1];
 bool g_bGloveThinkHooked[MAXPLAYERS + 1];
+int g_iTeamGloveGroup[MAXPLAYERS + 1][2];
+int g_iTeamGlovePaint[MAXPLAYERS + 1][2];
+float g_fTeamGloveWear[MAXPLAYERS + 1][2];
 Handle g_hRefreshTimer = null;
 
 int g_CachedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
@@ -59,7 +61,6 @@ int g_iAppliedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 char g_CachedKnifeClass[MAXPLAYERS + 1][CLUTCH_KNIFE_CLASS_LEN];
 float g_fLastEntityApply[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.0, 0.15, 0.35, 0.75, 1.5, 3.0};
-float g_fSpawnWearableCullDelays[SPAWN_WEARABLE_CULL_COUNT] = {0.25, 0.75, 1.5, 2.5};
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -304,8 +305,7 @@ public Action Timer_RefreshFromDb(Handle timer) {
 public Action Command_ReloadSkins(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
-            ApplyClientSkins(i, true);
-            ScheduleForcePlayerGloves(i);
+            ClutchBeginForcedSync(i);
         }
     }
     ReplyToCommand(client, "[Clutch] Loadouts reaplicados do weapons DB.");
@@ -315,12 +315,39 @@ public Action Command_ReloadSkins(int client, int args) {
 public Action Command_ApplySkins(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
-            ApplyClientSkins(i, true);
-            ScheduleForcePlayerGloves(i);
+            ClutchBeginForcedSync(i);
         }
     }
     ReplyToCommand(client, "[Clutch] Reaplicando skins nos jogadores.");
     return Plugin_Handled;
+}
+
+void ClutchBeginForcedSync(int client) {
+    g_bForceGloveApply[client] = true;
+    g_bGlovesPending[client] = false;
+    g_iGloveQueryGen[client]++;
+    g_iGloveApplyGen[client]++;
+
+    char steamId[32];
+    if (GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+        QueryPlayerGloves(client, steamId, 0);
+    }
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    CreateTimer(FORCE_WEAPONS_AFTER_GLOVES_DELAY, Timer_ApplyWeaponsAfterGloves, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplyWeaponsAfterGloves(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        ApplyClientSkins(client, true);
+    }
+    return Plugin_Stop;
 }
 
 public void OnClientDisconnect(int client) {
@@ -338,6 +365,12 @@ public void OnClientDisconnect(int client) {
     g_bForceGloveApply[client] = false;
     g_CachedKnifeClass[client][0] = '\0';
     ClutchDisableGloveThink(client);
+    g_iTeamGloveGroup[client][0] = 0;
+    g_iTeamGloveGroup[client][1] = 0;
+    g_iTeamGlovePaint[client][0] = 0;
+    g_iTeamGlovePaint[client][1] = 0;
+    g_fTeamGloveWear[client][0] = 0.15;
+    g_fTeamGloveWear[client][1] = 0.15;
 
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
         g_CachedPaintkit[client][i] = 0;
@@ -406,10 +439,72 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     g_iGloveQueryGen[client]++;
     g_iLastGloveGroup[client] = 0;
     g_iLastGlovePaint[client] = 0;
-    ClutchClearWearableGloves(client);
-    ScheduleSpawnWearableCull(client);
-    ScheduleApplyClientSkins(client);
-    ScheduleQueryPlayerGloves(client);
+
+    ClutchStripMismatchedSpawnWearable(client);
+
+    int userid = GetClientUserId(client);
+    CreateTimer(0.05, Timer_ApplySpawnGlovesFromCache, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(SPAWN_GLOVE_DB_REFRESH_DELAY, Timer_QueryPlayerGlovesDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(SPAWN_APPLY_AFTER_GLOVES_DELAY, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+void ClutchStripMismatchedSpawnWearable(int client) {
+    int ent = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
+    if (ent == -1 || !IsValidEntity(ent)) {
+        return;
+    }
+
+    int team = GetClientTeam(client);
+    if (team != CS_TEAM_T && team != CS_TEAM_CT) {
+        ClutchDestroyWearableEntity(ent);
+        SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
+        return;
+    }
+
+    int idx = team == CS_TEAM_CT ? 1 : 0;
+    int wantGroup = g_iTeamGloveGroup[client][idx];
+    int wantPaint = g_iTeamGlovePaint[client][idx];
+    if (wantGroup <= 0 || wantPaint <= 0) {
+        ClutchDestroyWearableEntity(ent);
+        SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
+        SetEntProp(client, Prop_Send, "m_nBody", 0);
+        return;
+    }
+
+    int def = GetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex");
+    int paint = GetEntProp(ent, Prop_Send, "m_nFallbackPaintKit");
+    if (def != wantGroup || paint != wantPaint) {
+        ClutchDestroyWearableEntity(ent);
+        SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
+        SetEntProp(client, Prop_Send, "m_nBody", 0);
+    }
+}
+
+public Action Timer_ApplySpawnGlovesFromCache(Handle timer, any userid) {
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || !IsPlayerAlive(client)) {
+        return Plugin_Stop;
+    }
+
+    int team = GetClientTeam(client);
+    if (team != CS_TEAM_T && team != CS_TEAM_CT) {
+        return Plugin_Stop;
+    }
+
+    int idx = team == CS_TEAM_CT ? 1 : 0;
+    int group = g_iTeamGloveGroup[client][idx];
+    int paint = g_iTeamGlovePaint[client][idx];
+    float wear = g_fTeamGloveWear[client][idx];
+    if (group <= 0 || paint <= 0) {
+        return Plugin_Stop;
+    }
+
+    g_bForceGloveApply[client] = true;
+    ClutchGivePlayerGloves(client, group, paint, wear);
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Spawn cache gloves %d/%d for %N before weapons", group, paint, client);
+    }
+    return Plugin_Stop;
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
@@ -596,7 +691,7 @@ public Action Timer_ApplyAllPlayersSkins(Handle timer) {
 
 void ScheduleApplyClientSkins(int client) {
     int userid = GetClientUserId(client);
-    CreateTimer(SPAWN_APPLY_DELAY, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(SPAWN_APPLY_AFTER_GLOVES_DELAY, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
@@ -607,34 +702,29 @@ public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
     return Plugin_Stop;
 }
 
-void ScheduleForcePlayerGloves(int client) {
-    if (client <= 0 || IsFakeClient(client)) {
+void ClutchPersistGloveLoadout(int client, int team, int group, int paint, float wear) {
+    if (team != CS_TEAM_T && team != CS_TEAM_CT) {
         return;
     }
-    DataPack pack = new DataPack();
-    pack.WriteCell(GetClientUserId(client));
-    CreateTimer(FORCE_GLOVE_AFTER_WEAPONS_DELAY, Timer_ForcePlayerGloves, pack, TIMER_FLAG_NO_MAPCHANGE);
-}
 
-public Action Timer_ForcePlayerGloves(Handle timer, DataPack pack) {
-    pack.Reset();
-    int userid = pack.ReadCell();
-    delete pack;
+    int idx = team == CS_TEAM_CT ? 1 : 0;
+    g_iTeamGloveGroup[client][idx] = group;
+    g_iTeamGlovePaint[client][idx] = paint;
+    g_fTeamGloveWear[client][idx] = wear;
 
-    int client = GetClientOfUserId(userid);
-    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
-        ForceReapplyPlayerGloves(client);
+    if (group > 0 && paint > 0) {
+        int other = idx == 0 ? 1 : 0;
+        g_iTeamGloveGroup[client][other] = group;
+        g_iTeamGlovePaint[client][other] = paint;
+        g_fTeamGloveWear[client][other] = wear;
     }
-    return Plugin_Stop;
 }
 
 void ForceReapplyPlayerGloves(int client) {
     g_bForceGloveApply[client] = true;
-    g_iLastGloveGroup[client] = 0;
-    g_iLastGlovePaint[client] = 0;
     g_bGlovesPending[client] = false;
     g_iGloveQueryGen[client]++;
-    ClutchClearWearableGloves(client);
+    g_iGloveApplyGen[client]++;
 
     char steamId[32];
     if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
@@ -642,43 +732,6 @@ void ForceReapplyPlayerGloves(int client) {
         return;
     }
     QueryPlayerGloves(client, steamId, 0);
-}
-
-void ScheduleSpawnWearableCull(int client) {
-    if (client <= 0 || IsFakeClient(client)) {
-        return;
-    }
-
-    int userid = GetClientUserId(client);
-    for (int i = 0; i < SPAWN_WEARABLE_CULL_COUNT; i++) {
-        DataPack pack = new DataPack();
-        pack.WriteCell(userid);
-        pack.WriteCell(i);
-        CreateTimer(g_fSpawnWearableCullDelays[i], Timer_CullSpawnWearable, pack, TIMER_FLAG_NO_MAPCHANGE);
-    }
-}
-
-public Action Timer_CullSpawnWearable(Handle timer, DataPack pack) {
-    pack.Reset();
-    int userid = pack.ReadCell();
-    int pass = pack.ReadCell();
-    delete pack;
-
-    int client = GetClientOfUserId(userid);
-    if (client <= 0 || !IsClientInGame(client) || !IsPlayerAlive(client)) {
-        return Plugin_Stop;
-    }
-
-    if (g_iLastGloveGroup[client] > 0) {
-        return Plugin_Stop;
-    }
-
-    ClutchCullEngineDefaultWearable(client);
-
-    if (g_cvDebug.BoolValue && pass == SPAWN_WEARABLE_CULL_COUNT - 1) {
-        LogMessage("[Clutch] Spawn wearable cull pass %d for %N (awaiting DB gloves)", pass, client);
-    }
-    return Plugin_Stop;
 }
 
 void ScheduleGloveViewMaintain(int client, float delay) {
@@ -696,7 +749,7 @@ void ScheduleQueryPlayerGloves(int client) {
         return;
     }
     int userid = GetClientUserId(client);
-    CreateTimer(SPAWN_GLOVE_QUERY_DELAY, Timer_QueryPlayerGlovesDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(SPAWN_GLOVE_DB_REFRESH_DELAY, Timer_QueryPlayerGlovesDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_QueryPlayerGlovesDelayed(Handle timer, any userid) {
@@ -1460,6 +1513,8 @@ public Action Timer_RetryGlovesAfterTeam(Handle timer, DataPack pack) {
 
 void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
     if (group <= 0 || paintkit <= 0) {
+        int clearTeam = GetClientTeam(client);
+        ClutchPersistGloveLoadout(client, clearTeam, 0, 0, 0.0);
         ClutchFixCustomArms(client);
         ClutchClearWearableGloves(client);
         g_bGlovesPending[client] = false;
@@ -1582,7 +1637,16 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
     g_bGlovesPending[client] = false;
     g_bForceGloveApply[client] = false;
 
+    ClutchPersistGloveLoadout(client, team, group, paintkit, wear);
+
     ClutchEnableGloveThink(client);
+    ClutchEnforceGloveState(client);
+    CS_UpdateClientModel(client);
+
+    DataPack reenforcePack = new DataPack();
+    reenforcePack.WriteCell(GetClientUserId(client));
+    CreateTimer(0.05, Timer_ReenforceGlovesAfterModelUpdate, reenforcePack, TIMER_FLAG_NO_MAPCHANGE);
+
     RequestFrame(OnFrame_FinalizeGloveBody, GetClientUserId(client));
 
     ScheduleGloveViewMaintain(client, 0.25);
@@ -1597,6 +1661,18 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
         client,
         worldModel ? 1 : 0
     );
+    return Plugin_Stop;
+}
+
+public Action Timer_ReenforceGlovesAfterModelUpdate(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && IsPlayerAlive(client)) {
+        ClutchEnforceGloveState(client);
+    }
     return Plugin_Stop;
 }
 
