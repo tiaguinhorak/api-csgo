@@ -10,6 +10,7 @@ import csgoStickersPushRouter from './routes/csgo-stickers-push';
 import { skinManager } from './services/skin-manager';
 import { resolveWeaponsDbPath } from './services/weapons-db-path';
 import { startMatchLiveWatcher } from './services/match-live-watcher';
+import { startSteamAllowlistSync } from './services/steam-allowlist-sync';
 import { assertProductionApiKey, requireApiAuth } from './middleware/auth';
 
 const app = express();
@@ -60,6 +61,14 @@ try {
 }
 
 startMatchLiveWatcher();
+
+if (process.env.CLUTCH_SITE_URL?.trim() && process.env.CSGO_SKINS_SYNC_KEY?.trim()) {
+  startSteamAllowlistSync();
+} else {
+  console.warn(
+    '[steam-allowlist] skipped — set CLUTCH_SITE_URL and CSGO_SKINS_SYNC_KEY to enable platform gate sync',
+  );
+}
 
 const bindHost = process.env.BIND_HOST?.trim() || '0.0.0.0';
 
