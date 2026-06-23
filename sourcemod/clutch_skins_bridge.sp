@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.2"
+#define PLUGIN_VERSION "3.7.3"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -1246,6 +1246,7 @@ bool ClutchWeaponAllowedForTeam(const char[] weaponKey, int csTeam) {
         StrEqual(weaponKey, "weapon_glock", false)
         || StrEqual(weaponKey, "weapon_tec9", false)
         || StrEqual(weaponKey, "weapon_galilar", false)
+        || StrEqual(weaponKey, "weapon_ak47", false)
         || StrEqual(weaponKey, "weapon_sg556", false)
         || StrEqual(weaponKey, "weapon_scar20", false)
         || StrEqual(weaponKey, "weapon_g3sg1", false)
