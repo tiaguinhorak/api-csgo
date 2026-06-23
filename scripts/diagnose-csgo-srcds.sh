@@ -26,6 +26,10 @@ if [[ -f "${SERVER_ROOT}/bin/srcds_linux" ]]; then
   ldd "${SERVER_ROOT}/bin/srcds_linux" 2>&1 | grep -i 'not found' || echo "(ldd: no missing libs)"
 else
   echo "MISSING: ${SERVER_ROOT}/bin/srcds_linux"
+  if [[ -d "${SERVER_ROOT}/bin" ]]; then
+    echo "bin/ contents:"
+    ls -la "${SERVER_ROOT}/bin" 2>/dev/null | head -15 || true
+  fi
 fi
 echo ""
 
@@ -35,8 +39,10 @@ if [[ -f "${SERVER_ROOT}/game/bin/linuxsteamrt64/cs2" ]] || [[ -f "${SERVER_ROOT
   echo ""
 fi
 
-if ls "${SERVER_ROOT}"/csgo/crash*" "${SERVER_ROOT}"/core* 2>/dev/null | head -3; then
-  echo "(recent crash dumps above)"
+crash_files="$(find "${SERVER_ROOT}/csgo" -maxdepth 1 -name 'crash*' 2>/dev/null | head -3 || true)"
+if [[ -n "${crash_files}" ]]; then
+  echo "${crash_files}"
+  echo "recent crash dumps above"
 fi
 echo ""
 
