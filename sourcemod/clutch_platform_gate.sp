@@ -57,7 +57,7 @@ public void OnClientAuthorized(int client, const char[] auth) {
         return;
     }
 
-    int accountId = GetSteamAccountID(client, AuthIdType_AccountID);
+    int accountId = GetSteamAccountID(client);
     if (accountId <= 0) {
         KickClient(client, "Steam não identificado. Abra o Steam e tente novamente.");
         return;
