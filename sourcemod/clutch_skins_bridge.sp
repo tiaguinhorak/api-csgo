@@ -22,7 +22,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.14"
+#define PLUGIN_VERSION "3.7.15"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -650,12 +650,6 @@ public Action Clutch_GiveNamedItemPre(
     bool &originIsNull,
     float origin[3]
 ) {
-    if (client <= 0 || IsFakeClient(client)) {
-        return Plugin_Continue;
-    }
-#if defined _weapons_included_
-    TryReloadWeaponsPluginData(client);
-#endif
     return Plugin_Continue;
 }
 
@@ -683,19 +677,8 @@ public void Clutch_GiveNamedItemPost(
         return;
     }
 
-#if defined _weapons_included_
-    if (!IsMeleeClassname(cn) && LibraryExists("weapons") && g_bWeaponsReloadNative) {
-        int entityPaint = GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit");
-        if (entityPaint == paintkit) {
-            g_iAppliedPaintkit[client][idx] = paintkit;
-        }
-        return;
-    }
-#endif
-
     int entityPaint = GetEntProp(entity, Prop_Send, "m_nFallbackPaintKit");
-    if (entityPaint == paintkit && !ClutchClientHasGlovesLoaded(client)) {
-        g_iAppliedPaintkit[client][idx] = paintkit;
+    if (entityPaint == paintkit && g_iAppliedPaintkit[client][idx] == paintkit) {
         return;
     }
 
@@ -837,35 +820,6 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
         return false;
     }
     g_fLastEntityApply[client][idx] = now;
-
-#if defined _weapons_included_
-    if (!isKnife && LibraryExists("weapons")) {
-        TryReloadWeaponsPluginData(client);
-        if (g_bWeaponsRefreshNative) {
-            float regiveNow = GetGameTime();
-            bool canRefresh = allowRegive
-                && regiveNow - g_fLastWeaponRegive[client][idx] >= WEAPON_REGIVE_COOLDOWN;
-            if (canRefresh || entityPaint != paintkit) {
-                if (canRefresh) {
-                    Weapons_RefreshWeapon(client, idx);
-                    g_fLastWeaponRegive[client][idx] = regiveNow;
-                    g_iAppliedPaintkit[client][idx] = paintkit;
-                    if (g_cvDebug.BoolValue) {
-                        LogMessage(
-                            "[Clutch] weapons.smx refresh %s paintkit %d for %N",
-                            g_ClutchWeaponKeys[idx],
-                            paintkit,
-                            client
-                        );
-                    }
-                    return true;
-                }
-            } else if (entityPaint == paintkit) {
-                return false;
-            }
-        }
-    }
-#endif
 
     if (!isKnife && allowRegive && ClutchClientHasGlovesLoaded(client)) {
         if (GetGameTime() - g_fLastWeaponRegive[client][idx] < WEAPON_REGIVE_COOLDOWN) {
@@ -1837,6 +1791,13 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
         int weapon = FindPlayerWeapon(client, weaponId);
         if (weapon != -1) {
             ApplyCachedSkinToEntity(client, weapon, idx, false, true, false);
+        } else if (g_cvDebug.BoolValue) {
+            LogMessage(
+                "[Clutch] Cached %s paintkit %d for %N (pick up weapon to apply)",
+                weaponId,
+                paintkit,
+                client
+            );
         }
     }
 

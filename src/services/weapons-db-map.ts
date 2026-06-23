@@ -451,7 +451,7 @@ export function buildPlayerLoadoutSql(
 
     if (!w.paintkit || w.paintkit <= 0) continue;
 
-    // Per-side paintkits (shared + team-exclusive) live in clutch_team_loadout only.
+    // Per-side paintkits: shared weapons → clutch_team_loadout only; team-exclusive → kgns + team table.
     if (w.team === 'T' || w.team === 'CT') {
       if (isMeleeWeaponId(w.weaponId)) {
         const teamColumn = weaponIdToDbColumn(w.weaponId);
@@ -461,7 +461,9 @@ export function buildPlayerLoadoutSql(
         updates.push('knife=0');
         continue;
       }
-      continue;
+      if (!isTeamExclusiveWeapon(w.weaponId)) {
+        continue;
+      }
     }
 
 
