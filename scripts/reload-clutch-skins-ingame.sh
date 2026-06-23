@@ -80,6 +80,6 @@ send_cmd "sm_clutch_applyskins"
 
 echo ""
 echo "Done. Expect z_clutch_skins_bridge Version: ${EXPECTED_VERSION}"
-echo "Wait ~4s after sm_clutch_applyskins for gloves (3.4.2+)."
+echo "Wait ~4s after sm_clutch_applyskins for gloves (3.4.6+ applies after weapons)."
 echo "If weapons reload failed, change map (sm_map de_dust2) then re-run this script."
 echo "Respawn in-game after apply. New errors: tail addons/sourcemod/logs/errors_*.log"
