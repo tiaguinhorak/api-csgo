@@ -462,6 +462,10 @@ export function buildPlayerLoadoutSql(
         continue;
       }
       if (!isTeamExclusiveWeapon(w.weaponId)) {
+        const sharedColumn = weaponIdToDbColumn(w.weaponId);
+        if (sharedColumn) {
+          updates.push(...clearColumnUpdates(sharedColumn));
+        }
         continue;
       }
     }

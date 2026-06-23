@@ -22,7 +22,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.15"
+#define PLUGIN_VERSION "3.7.16"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -1622,6 +1622,15 @@ bool ClutchWeaponAllowedForTeam(const char[] weaponKey, int csTeam) {
     return true;
 }
 
+/** Deagle, AWP, etc. — per-side paints live in clutch_team_loadout, not kgns columns. */
+bool ClutchIsSharedWeaponKey(const char[] weaponKey) {
+    if (IsMeleeWeaponKey(weaponKey)) {
+        return false;
+    }
+    return ClutchWeaponAllowedForTeam(weaponKey, CS_TEAM_T)
+        && ClutchWeaponAllowedForTeam(weaponKey, CS_TEAM_CT);
+}
+
 void QueryKgnsLoadout(int client, const char[] steamId, int altAttempt, bool force) {
     if (g_hWeaponsDb == null) {
         ConnectWeaponsDatabase();
@@ -1707,6 +1716,22 @@ public void T_TeamLoadoutCallback(Database database, DBResultSet results, const 
     }
 
     bool hadRows = ApplyTeamLoadoutFromResults(client, results, force);
+    if (g_cvDebug.BoolValue) {
+        int csTeamDbg = GetClientTeam(client);
+        char sideDbg[3] = "??";
+        if (csTeamDbg == CS_TEAM_T) {
+            strcopy(sideDbg, sizeof(sideDbg), "T");
+        } else if (csTeamDbg == CS_TEAM_CT) {
+            strcopy(sideDbg, sizeof(sideDbg), "CT");
+        }
+        LogMessage(
+            "[Clutch] team loadout side=%s steam=%s had=%d for %N",
+            sideDbg,
+            steamId,
+            hadRows ? 1 : 0,
+            client
+        );
+    }
     if (!hadRows) {
         if (altAttempt == 0) {
             char altSteam[32];
@@ -1876,11 +1901,6 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
     }
 
     g_bLoggedMissingLoadout[client] = false;
-#if defined _weapons_included_
-    if (!force && !ClutchClientHasGlovesLoaded(client)) {
-        TryReloadWeaponsPluginData(client);
-    }
-#endif
     ApplyLoadoutFromDbRow(client, results, force);
 }
 
@@ -2463,62 +2483,16 @@ void DbFetchString(DBResultSet results, const char[] column, char[] buffer, int 
 void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
     int csTeam = GetClientTeam(client);
 
-    char knifeClass[64];
-    knifeClass[0] = '\0';
-
-    int knifeIdx = DbFetchInt(results, "knife", -1);
-    if (knifeIdx >= 0) {
-        KnifeClassFromIndex(knifeIdx, knifeClass, sizeof(knifeClass));
-    }
-
-    int knifePaintkit = 0;
-    float knifeWear = 0.15;
-    int knifeSeed = 0;
-    int knifeTrak = 0;
-    int knifeTrakCount = 0;
-    char knifeTag[64];
-    knifeTag[0] = '\0';
-
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
         char weaponKey[32];
         strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
 
         if (!ClutchWeaponAllowedForTeam(weaponKey, csTeam)) {
-            ClearSlotCache(client, i);
             continue;
         }
 
-        if (IsMeleeWeaponKey(weaponKey)) {
-            if (knifeClass[0] != '\0' && !StrEqual(weaponKey, knifeClass, false)) {
-                continue;
-            }
-
-            char column[32];
-            strcopy(column, sizeof(column), g_ClutchDbColumns[i]);
-            knifePaintkit = DbFetchInt(results, column, 0);
-
-            char floatCol[40];
-            Format(floatCol, sizeof(floatCol), "%s_float", column);
-            knifeWear = DbFetchFloat(results, floatCol, 0.15);
-            if (knifeWear <= 0.0) {
-                knifeWear = 0.15;
-            }
-
-            char seedCol[40];
-            Format(seedCol, sizeof(seedCol), "%s_seed", column);
-            knifeSeed = DbFetchInt(results, seedCol, 0);
-
-            char trakCol[40];
-            Format(trakCol, sizeof(trakCol), "%s_trak", column);
-            knifeTrak = DbFetchInt(results, trakCol, 0);
-
-            char trakCountCol[48];
-            Format(trakCountCol, sizeof(trakCountCol), "%s_trak_count", column);
-            knifeTrakCount = DbFetchInt(results, trakCountCol, 0);
-
-            char tagCol[40];
-            Format(tagCol, sizeof(tagCol), "%s_tag", column);
-            DbFetchString(results, tagCol, knifeTag, sizeof(knifeTag));
+        // Knives + shared guns: clutch_team_loadout only (kgns row may hold CT paints).
+        if (IsMeleeWeaponKey(weaponKey) || ClutchIsSharedWeaponKey(weaponKey)) {
             continue;
         }
 
@@ -2527,7 +2501,6 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
 
         int paintkit = DbFetchInt(results, column, 0);
         if (paintkit <= 0) {
-            ClearSlotCache(client, i);
             continue;
         }
 
@@ -2589,47 +2562,6 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
         g_bAllowWeaponRegive[client] = false;
     }
     ScheduleForceReapply(client, force, allowRegive);
-
-    if (knifePaintkit <= 0) {
-        ClearAllMeleeSlotCaches(client);
-        return;
-    }
-
-    if (knifeClass[0] == '\0') {
-        return;
-    }
-
-    strcopy(g_CachedKnifeClass[client], CLUTCH_KNIFE_CLASS_LEN, knifeClass);
-
-    for (int k = 0; k < CLUTCH_WEAPON_SLOTS; k++) {
-        if (StrEqual(g_ClutchWeaponKeys[k], knifeClass, false)) {
-            UpdateSlotCache(client, k, knifePaintkit, knifeWear, knifeSeed, knifeTrak, knifeTrakCount, knifeTag);
-            break;
-        }
-    }
-
-    if (!force && g_iLastKnifePaint[client] == knifePaintkit) {
-        int knifeWeapon = FindPlayerWeapon(client, knifeClass);
-        if (knifeWeapon != -1
-            && GetEntProp(knifeWeapon, Prop_Send, "m_nFallbackPaintKit") == knifePaintkit
-            && GetEntProp(knifeWeapon, Prop_Send, "m_nFallbackSeed") == knifeSeed) {
-            return;
-        }
-    }
-    g_iLastKnifePaint[client] = knifePaintkit;
-
-    ClutchSetClientKnife(client, knifeClass);
-
-    DataPack pack = new DataPack();
-    pack.WriteCell(GetClientUserId(client));
-    pack.WriteString(knifeClass);
-    pack.WriteCell(knifePaintkit);
-    pack.WriteFloat(knifeWear);
-    pack.WriteCell(knifeSeed);
-    pack.WriteCell(knifeTrak);
-    pack.WriteCell(knifeTrakCount);
-    pack.WriteString(knifeTag);
-    CreateTimer(0.35, Timer_ApplyKnifeSkinDelayed, pack, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public void ApplyClientSkinsFrame(any userid) {
