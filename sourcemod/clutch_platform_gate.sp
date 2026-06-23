@@ -87,7 +87,7 @@ public Action Cmd_Check(int client, int args) {
         return Plugin_Handled;
     }
 
-    int accountId = GetSteamAccountID(target, AuthIdType_AccountID);
+    int accountId = GetSteamAccountID(target);
     bool allowed = IsAccountAllowed(accountId);
     char name[MAX_NAME_LENGTH];
     GetClientName(target, name, sizeof(name));
