@@ -1,5 +1,7 @@
 # Skins Bridge — Site ↔ Servidor CS:GO
 
+> **Runbook operacional:** `OPERATIONS.md`
+
 ## Arquitetura (100% API + banco — sem arquivos estáticos na VPS)
 
 | Camada | O que é | Manual na VPS? |

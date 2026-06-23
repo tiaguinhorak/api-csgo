@@ -1,5 +1,7 @@
 # Comandos de Admin — CS:GO + SourceMod (VPS Clutch)
 
+> **Runbook completo (deploy, site URL, skins, paths):** `OPERATIONS.md`
+
 Guia para administrar o servidor dedicado (`screen`, RCON, SourceMod).
 
 ---

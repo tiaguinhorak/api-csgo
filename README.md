@@ -1,5 +1,7 @@
 # API CS:GO
 
+> **Runbook VPS (deploy, motd, plugins, unban, env):** `OPERATIONS.md`
+
 API REST para gerenciamento de servidores CS:GO, partidas competitivas com sistema de veto e skins. Desenvolvida para integrar com plataformas web competitivas.
 
 ## Stack
