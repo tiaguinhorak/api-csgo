@@ -119,7 +119,7 @@ else
 fi
 
 echo ""
-echo ">>> server branding (host_url / MOTD)"
+echo ">>> server branding (motd.txt scoreboard link)"
 bash "${REPO_ROOT}/scripts/ensure-clutch-server-branding.sh" || {
   echo "WARN: server branding script failed" >&2
 }
