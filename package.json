@@ -15,7 +15,9 @@
     "pm2:stop": "pm2 stop api-csgo",
     "pm2:delete": "pm2 delete api-csgo",
     "pm2:logs": "pm2 logs api-csgo --lines 50",
-    "deploy:vps": "bash scripts/deploy-vps.sh",
+    "deploy": "bash deploy.sh",
+    "deploy:vps": "bash deploy.sh",
+    "sync:allowlist": "bash scripts/sync-steam-allowlist.sh",
     "lint": "tsc --noEmit"
   },
   "keywords": [

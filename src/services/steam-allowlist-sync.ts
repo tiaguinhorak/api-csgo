@@ -47,7 +47,15 @@ export function ensureSteamAllowlistTable(db: Database.Database): void {
 }
 
 export function syncSteamAllowlistToDb(accountIds: number[]): number {
+  if (accountIds.length === 0) {
+    console.warn(
+      '[steam-allowlist] site returned 0 account ids — keeping existing allowlist (no DELETE)',
+    );
+    return 0;
+  }
+
   const path = getWeaponsDbPath();
+  console.log(`[steam-allowlist] writing to ${path}`);
   const db = new Database(path);
   ensureSteamAllowlistTable(db);
 

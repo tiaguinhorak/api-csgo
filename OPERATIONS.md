@@ -137,22 +137,23 @@ cat /home/csgo/server/csgo/motd.txt
 
 ---
 
-## 5. Deploy na VPS (fluxo completo)
+## 5. Deploy na VPS (um comando)
 
 ```bash
 cd ~/api-csgo
-git pull
-./scripts/deploy-vps.sh
+./deploy.sh
 ```
 
-O `deploy-vps.sh` faz: `git pull` → `npm install` → `npm run build` → `pm2` → sync `weapons_english.cfg` → branding `motd.txt` → compila plugins → reload no screen.
+Equivalente: `npm run deploy` ou `./scripts/deploy-vps.sh`
+
+O deploy faz: `git pull` → `npm build` → `pm2` → sync allowlist Steam → sync `weapons_english.cfg` → branding `motd.txt` → instala **todos** os plugins (bridge, gloves, gate, match tracker, stickers) → reload no screen.
 
 **Opções:**
 
 ```bash
-./scripts/deploy-vps.sh --skip-pull
-./scripts/deploy-vps.sh --skip-ingame    # CS offline
-./scripts/deploy-vps.sh --skip-plugin    # só API
+./deploy.sh --skip-pull
+./deploy.sh --skip-ingame    # CS offline
+./deploy.sh --skip-plugin    # só API + syncs
 ```
 
 **Deploy manual (equivalente):**
@@ -161,10 +162,13 @@ O `deploy-vps.sh` faz: `git pull` → `npm install` → `npm run build` → `pm2
 cd ~/api-csgo && git pull
 npm run build
 pm2 restart api-csgo --update-env
-chmod +x scripts/*.sh
+chmod +x scripts/*.sh deploy.sh
+./scripts/sync-steam-allowlist.sh
 ./scripts/ensure-clutch-server-branding.sh
 ./scripts/install-clutch-skins-bridge.sh
-bash scripts/sync-weapons-cfg-from-site.sh
+./scripts/install-clutch-platform-gate.sh
+./scripts/install-clutch-match-tracker.sh
+bash scripts/install-csgo-weaponstickers.sh
 ./scripts/reload-clutch-skins-ingame.sh
 ```
 
@@ -424,7 +428,7 @@ Porta errada / processo zumbi:
 
 | Script | Uso |
 |--------|-----|
-| `deploy-vps.sh` | Deploy completo |
+| `deploy.sh` | Deploy completo (um comando) |
 | `install-clutch-skins-bridge.sh` | Compila e instala plugins Clutch |
 | `reload-clutch-skins-ingame.sh` | Reload plugins via screen |
 | `ensure-clutch-server-branding.sh` | `motd.txt` + site no scoreboard |

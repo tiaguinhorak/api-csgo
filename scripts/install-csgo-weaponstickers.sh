@@ -51,7 +51,7 @@ Z1NTEX_RAR_URL="https://github.com/z1ntex/CSGO_WeaponStickers/releases/download/
 QUASEMAGO_ZIP_URL="https://github.com/quasemago/CSGO_WeaponStickers/releases/download/v1.0.13c/weaponstickers_1.0.13c.zip"
 EITEMS_ZIP_URL="https://github.com/quasemago/eItems/releases/download/0.10_noapi/eItems_0.10.No.API.zip"
 PTAH_LINUX_URL="https://github.com/komashchenko/PTaH/releases/download/v1.1.4/linux.zip"
-RIPEXT_LINUX_URL="https://github.com/ErikMinekus/sm-ripext/releases/download/1.2.3/sm-ripext-1.2.3-linux.tar.gz"
+RIPEXT_LINUX_URL="https://github.com/ErikMinekus/sm-ripext/releases/download/1.3.2/sm-ripext-1.3.2-linux.zip"
 MULTICOLORS_ZIP_URL="https://github.com/Bara/Multi-Colors/archive/refs/heads/master.zip"
 
 if [[ ! -d "${SM}/plugins" ]]; then
@@ -145,39 +145,161 @@ has_eitems_plugin() {
   [[ -f "${SM}/plugins/eItems.smx" || -f "${SM}/plugins/eitems.smx" ]]
 }
 
+has_multicolors_include() {
+  [[ -f "${SM}/scripting/include/multicolors.inc" ]]
+}
+
 has_ptah_extension() {
   compgen -G "${SM}/extensions/PTaH.ext*.so" >/dev/null 2>&1 \
     || [[ -f "${SM}/extensions/PTaH.ext.so" ]]
 }
 
 has_ripext_extension() {
-  compgen -G "${SM}/extensions/rip.ext*.so" >/dev/null 2>&1 \
-    || [[ -f "${SM}/extensions/rip.ext.so" ]]
+  [[ -n "$(ripext_so_path)" ]]
 }
 
-has_multicolors_include() {
-  [[ -f "${SM}/scripting/include/multicolors.inc" ]]
+ripext_so_path() {
+  local candidates=(
+    "${SM}/extensions/rip.ext.so"
+    "${SM}/extensions/ripext.ext.so"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    if [[ -f "${c}" ]]; then
+      echo "${c}"
+      return 0
+    fi
+  done
+  compgen -G "${SM}/extensions/rip.ext*.so" 2>/dev/null | head -1 || true
+}
+
+verify_ripext_ldd() {
+  local rip_so
+  rip_so="$(ripext_so_path)"
+  if [[ -z "${rip_so}" || ! -f "${rip_so}" ]]; then
+    echo "ERROR: rip.ext.so not found in ${SM}/extensions/" >&2
+    return 1
+  fi
+  chmod u+x "${rip_so}" 2>/dev/null || true
+  echo ""
+  echo ">>> ldd ${rip_so}"
+  if ! command -v ldd >/dev/null 2>&1; then
+    echo "WARN: ldd not available — skipping dependency check"
+    return 0
+  fi
+  local ldd_out
+  ldd_out="$(ldd "${rip_so}" 2>&1)"
+  echo "${ldd_out}"
+  if echo "${ldd_out}" | grep -q 'not found'; then
+    echo ""
+    echo "ERROR: rip.ext cannot load — missing 32-bit system libraries (CS:GO srcds is 32-bit)." >&2
+    echo "Run on VPS:" >&2
+    echo "  sudo dpkg --add-architecture i386" >&2
+    echo "  sudo apt update" >&2
+    echo "  sudo apt install -y lib32stdc++6 lib32z1 zlib1g:i386 libssl3t64:i386 libcurl4:i386" >&2
+    return 1
+  fi
+  return 0
+}
+
+verify_ripext_size() {
+  local rip_so size
+  rip_so="$(ripext_so_path)"
+  if [[ -z "${rip_so}" || ! -f "${rip_so}" ]]; then
+    return 1
+  fi
+  size="$(wc -c < "${rip_so}" | tr -d ' ')"
+  echo "rip.ext.so size: ${size} bytes (sm-ripext 1.3.2 expects ~5008816)"
+  if [[ "${size}" -lt 4000000 ]]; then
+    echo "ERROR: rip.ext.so is too small — likely wrong/corrupt build. Re-run installer." >&2
+    return 1
+  fi
+  return 0
+}
+
+check_extensions_mount_exec() {
+  local rip_so mount_opts
+  rip_so="$(ripext_so_path)"
+  if [[ -z "${rip_so}" ]]; then
+    return 0
+  fi
+  if ! command -v findmnt >/dev/null 2>&1; then
+    return 0
+  fi
+  mount_opts="$(findmnt -no OPTIONS -T "${rip_so}" 2>/dev/null || true)"
+  if [[ -n "${mount_opts}" && "${mount_opts}" == *noexec* ]]; then
+    echo ""
+    echo "ERROR: ${rip_so} sits on a noexec mount (${mount_opts})." >&2
+    echo "srcds cannot dlopen extensions there — remount with exec or move server off /home:" >&2
+    echo "  sudo mount -o remount,exec $(findmnt -no TARGET -T "${rip_so}")" >&2
+    return 1
+  fi
+  return 0
+}
+
+cleanup_linux_optional_extensions() {
+  # Windows-only optional extensions — broken .so on Linux clutters sm exts list
+  rm -f "${SM}/extensions/sourcescramble.ext.so" "${SM}/extensions/sourcescramble.autoload" 2>/dev/null || true
+}
+
+install_ripext_system_deps() {
+  if ! command -v apt-get >/dev/null 2>&1 || ! command -v sudo >/dev/null 2>&1; then
+    return 1
+  fi
+  echo ""
+  echo ">>> Installing 32-bit system libs for rip.ext (sudo)..."
+  sudo dpkg --add-architecture i386 2>/dev/null || true
+  sudo apt-get update -qq 2>/dev/null || true
+  if sudo apt-get install -y lib32stdc++6 lib32z1 zlib1g:i386 libssl3t64:i386 libcurl4t64:i386 \
+    libnghttp2-14:i386 libldap2:i386 libpsl5t64:i386 libssh-4:i386 librtmp1:i386 \
+    libbrotli1:i386 libidn2-0:i386 2>/dev/null; then
+    return 0
+  fi
+  if sudo apt-get install -y lib32stdc++6 lib32z1 zlib1g:i386 libssl3t64:i386 libcurl4:i386 \
+    libnghttp2:i386 libldap2:i386 libpsl5:i386 libssh-4:i386 libldap-2.5-0:i386 librtmp1:i386 \
+    libbrotli1:i386 2>/dev/null; then
+    return 0
+  fi
+  if sudo apt-get install -y lib32stdc++6 lib32z1 zlib1g:i386 libssl1.1:i386 libcurl4:i386 2>/dev/null; then
+    return 0
+  fi
+  return 1
 }
 
 install_ripext() {
   echo ""
-  echo ">>> REST in Pawn (sm-ripext) — required by eItems + WeaponStickers"
-  curl -fsSL "${RIPEXT_LINUX_URL}" -o "${TMP_DIR}/ripext.tar.gz"
-  extract_archive "${TMP_DIR}/ripext.tar.gz" "${TMP_DIR}/ripext"
+  echo ">>> REST in Pawn (sm-ripext 1.3.2) — required by eItems + WeaponStickers"
+  rm -f "${SM}/extensions/rip.ext"*.so "${SM}/extensions/ripext.ext"*.so 2>/dev/null || true
+  curl -fsSL "${RIPEXT_LINUX_URL}" -o "${TMP_DIR}/ripext.zip"
+  extract_archive "${TMP_DIR}/ripext.zip" "${TMP_DIR}/ripext"
   if ! merge_addons_tree "${TMP_DIR}/ripext"; then
-    local rip_so
-    rip_so="$(find "${TMP_DIR}/ripext" -name 'rip.ext*.so' -print -quit 2>/dev/null || true)"
-    if [[ -n "${rip_so}" ]]; then
-      echo "Copying ${rip_so} -> ${SM}/extensions/"
-      mkdir -p "${SM}/extensions"
-      cp -a "${rip_so}" "${SM}/extensions/"
-    else
-      echo "ERROR: rip.ext.so not found inside sm-ripext package" >&2
-      return 1
-    fi
+    echo "WARN: merge_addons_tree failed for ripext — copying .so files manually"
   fi
-  # Force load even before dependent plugins are up.
+  mkdir -p "${SM}/extensions"
+  while IFS= read -r -d '' so_file; do
+    echo "Copying ${so_file} -> ${SM}/extensions/"
+    cp -a "${so_file}" "${SM}/extensions/"
+  done < <(find "${TMP_DIR}/ripext" -name '*.so' -path '*/extensions/*' -print0 2>/dev/null)
+  # CA bundle for HTTPS (ripext 1.0.3+)
+  while IFS= read -r -d '' cfg_dir; do
+    if [[ -d "${cfg_dir}" ]]; then
+      mkdir -p "${SM}/configs/ripext"
+      cp -a "${cfg_dir}/." "${SM}/configs/ripext/" 2>/dev/null || true
+    fi
+  done < <(find "${TMP_DIR}/ripext" -type d -path '*/configs/ripext' -print0 2>/dev/null)
   touch "${SM}/extensions/rip.autoload" 2>/dev/null || true
+  if [[ -n "$(ripext_so_path)" ]]; then
+  chown csgo:csgo "${SM}/extensions/rip.ext"*.so 2>/dev/null || true
+  chmod u+x "${SM}/extensions/rip.ext"*.so 2>/dev/null || true
+  fi
+  if [[ -d "${SM}/configs/ripext" ]]; then
+    chown -R csgo:csgo "${SM}/configs/ripext" 2>/dev/null || true
+  fi
+  if [[ -z "$(ripext_so_path)" ]]; then
+    echo "ERROR: rip.ext.so not found inside sm-ripext package" >&2
+    return 1
+  fi
+  return 0
 }
 
 install_multicolors() {
@@ -275,7 +397,7 @@ install_ptah() {
   merge_addons_tree "${TMP_DIR}/ptah"
 }
 
-echo "=== CSGO_WeaponStickers installer (v2026-06-23-z1ntex-extract) ==="
+echo "=== CSGO_WeaponStickers installer (v2026-06-23-ripext-ldd) ==="
 echo "CSGO_ROOT=${CSGO_ROOT}"
 
 if [[ "${WEAPONSTICKERS_FORCE:-0}" == "1" ]]; then
@@ -283,9 +405,7 @@ if [[ "${WEAPONSTICKERS_FORCE:-0}" == "1" ]]; then
   rm -f "${SM}/plugins/csgo_weaponstickers.smx"
 fi
 
-if ! has_ripext_extension; then
-  install_ripext
-fi
+# Do not install ripext here — other packages may overwrite extensions/*.so
 
 if ! has_multicolors_include; then
   install_multicolors
@@ -313,9 +433,21 @@ if ! has_ptah_extension; then
   install_ptah
 fi
 
-# Re-check deps after installs
-if ! has_ripext_extension; then
-  install_ripext
+# Install ripext LAST — weaponstickers/eItems merges must not overwrite rip.ext.so
+install_ripext
+cleanup_linux_optional_extensions
+
+echo ""
+echo ">>> rip.ext checks (size, mount, ldd)"
+verify_ripext_size || true
+check_extensions_mount_exec || true
+if ! verify_ripext_ldd; then
+  install_ripext_system_deps || true
+  if ! verify_ripext_ldd; then
+    echo ""
+    echo "ERROR: rip.ext still missing system libraries — stickers will not work until fixed." >&2
+    echo "Install i386 libs manually (see ldd output above), then restart srcds." >&2
+  fi
 fi
 
 echo ""
@@ -409,6 +541,7 @@ else
 fi
 if has_ripext_extension; then
   ls -la "${SM}/extensions/rip.ext"*.so 2>/dev/null | head -3
+  verify_ripext_ldd || true
 else
   echo "ERROR: rip.ext (REST in Pawn) missing — eItems and WeaponStickers will fail"
 fi
@@ -428,10 +561,12 @@ fi
 
 echo ""
 echo "=== Done ==="
-echo "Restart srcds OR in server console (order matters):"
-echo "  sm exts list | grep -i rip"
-echo "  sm plugins reload eItems"
-echo "  sm plugins reload csgo_weaponstickers"
+echo "Extensions (rip.ext) only load on srcds start — restart srcds or changelevel."
+echo "Then in server console:"
+echo "  sm exts list"
+echo "  sm plugins load eItems"
+echo "  sm plugins load csgo_weaponstickers"
 echo "  sm plugins list | grep -iE 'eitems|weaponstickers'"
 echo ""
-echo "If plugins still fail, full map change or: changelevel de_dust2"
+echo "If rip.ext shows FAILED, run: ldd ${SM}/extensions/rip.ext.so"
+echo "and install any 'not found' i386 packages (see verify_ripext_ldd output above)."

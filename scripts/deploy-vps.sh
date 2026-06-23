@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Deploy completo na VPS: git pull → build api-csgo → pm2 → plugin → reload in-game.
+# Deploy completo na VPS — UM comando para tudo.
 #
 # Uso (como usuário csgo na VPS):
+#   cd ~/api-csgo && ./deploy.sh
 #   cd ~/api-csgo && ./scripts/deploy-vps.sh
+#
+# Fluxo:
+#   git pull → npm build → pm2 → sync allowlist Steam → sync weapons cfg →
+#   branding motd → instalar TODOS os plugins Clutch + stickers → reload in-game
 #
 # Opções:
 #   --skip-pull          não roda git pull
-#   --skip-ingame        não recarrega plugin no screen do CS
-#   --skip-plugin        só api (npm build + pm2), sem compilar plugin
-#
-# Exemplos:
-#   ./scripts/deploy-vps.sh
-#   ./scripts/deploy-vps.sh --skip-ingame
+#   --skip-ingame        não recarrega plugins no screen do CS
+#   --skip-plugin        só API (npm build + pm2 + sync), sem compilar plugins
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
@@ -28,19 +29,32 @@ for arg in "$@"; do
     --skip-ingame) SKIP_INGAME=1 ;;
     --skip-plugin) SKIP_PLUGIN=1 ;;
     -h|--help)
-      sed -n '1,20p' "$0"
+      cat <<'EOF'
+Clutch deploy completo (VPS)
+
+  ./deploy.sh
+
+Opções:
+  --skip-pull      não faz git pull
+  --skip-ingame    não recarrega plugins no screen (CS offline)
+  --skip-plugin    só API (build + pm2 + syncs), sem plugins SourceMod
+
+Site (Hostinger): git pull + rebuild separado no painel Hostinger.
+EOF
       exit 0
     ;;
     *)
-      echo "Unknown option: ${arg}" >&2
+      echo "Opção desconhecida: ${arg}" >&2
       exit 1
     ;;
   esac
 done
 
-chmod +x "${REPO_ROOT}/scripts/"*.sh 2>/dev/null || true
+chmod +x "${REPO_ROOT}/deploy.sh" "${REPO_ROOT}/scripts/"*.sh 2>/dev/null || true
 
-echo "=== Clutch VPS deploy (api-csgo) ==="
+echo "=========================================="
+echo "  Clutch — deploy completo (api-csgo + CS)"
+echo "=========================================="
 echo "Repo: ${REPO_ROOT}"
 
 if [[ "${SKIP_PULL}" -eq 0 && -d .git ]]; then
@@ -50,14 +64,15 @@ if [[ "${SKIP_PULL}" -eq 0 && -d .git ]]; then
 fi
 
 if [[ -d .git ]]; then
-  echo "Git: $(git rev-parse --short HEAD) on $(git branch --show-current 2>/dev/null || echo '?')"
+  echo "Git: $(git rev-parse --short HEAD) ($(git branch --show-current 2>/dev/null || echo '?'))"
 fi
 
-EXPECTED_VERSION="$(grep -E '#define PLUGIN_VERSION' sourcemod/clutch_skins_bridge.sp | sed 's/.*"\(.*\)".*/\1/')"
-echo "Plugin source version: ${EXPECTED_VERSION}"
+BRIDGE_VER="$(grep -E '#define PLUGIN_VERSION' sourcemod/clutch_skins_bridge.sp | sed 's/.*"\(.*\)".*/\1/')"
+GATE_VER="$(grep -E '#define PLUGIN_VERSION' sourcemod/clutch_platform_gate.sp | sed 's/.*"\(.*\)".*/\1/')"
+echo "Plugin bridge: ${BRIDGE_VER} | platform gate: ${GATE_VER}"
 
 if [[ ! -f package.json ]]; then
-  echo "Not in api-csgo repo" >&2
+  echo "ERROR: não é o repo api-csgo" >&2
   exit 1
 fi
 
@@ -70,7 +85,7 @@ echo ">>> npm run build"
 npm run build
 
 if ! grep -q 'gloves: result.gloves' dist/routes/csgo-skins-push.js; then
-  echo "ERROR: dist build missing gloves sync — check git pull / build errors" >&2
+  echo "ERROR: build sem gloves sync — verifique erros de compilação" >&2
   exit 1
 fi
 
@@ -79,7 +94,7 @@ if command -v pm2 >/dev/null 2>&1; then
   echo ">>> pm2 (api-csgo)"
   "${REPO_ROOT}/scripts/pm2-ensure-api-csgo.sh"
 else
-  echo "WARN: pm2 not found — restart api-csgo manually"
+  echo "WARN: pm2 não encontrado — reinicie api-csgo manualmente"
 fi
 
 if [[ -f "${REPO_ROOT}/.env" ]]; then
@@ -90,11 +105,11 @@ if [[ -f "${REPO_ROOT}/.env" ]]; then
 fi
 
 echo ""
-echo ">>> verify live API matches dist"
+echo ">>> verificar API em execução"
 if ! "${REPO_ROOT}/scripts/verify-api-running-build.sh"; then
   if command -v pm2 >/dev/null 2>&1; then
     echo ""
-    echo ">>> stale process detected — running pm2-recover.sh"
+    echo ">>> processo antigo — pm2-recover"
     "${REPO_ROOT}/scripts/pm2-recover.sh"
     sleep 2
     "${REPO_ROOT}/scripts/verify-api-running-build.sh"
@@ -105,35 +120,62 @@ fi
 
 if [[ -z "${CSGO_SKINS_SYNC_KEY:-}" && -z "${API_KEY:-}" ]]; then
   echo ""
-  echo "WARN: No CSGO_SKINS_SYNC_KEY or API_KEY in .env — site push may get HTTP 401"
+  echo "WARN: sem CSGO_SKINS_SYNC_KEY/API_KEY no .env — push do site pode retornar 401"
 fi
 
 echo ""
-echo ">>> sync weapons_english.cfg from site catalog"
+echo ">>> sync allowlist Steam (platform gate)"
+if [[ -n "${CSGO_SKINS_SYNC_KEY:-}" && -n "${CLUTCH_SITE_URL:-}" ]]; then
+  bash "${REPO_ROOT}/scripts/sync-steam-allowlist.sh" || {
+    echo "WARN: sync allowlist falhou — verifique CLUTCH_SITE_URL e site deploy" >&2
+  }
+  bash "${REPO_ROOT}/scripts/verify-steam-allowlist.sh" || true
+else
+  echo "Skip (defina CLUTCH_SITE_URL + CSGO_SKINS_SYNC_KEY no .env)"
+fi
+
+echo ""
+echo ">>> sync weapons_english.cfg do catálogo do site"
 if [[ -n "${CSGO_SKINS_SYNC_KEY:-}" ]]; then
   bash "${REPO_ROOT}/scripts/sync-weapons-cfg-from-site.sh" || {
-    echo "WARN: weapons cfg sync failed — run ./scripts/sync-weapons-cfg-from-site.sh after fixing CLUTCH_SITE_URL" >&2
+    echo "WARN: sync weapons cfg falhou" >&2
   }
 else
-  echo "Skip (no CSGO_SKINS_SYNC_KEY)"
+  echo "Skip (sem CSGO_SKINS_SYNC_KEY)"
 fi
 
 echo ""
-echo ">>> server branding (motd.txt scoreboard link)"
+echo ">>> branding servidor (motd.txt)"
 bash "${REPO_ROOT}/scripts/ensure-clutch-server-branding.sh" || {
-  echo "WARN: server branding script failed" >&2
+  echo "WARN: branding falhou" >&2
 }
 
 if [[ "${SKIP_PLUGIN}" -eq 0 ]]; then
   echo ""
-  echo ">>> install clutch_skins_bridge plugin"
+  echo ">>> plugins SourceMod — skins bridge + gloves"
   "${REPO_ROOT}/scripts/install-clutch-skins-bridge.sh"
 
   echo ""
-  echo ">>> install CSGO_WeaponStickers + eItems (optional — skip if already installed)"
+  echo ">>> plugins SourceMod — match tracker"
+  if [[ -f "${REPO_ROOT}/scripts/install-clutch-match-tracker.sh" ]]; then
+    bash "${REPO_ROOT}/scripts/install-clutch-match-tracker.sh" || {
+      echo "WARN: install-clutch-match-tracker falhou" >&2
+    }
+  fi
+
+  echo ""
+  echo ">>> plugins SourceMod — platform gate"
+  if [[ -f "${REPO_ROOT}/scripts/install-clutch-platform-gate.sh" ]]; then
+    bash "${REPO_ROOT}/scripts/install-clutch-platform-gate.sh" || {
+      echo "WARN: install-clutch-platform-gate falhou" >&2
+    }
+  fi
+
+  echo ""
+  echo ">>> plugins SourceMod — stickers (eItems + weaponstickers + ripext)"
   if [[ -f "${REPO_ROOT}/scripts/install-csgo-weaponstickers.sh" ]]; then
     bash "${REPO_ROOT}/scripts/install-csgo-weaponstickers.sh" || {
-      echo "WARN: install-csgo-weaponstickers.sh failed — run manually after fixing deps" >&2
+      echo "WARN: install-csgo-weaponstickers falhou — rode manualmente se precisar" >&2
     }
   fi
 fi
@@ -141,29 +183,33 @@ fi
 echo ""
 echo "=== Health check ==="
 sleep 1
-curl -sf "http://127.0.0.1:${PORT:-3000}/health" && echo "" || echo "WARN: api-csgo not responding on :${PORT:-3000}"
+curl -sf "http://127.0.0.1:${PORT:-3000}/health" && echo "" || echo "WARN: api-csgo não responde em :${PORT:-3000}"
 
 echo ""
-echo "=== Gloves sync test (optional) ==="
+echo "=== Teste gloves sync (opcional) ==="
 if [[ -n "${CSGO_SKINS_SYNC_KEY:-}" ]]; then
   "${REPO_ROOT}/scripts/test-gloves-sync.sh" "STEAM_1:0:203852188" || true
 else
-  echo "Skip (no CSGO_SKINS_SYNC_KEY)"
+  echo "Skip (sem CSGO_SKINS_SYNC_KEY)"
 fi
 
 if [[ "${SKIP_INGAME}" -eq 0 ]]; then
   echo ""
-  echo ">>> reload plugin in-game (screen)"
+  echo ">>> reload plugins no screen do CS"
   if "${REPO_ROOT}/scripts/reload-clutch-skins-ingame.sh"; then
-    echo "In-game reload OK."
+    echo "Reload in-game OK."
   else
-    echo "WARN: in-game reload skipped or failed (CS screen offline?)."
-    echo "  When server is up: ./scripts/reload-clutch-skins-ingame.sh"
+    echo "WARN: reload in-game falhou (CS offline?). Quando subir: ./scripts/reload-clutch-skins-ingame.sh"
   fi
 fi
 
 echo ""
-echo "=== Deploy finished ==="
-echo "Plugin version expected: ${EXPECTED_VERSION}"
-echo "Verify in screen: sm plugins info z_clutch_skins_bridge"
-echo "After editing .env: pm2 restart api-csgo --update-env"
+echo "=========================================="
+echo "  Deploy concluído"
+echo "=========================================="
+echo "Bridge: ${BRIDGE_VER} | Gate: ${GATE_VER}"
+echo "Screen: sm plugins info z_clutch_skins_bridge"
+echo "        sm plugins info clutch_platform_gate"
+echo "        sm plugins list | grep -iE 'eitems|weaponstickers'"
+echo "Após editar .env: pm2 restart api-csgo --update-env"
+echo "Site Hostinger: git pull + rebuild no painel (separado da VPS)"
