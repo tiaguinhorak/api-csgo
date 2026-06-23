@@ -6,7 +6,7 @@ import {
   buildWsAllowlistSet,
   loadWsWeaponsAllowlist,
 } from '../services/ws-weapons-config';
-import { reloadClutchSkinsInGame, reloadWeaponsPluginInGame } from '../services/clutch-rcon';
+import { reloadClutchSkinsInGame, reloadWeaponsPluginInGame, stageClutchLoadoutInGame } from '../services/clutch-rcon';
 import { syncWeaponsCfgFromSite } from '../services/sync-weapons-cfg-file';
 
 const router = Router();
@@ -82,11 +82,12 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       clearWeaponIds: body.clearWeaponIds,
       clearGloveTeam: body.clearGloveTeam,
     });
-    const rconReload = await reloadClutchSkinsInGame();
+    const rconReload = await stageClutchLoadoutInGame(result.steamId);
 
     return res.json({
       ok: true,
       mode: 'db',
+      applyMode: 'staged',
       steamId: result.steamId,
       steamIds: result.steamIds,
       weapons: weapons.length,

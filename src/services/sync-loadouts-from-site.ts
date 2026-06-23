@@ -1,5 +1,5 @@
 import type { SyncWeaponPayload } from './weapons-db-map';
-import { reloadClutchSkinsInGame } from './clutch-rcon';
+import { stageClutchLoadoutInGame } from './clutch-rcon';
 import { syncAllStickersFromSite } from './sync-stickers-from-site';
 import { syncPlayerLoadoutToWeaponsDb } from './weapons-db-sync';
 
@@ -111,7 +111,7 @@ export async function syncAllLoadoutsFromSite(): Promise<{
     errors.push(`stickers: ${stickerError}`);
   }
 
-  const rconReload = synced > 0 ? await reloadClutchSkinsInGame() : false;
+  const rconReload = synced > 0 ? await stageClutchLoadoutInGame() : false;
 
   return {
     ok: errors.length === 0,

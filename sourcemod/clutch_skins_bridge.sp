@@ -22,7 +22,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.17"
+#define PLUGIN_VERSION "3.8.0"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -39,6 +39,7 @@ ConVar g_cvWeaponsDb;
 ConVar g_cvWeaponsTablePrefix;
 ConVar g_cvRefreshSeconds;
 ConVar g_cvGlovesWorldModel;
+ConVar g_cvDeferLive;
 
 Database g_hWeaponsDb = null;
 char g_sTablePrefix[16];
@@ -58,6 +59,7 @@ int g_iTeamGloveGroup[MAXPLAYERS + 1][2];
 int g_iTeamGlovePaint[MAXPLAYERS + 1][2];
 float g_fTeamGloveWear[MAXPLAYERS + 1][2];
 Handle g_hRefreshTimer = null;
+bool g_bPendingWebLoadout[MAXPLAYERS + 1];
 
 int g_CachedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 float g_CachedWear[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
@@ -154,6 +156,16 @@ public void OnPluginStart() {
         true,
         1.0
     );
+    g_cvDeferLive = CreateConVar(
+        "clutch_skins_defer_live",
+        "1",
+        "1 = web loadout changes apply after match (admins each round). 0 = apply immediately",
+        FCVAR_NOTIFY,
+        true,
+        0.0,
+        true,
+        1.0
+    );
 
     AutoExecConfig(true, "clutch_skins_bridge");
 
@@ -161,6 +173,7 @@ public void OnPluginStart() {
 
     RegAdminCmd("sm_reloadclutchskins", Command_ReloadSkins, ADMFLAG_ROOT, "Re-apply clutch skins from weapons DB");
     RegAdminCmd("sm_clutch_applyskins", Command_ApplySkins, ADMFLAG_ROOT, "Re-apply clutch skins to all players");
+    RegServerCmd("sm_clutch_loadout_pending", Command_LoadoutPending, "Stage web loadout from DB (api-csgo player-sync)");
 
     AddCommandListener(ClutchBlockWsChatForPlayers, "say");
     AddCommandListener(ClutchBlockWsChatForPlayers, "say_team");
@@ -169,6 +182,7 @@ public void OnPluginStart() {
 
     HookEvent("player_spawn", OnPlayerSpawn, EventHookMode_Post);
     HookEvent("round_start", Event_RoundStart, EventHookMode_Post);
+    HookEvent("cs_win_panel_match", Event_MatchOver, EventHookMode_Post);
     HookEvent("player_team", Event_PlayerTeam, EventHookMode_Post);
 
     PTaH(PTaH_GiveNamedItemPre, Hook, Clutch_GiveNamedItemPre);
@@ -435,10 +449,106 @@ public Action Command_ReloadSkins(int client, int args) {
 public Action Command_ApplySkins(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
+            g_bPendingWebLoadout[i] = false;
             ClutchBeginForcedSync(i);
         }
     }
     ReplyToCommand(client, "[Clutch] Skins reaplicados. Luvas atualizam no proximo spawn.");
+    return Plugin_Handled;
+}
+
+bool ClutchClientIsSkinAdmin(int client) {
+    return CheckCommandAccess(client, "sm_clutch_applyskins", ADMFLAG_GENERIC, true);
+}
+
+bool ClutchIsLiveMatch() {
+    if (!g_cvDeferLive.BoolValue) {
+        return false;
+    }
+
+    if (GameRules_GetProp("m_bWarmupPeriod", Prop_Send)) {
+        return false;
+    }
+
+    int rounds = GameRules_GetProp("m_totalRoundsPlayed", Prop_Send);
+    if (rounds > 0) {
+        return true;
+    }
+
+    if (CS_GetTeamScore(CS_TEAM_CT) > 0 || CS_GetTeamScore(CS_TEAM_T) > 0) {
+        return true;
+    }
+
+    return false;
+}
+
+int FindClientBySteam2(const char[] steam) {
+    char clientSteam[32];
+    char alt[32];
+
+    for (int i = 1; i <= MaxClients; i++) {
+        if (!IsClientInGame(i) || IsFakeClient(i)) {
+            continue;
+        }
+        if (!GetClientAuthId(i, AuthId_Steam2, clientSteam, sizeof(clientSteam), true)) {
+            continue;
+        }
+        if (StrEqual(clientSteam, steam, false)) {
+            return i;
+        }
+
+        strcopy(alt, sizeof(alt), steam);
+        if (alt[6] == '0') {
+            alt[6] = '1';
+        } else if (alt[6] == '1') {
+            alt[6] = '0';
+        }
+        if (StrEqual(clientSteam, alt, false)) {
+            return i;
+        }
+    }
+
+    return 0;
+}
+
+void ClutchStageWebLoadout(int client) {
+    if (client <= 0 || IsFakeClient(client) || !IsClientInGame(client)) {
+        return;
+    }
+
+    g_bPendingWebLoadout[client] = true;
+
+    if (!ClutchIsLiveMatch() || ClutchClientIsSkinAdmin(client)) {
+        g_bPendingWebLoadout[client] = false;
+        ClutchBeginForcedSync(client);
+        return;
+    }
+
+    PrintToChat(client, " [Clutch] Skins do site aplicam no fim da partida.");
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Staged web loadout for %N (apply at match end)", client);
+    }
+}
+
+public Action Command_LoadoutPending(int args) {
+    if (args >= 1) {
+        char steam[32];
+        GetCmdArg(1, steam, sizeof(steam));
+        TrimString(steam);
+
+        int client = FindClientBySteam2(steam);
+        if (client > 0) {
+            ClutchStageWebLoadout(client);
+        } else if (g_cvDebug.BoolValue) {
+            LogMessage("[Clutch] loadout_pending: %s not in game", steam);
+        }
+    } else {
+        for (int i = 1; i <= MaxClients; i++) {
+            if (IsClientInGame(i) && !IsFakeClient(i)) {
+                ClutchStageWebLoadout(i);
+            }
+        }
+    }
     return Plugin_Handled;
 }
 
@@ -533,6 +643,7 @@ public void OnClientDisconnect(int client) {
         SDKUnhook(client, SDKHook_WeaponEquip, OnWeaponEquip);
     }
     g_bLoggedMissingLoadout[client] = false;
+    g_bPendingWebLoadout[client] = false;
     g_fLastApplyTime[client] = 0.0;
     g_iLastKnifePaint[client] = 0;
     g_iLastGloveGroup[client] = 0;
@@ -620,7 +731,35 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
-    CreateTimer(3.0, Timer_ApplyAllPlayersSkins, _, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(3.0, Timer_RoundStartApply, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_RoundStartApply(Handle timer) {
+    for (int client = 1; client <= MaxClients; client++) {
+        if (!IsClientInGame(client) || IsFakeClient(client)) {
+            continue;
+        }
+        if (ClutchClientIsSkinAdmin(client)) {
+            ApplyClientSkins(client, true);
+        }
+    }
+    return Plugin_Stop;
+}
+
+public void Event_MatchOver(Event event, const char[] name, bool dontBroadcast) {
+    for (int client = 1; client <= MaxClients; client++) {
+        if (!IsClientInGame(client) || IsFakeClient(client)) {
+            continue;
+        }
+        if (!g_bPendingWebLoadout[client]) {
+            continue;
+        }
+        g_bPendingWebLoadout[client] = false;
+        ClutchBeginForcedSync(client);
+        if (g_cvDebug.BoolValue) {
+            LogMessage("[Clutch] Applied staged web loadout at match end for %N", client);
+        }
+    }
 }
 
 public void Event_PlayerTeam(Event event, const char[] name, bool dontBroadcast) {
@@ -2579,6 +2718,15 @@ public void ApplyClientSkinsFrame(any userid) {
 
 void ApplyClientSkins(int client, bool force) {
     if (!IsClientInGame(client) || IsFakeClient(client)) {
+        return;
+    }
+
+    if (
+        !force
+        && g_bPendingWebLoadout[client]
+        && ClutchIsLiveMatch()
+        && !ClutchClientIsSkinAdmin(client)
+    ) {
         return;
     }
 

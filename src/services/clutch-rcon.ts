@@ -126,6 +126,18 @@ export async function reloadWeaponsPluginInGame(): Promise<boolean> {
   return ok;
 }
 
+export async function stageClutchLoadoutInGame(steamId?: string): Promise<boolean> {
+  const trimmed = steamId?.trim();
+  const command = trimmed
+    ? `sm_clutch_loadout_pending ${trimmed}`
+    : 'sm_clutch_loadout_pending';
+  const ok = await sendRconOrScreen(command);
+  if (!ok) {
+    console.warn('[clutch-rcon] loadout stage skipped (no RCON/screen)');
+  }
+  return ok;
+}
+
 export async function reloadClutchSkinsInGame(): Promise<boolean> {
   const target = resolveRconTarget();
   if (!target) {
