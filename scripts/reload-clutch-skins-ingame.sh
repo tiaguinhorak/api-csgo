@@ -87,6 +87,7 @@ send_cmd "sm plugins load z_clutch_skins_bridge" 0.8
 send_cmd "sm plugins info z_clutch_skins_bridge"
 send_cmd "clutch_gloves_debug 1"
 send_cmd "clutch_skins_debug 1"
+send_cmd "sm_clutch_gloves_apply"
 send_cmd "sm_reloadclutchskins"
 send_cmd "sm_clutch_applyskins"
 

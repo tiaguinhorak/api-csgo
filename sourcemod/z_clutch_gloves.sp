@@ -6,7 +6,7 @@
 #include <cstrike>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.2.0"
 #define GLOVE_THINK_TICK_MOD 8
 
 ConVar g_cvDb;
@@ -16,6 +16,9 @@ ConVar g_cvDebug;
 
 Database g_hDb = null;
 char g_sTablePrefix[16];
+char g_sDbName[64];
+
+Handle g_hForwardApplied = null;
 
 int g_iGroup[MAXPLAYERS + 1][4];
 int g_iPaint[MAXPLAYERS + 1][4];
@@ -32,7 +35,15 @@ public Plugin myinfo = {
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
     CreateNative("ClutchGloves_RefreshClient", Native_RefreshClient);
+    CreateNative("ClutchGloves_ApplyClient", Native_ApplyClient);
     CreateNative("ClutchGloves_IsClientUsingGloves", Native_IsUsing);
+    g_hForwardApplied = CreateGlobalForward(
+        "ClutchGloves_OnClientApplied",
+        ET_Ignore,
+        Param_Cell,
+        Param_Cell,
+        Param_Cell
+    );
     RegPluginLibrary("clutch_gloves");
     return APLRes_Success;
 }
@@ -66,12 +77,35 @@ public void OnPluginStart() {
 
     HookEvent("player_spawn", Event_PlayerSpawn, EventHookMode_Pre);
     RegAdminCmd("sm_clutch_gloves_refresh", Command_Refresh, ADMFLAG_ROOT, "Re-read gloves DB and apply");
+    RegAdminCmd("sm_clutch_gloves_apply", Command_Apply, ADMFLAG_ROOT, "Apply gloves from cache (no DB)");
 
     ConnectDatabase();
+    LogMessage("[ClutchGloves] Plugin loaded v%s", PLUGIN_VERSION);
+}
+
+void SyncSharedConVars() {
+    ConVar cvDb = FindConVar("clutch_weapons_db");
+    if (cvDb != null) {
+        cvDb.GetString(g_sDbName, sizeof(g_sDbName));
+        if (g_sDbName[0] != '\0') {
+            g_cvDb.SetString(g_sDbName);
+        }
+    } else {
+        g_cvDb.GetString(g_sDbName, sizeof(g_sDbName));
+    }
+
+    ConVar cvPrefix = FindConVar("clutch_weapons_table_prefix");
+    if (cvPrefix != null) {
+        cvPrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
+        g_cvTablePrefix.SetString(g_sTablePrefix);
+    } else {
+        g_cvTablePrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
+    }
 }
 
 public void OnConfigsExecuted() {
-    g_cvTablePrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
+    SyncSharedConVars();
+    ConnectDatabase();
 }
 
 public void OnClientDisconnect(int client) {
@@ -91,16 +125,18 @@ public void OnClientPostAdminCheck(int client) {
 }
 
 void ConnectDatabase() {
+    SyncSharedConVars();
+
     if (g_hDb != null) {
         delete g_hDb;
         g_hDb = null;
     }
 
-    char dbName[64];
-    g_cvDb.GetString(dbName, sizeof(dbName));
-    g_cvTablePrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
+    if (g_sDbName[0] == '\0') {
+        g_cvDb.GetString(g_sDbName, sizeof(g_sDbName));
+    }
 
-    Database.Connect(OnDatabaseConnected, dbName);
+    Database.Connect(OnDatabaseConnected, g_sDbName);
 }
 
 public void OnDatabaseConnected(Database database, const char[] error, any data) {
@@ -167,6 +203,24 @@ public Action Command_Refresh(int client, int args) {
     return Plugin_Handled;
 }
 
+public Action Command_Apply(int client, int args) {
+    for (int i = 1; i <= MaxClients; i++) {
+        if (IsClientInGame(i) && !IsFakeClient(i)) {
+            GivePlayerGloves(i);
+        }
+    }
+    return Plugin_Handled;
+}
+
+public int Native_ApplyClient(Handle plugin, int numParams) {
+    int client = GetNativeCell(1);
+    if (client < 1 || client > MaxClients) {
+        return 0;
+    }
+    GivePlayerGloves(client);
+    return 0;
+}
+
 public int Native_RefreshClient(Handle plugin, int numParams) {
     int client = GetNativeCell(1);
     if (client < 1 || client > MaxClients) {
@@ -192,6 +246,8 @@ void RefreshClientFromDatabase(int client, int altAttempt) {
     if (!IsClientInGame(client) || IsFakeClient(client) || g_hDb == null) {
         return;
     }
+
+    GivePlayerGloves(client);
 
     char steamId[32];
     if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
@@ -443,5 +499,13 @@ void GivePlayerGloves(int client) {
             team,
             worldModel ? 1 : 0
         );
+    }
+
+    if (g_hForwardApplied != null) {
+        Call_StartForward(g_hForwardApplied);
+        Call_PushCell(client);
+        Call_PushCell(group);
+        Call_PushCell(paint);
+        Call_Finish();
     }
 }

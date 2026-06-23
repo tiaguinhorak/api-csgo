@@ -17,9 +17,10 @@
 #endif
 #if defined _clutch_gloves_included_
     bool g_bGlovesNativeReady = false;
+    bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.6.1"
+#define PLUGIN_VERSION "3.6.2"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -28,7 +29,7 @@
 #define REAPPLY_PASS_COUNT 6
 #define SPAWN_APPLY_AFTER_GLOVES_DELAY 1.25
 #define SPAWN_GLOVE_DB_REFRESH_DELAY 0.75
-#define FORCE_WEAPONS_AFTER_GLOVES_DELAY 1.5
+#define FORCE_WEAPONS_AFTER_GLOVES_DELAY 2.5
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -167,6 +168,7 @@ public void OnPluginStart() {
 #endif
 #if defined _clutch_gloves_included_
     MarkNativeAsOptional("ClutchGloves_RefreshClient");
+    MarkNativeAsOptional("ClutchGloves_ApplyClient");
     MarkNativeAsOptional("ClutchGloves_IsClientUsingGloves");
 #endif
 
@@ -238,12 +240,28 @@ public void OnAllPluginsLoaded() {
 #if defined _clutch_gloves_included_
 void RefreshGlovesNativeFlag() {
     g_bGlovesNativeReady = GetFeatureStatus(FeatureType_Native, "ClutchGloves_RefreshClient") == FeatureStatus_Available
+        && GetFeatureStatus(FeatureType_Native, "ClutchGloves_ApplyClient") == FeatureStatus_Available
         && GetFeatureStatus(FeatureType_Native, "ClutchGloves_IsClientUsingGloves") == FeatureStatus_Available;
+    if (g_bGlovesNativeReady) {
+        g_bLoggedGlovesNativeMissing = false;
+        LogMessage("[Clutch] z_clutch_gloves natives ready");
+    }
+}
+
+void ClutchGlovesApplyClientSafe(int client) {
+    if (g_bGlovesNativeReady) {
+        ClutchGloves_ApplyClient(client);
+    }
 }
 
 void ClutchGlovesRefreshClientSafe(int client) {
     if (g_bGlovesNativeReady) {
         ClutchGloves_RefreshClient(client);
+    } else if (!g_bLoggedGlovesNativeMissing) {
+        g_bLoggedGlovesNativeMissing = true;
+        LogError(
+            "[Clutch] z_clutch_gloves not ready — run: sm plugins unload z_clutch_skins_bridge; sm plugins load z_clutch_gloves; sm plugins load z_clutch_skins_bridge"
+        );
     }
 }
 
@@ -371,6 +389,7 @@ public Action Command_ApplySkins(int client, int args) {
 
 void ClutchBeginForcedSync(int client) {
 #if defined _clutch_gloves_included_
+    ClutchGlovesApplyClientSafe(client);
     ClutchGlovesRefreshClientSafe(client);
 #endif
 
@@ -386,6 +405,9 @@ public Action Timer_ApplyWeaponsAfterGloves(Handle timer, DataPack pack) {
 
     int client = GetClientOfUserId(userid);
     if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+#if defined _clutch_gloves_included_
+        ClutchGlovesApplyClientSafe(client);
+#endif
         ApplyClientSkins(client, true);
     }
     return Plugin_Stop;
@@ -427,6 +449,7 @@ public void OnClientPutInServer(int client) {
     }
     SDKHook(client, SDKHook_WeaponEquip, OnWeaponEquip);
 #if defined _clutch_gloves_included_
+    ClutchGlovesApplyClientSafe(client);
     ClutchGlovesRefreshClientSafe(client);
 #endif
     ScheduleApplyClientSkins(client);
@@ -1967,3 +1990,15 @@ void ApplyClientSkins(int client, bool force) {
 
     QueryPlayerLoadout(client, steamId, 0, force);
 }
+
+#if defined _clutch_gloves_included_
+public void ClutchGloves_OnClientApplied(int client, int group, int paintkit) {
+    if (client <= 0 || IsFakeClient(client) || group <= 0 || paintkit <= 0) {
+        return;
+    }
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    CreateTimer(0.3, Timer_ApplyWeaponsAfterGloves, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+#endif
