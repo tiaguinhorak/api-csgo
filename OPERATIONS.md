@@ -293,21 +293,42 @@ cd ~/api-csgo
 
 ### Catálogo admin não aparece in-game
 
-Skins adicionadas só no admin do site precisam estar em `weapons_english.cfg`:
+Skins adicionadas **só no painel admin** precisam de **3 passos** (adicionar ao catálogo ≠ equipar ≠ aplicar no jogo):
+
+1. **Catálogo** — skin `enabled` no admin (dispara sync de `weapons_english.cfg` se o site alcança a VPS).
+2. **Equipar no site** — inventário → aba T ou CT → equipar a skin (dispara `player-sync` → SQLite).
+3. **VPS** — cfg + reload do plugin `weapons` (paintkits novos só existem para `weapons.smx` após reload).
 
 ```bash
 cd ~/api-csgo
+git pull
+npm run build && pm2 restart api-csgo --update-env
 bash scripts/sync-weapons-cfg-from-site.sh
 ```
 
-No console CS:
+No console CS (ou `./scripts/reload-clutch-skins-ingame.sh`):
 
 ```text
 sm plugins reload weapons
 sm_clutch_applyskins
 ```
 
-Requer `WS_ALLOWLIST_SOURCE=site-db` e `CLUTCH_SITE_URL` acessível da VPS.
+Respawn ou `mp_restartgame 1`. Confira aba **T/CT** certa (AK só T, M4 só CT).
+
+**Verificar** que a paintkit está no cfg:
+
+```bash
+grep "PAINTKIT_NUMERO" /home/csgo/server/csgo/addons/sourcemod/configs/weapons/weapons_english.cfg
+```
+
+**Verificar** allowlist do site (VPS → Hostinger):
+
+```bash
+curl -s -H "x-skins-sync-key: $CSGO_SKINS_SYNC_KEY" \
+  "https://clutchclube.com.br/api/csgo/catalog/allowlist" | head
+```
+
+Requer `WS_ALLOWLIST_SOURCE=site-db`, `CLUTCH_SITE_URL` e `CSGO_SKINS_SYNC_KEY` na VPS.
 
 ### `core.cfg` (obrigatório para skins)
 

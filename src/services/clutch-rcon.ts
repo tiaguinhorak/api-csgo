@@ -93,6 +93,39 @@ async function reloadViaScreen(): Promise<boolean> {
   return false;
 }
 
+async function sendRconOrScreen(command: string): Promise<boolean> {
+  const target = resolveRconTarget();
+  if (target) {
+    try {
+      await rconService.sendCommand(target.host, target.port, target.password, command);
+      console.log(`[clutch-rcon] ${command} via RCON ${target.host}:${target.port}`);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[clutch-rcon] RCON ${command} failed: ${message}`);
+    }
+  }
+
+  const sessions = await listScreenSessionIds();
+  for (const session of sessions) {
+    if (await sendViaScreen(session, command)) {
+      console.log(`[clutch-rcon] ${command} via screen ${session}`);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** Reload kgns weapons.smx so new paintkits in weapons_english.cfg are recognized. */
+export async function reloadWeaponsPluginInGame(): Promise<boolean> {
+  const ok = await sendRconOrScreen('sm plugins reload weapons');
+  if (!ok) {
+    console.warn('[clutch-rcon] weapons plugin reload skipped (no RCON/screen)');
+  }
+  return ok;
+}
+
 export async function reloadClutchSkinsInGame(): Promise<boolean> {
   const target = resolveRconTarget();
   if (!target) {
