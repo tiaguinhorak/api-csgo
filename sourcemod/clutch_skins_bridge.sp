@@ -13,20 +13,23 @@
 
 #if defined _weapons_included_
     bool g_bWeaponsReloadNative = false;
+    bool g_bWeaponsRefreshNative = false;
     bool g_bLoggedMissingReloadNative = false;
+    bool g_bLoggedMissingRefreshNative = false;
 #endif
 #if defined _clutch_gloves_included_
     bool g_bGlovesNativeReady = false;
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.10"
+#define PLUGIN_VERSION "3.7.11"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
 #define CLUTCH_KNIFE_CLASS_LEN 64
 #define ENTITY_APPLY_COOLDOWN 1.5
-#define REAPPLY_PASS_COUNT 6
+#define WEAPON_REGIVE_COOLDOWN 10.0
+#define REAPPLY_PASS_COUNT 3
 #define SPAWN_APPLY_AFTER_GLOVES_DELAY 1.25
 #define SPAWN_GLOVE_DB_REFRESH_DELAY 0.75
 #define FORCE_WEAPONS_AFTER_GLOVES_DELAY 2.5
@@ -65,7 +68,10 @@ char g_CachedTag[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][64];
 int g_iAppliedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 char g_CachedKnifeClass[MAXPLAYERS + 1][CLUTCH_KNIFE_CLASS_LEN];
 float g_fLastEntityApply[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
-float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.0, 0.15, 0.35, 0.75, 1.5, 3.0};
+float g_fLastWeaponRegive[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
+int g_iReapplyGen[MAXPLAYERS + 1];
+bool g_bAllowWeaponRegive[MAXPLAYERS + 1];
+float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35, 1.0, 2.0};
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -169,6 +175,7 @@ public void OnPluginStart() {
 
 #if defined _weapons_included_
     MarkNativeAsOptional("Weapons_ReloadClientData");
+    MarkNativeAsOptional("Weapons_RefreshWeapon");
 #endif
 #if defined _clutch_gloves_included_
     MarkNativeAsOptional("ClutchGloves_RefreshClient");
@@ -201,6 +208,7 @@ public void OnLibraryRemoved(const char[] name) {
 #if defined _weapons_included_
     if (StrEqual(name, "weapons")) {
         g_bWeaponsReloadNative = false;
+        g_bWeaponsRefreshNative = false;
     }
 #endif
 }
@@ -476,6 +484,7 @@ public Action ClutchBlockWsChatForPlayers(int client, const char[] command, int 
 }
 
 void ClutchBeginForcedSync(int client) {
+    g_bAllowWeaponRegive[client] = true;
 #if defined _clutch_gloves_included_
     // Mid-game: refresh glove cache only — z_clutch_gloves applies on player_spawn.
     ClutchGlovesRefreshClientSafe(client);
@@ -511,6 +520,8 @@ public void OnClientDisconnect(int client) {
     g_iGloveQueryGen[client] = 0;
     g_iGloveApplyGen[client] = 0;
     g_bForceGloveApply[client] = false;
+    g_bAllowWeaponRegive[client] = false;
+    g_iReapplyGen[client] = 0;
     g_CachedKnifeClass[client][0] = '\0';
     ClutchDisableGloveThink(client);
     g_iTeamGloveGroup[client][0] = 0;
@@ -758,7 +769,7 @@ void PrepareTeamLoadoutCaches(int client) {
     g_iLastKnifePaint[client] = 0;
 }
 
-bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool force = false) {
+bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool force = false, bool allowRegive = false) {
     int paintkit = g_CachedPaintkit[client][idx];
     if (paintkit <= 0 || !IsPaintableWeaponEntity(entity)) {
         return false;
@@ -779,14 +790,32 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
     }
     g_fLastEntityApply[client][idx] = now;
 
-    if (!isKnife && (force || ClutchClientHasGlovesLoaded(client))) {
-        if (ClutchRefreshWeaponSlot(client, idx)) {
+    if (!isKnife && allowRegive && ClutchClientHasGlovesLoaded(client)) {
+        if (now - g_fLastWeaponRegive[client][idx] < WEAPON_REGIVE_COOLDOWN) {
+            allowRegive = false;
+        }
+#if defined _weapons_included_
+        else if (ClutchTryRefreshWeaponViaKgns(client, idx)) {
+            g_fLastWeaponRegive[client][idx] = now;
+            g_iAppliedPaintkit[client][idx] = paintkit;
             if (g_cvDebug.BoolValue) {
-                char classname[64];
-                GetEntityClassname(entity, classname, sizeof(classname));
+                LogMessage(
+                    "[Clutch] kgns refresh %s paintkit %d for %N",
+                    g_ClutchWeaponKeys[idx],
+                    paintkit,
+                    client
+                );
+            }
+            return true;
+        }
+#endif
+        else if (ClutchRefreshWeaponSlot(client, idx)) {
+            g_fLastWeaponRegive[client][idx] = now;
+            g_iAppliedPaintkit[client][idx] = paintkit;
+            if (g_cvDebug.BoolValue) {
                 LogMessage(
                     "[Clutch] Refreshed %s paintkit %d for %N (re-give)",
-                    classname,
+                    g_ClutchWeaponKeys[idx],
                     paintkit,
                     client
                 );
@@ -1383,6 +1412,8 @@ void ClutchNetworkUpdateWeaponSkin(int entity) {
 void RefreshWeaponsReloadNativeFlag() {
     g_bWeaponsReloadNative = LibraryExists("weapons")
         && GetFeatureStatus(FeatureType_Native, "Weapons_ReloadClientData") == FeatureStatus_Available;
+    g_bWeaponsRefreshNative = LibraryExists("weapons")
+        && GetFeatureStatus(FeatureType_Native, "Weapons_RefreshWeapon") == FeatureStatus_Available;
 
     if (LibraryExists("weapons") && !g_bWeaponsReloadNative && !g_bLoggedMissingReloadNative) {
         g_bLoggedMissingReloadNative = true;
@@ -1390,6 +1421,28 @@ void RefreshWeaponsReloadNativeFlag() {
             "[Clutch] weapons.smx has no Weapons_ReloadClientData native — paint may stay stale. Run: bash scripts/patch-weapons-reload-native.sh"
         );
     }
+    if (LibraryExists("weapons") && !g_bWeaponsRefreshNative && !g_bLoggedMissingRefreshNative) {
+        g_bLoggedMissingRefreshNative = true;
+        LogMessage(
+            "[Clutch] weapons.smx has no Weapons_RefreshWeapon native — re-run: bash scripts/patch-weapons-reload-native.sh"
+        );
+    }
+}
+
+bool ClutchTryRefreshWeaponViaKgns(int client, int idx) {
+    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+        return false;
+    }
+    if (!LibraryExists("weapons") || !g_bWeaponsRefreshNative) {
+        return false;
+    }
+    if (!IsClientInGame(client) || IsFakeClient(client)) {
+        return false;
+    }
+
+    TryReloadWeaponsPluginData(client);
+    Weapons_RefreshWeapon(client, idx);
+    return true;
 }
 
 void TryReloadWeaponsPluginData(int client) {
@@ -1400,7 +1453,7 @@ void TryReloadWeaponsPluginData(int client) {
 }
 #endif
 
-void ApplyAllCachedWeaponsToClient(int client, bool force) {
+void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = false) {
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
         int paintkit = g_CachedPaintkit[client][i];
         if (paintkit <= 0) {
@@ -1424,7 +1477,7 @@ void ApplyAllCachedWeaponsToClient(int client, bool force) {
             continue;
         }
 
-        ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force);
+        ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force, allowRegive);
     }
 
     if (ClutchClientHasGlovesLoaded(client)) {
@@ -1459,22 +1512,26 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
     RefreshWeaponsReloadNativeFlag();
     TryReloadWeaponsPluginData(client);
 #endif
-    ApplyAllCachedWeaponsToClient(client, force);
-    ScheduleForceReapply(client, force);
+    ApplyAllCachedWeaponsToClient(client, force, false);
+    ScheduleForceReapply(client, force, false);
     return Plugin_Stop;
 }
 
-void ScheduleForceReapply(int client, bool force) {
+void ScheduleForceReapply(int client, bool force, bool allowRegive = false) {
     if (!IsClientInGame(client) || IsFakeClient(client)) {
         return;
     }
 
+    g_iReapplyGen[client]++;
+    int gen = g_iReapplyGen[client];
     int userid = GetClientUserId(client);
     for (int i = 0; i < REAPPLY_PASS_COUNT; i++) {
         DataPack pack = new DataPack();
         pack.WriteCell(userid);
         pack.WriteCell(force ? 1 : 0);
         pack.WriteCell(i);
+        pack.WriteCell(gen);
+        pack.WriteCell((allowRegive && i == 0) ? 1 : 0);
         CreateTimer(g_fReapplyDelays[i], Timer_ForceReapplyPass, pack, TIMER_FLAG_NO_MAPCHANGE);
     }
 }
@@ -1484,6 +1541,8 @@ public Action Timer_ForceReapplyPass(Handle timer, DataPack pack) {
     int userid = pack.ReadCell();
     bool force = pack.ReadCell() == 1;
     int pass = pack.ReadCell();
+    int gen = pack.ReadCell();
+    bool allowRegive = pack.ReadCell() == 1;
     delete pack;
 
     int client = GetClientOfUserId(userid);
@@ -1491,7 +1550,11 @@ public Action Timer_ForceReapplyPass(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
-    ApplyAllCachedWeaponsToClient(client, force);
+    if (gen != g_iReapplyGen[client]) {
+        return Plugin_Stop;
+    }
+
+    ApplyAllCachedWeaponsToClient(client, force, allowRegive);
 
     if (force && pass == REAPPLY_PASS_COUNT - 1 && g_cvDebug.BoolValue) {
         LogMessage("[Clutch] Finished forced re-apply passes for %N", client);
@@ -1724,7 +1787,7 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
 
         int weapon = FindPlayerWeapon(client, weaponId);
         if (weapon != -1) {
-            ApplyCachedSkinToEntity(client, weapon, idx, false, true);
+            ApplyCachedSkinToEntity(client, weapon, idx, false, true, false);
         }
     }
 
@@ -1753,7 +1816,11 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
         CreateTimer(0.35, Timer_ApplyKnifeSkinDelayed, knifePack, TIMER_FLAG_NO_MAPCHANGE);
     }
 
-    ScheduleForceReapply(client, force);
+    bool allowRegive = g_bAllowWeaponRegive[client];
+    if (allowRegive) {
+        g_bAllowWeaponRegive[client] = false;
+    }
+    ScheduleForceReapply(client, force, allowRegive);
     return true;
 }
 
@@ -2498,7 +2565,11 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
         }
     }
 
-    ScheduleForceReapply(client, force);
+    bool allowRegive = g_bAllowWeaponRegive[client];
+    if (allowRegive) {
+        g_bAllowWeaponRegive[client] = false;
+    }
+    ScheduleForceReapply(client, force, allowRegive);
 
     if (knifePaintkit <= 0) {
         ClearAllMeleeSlotCaches(client);

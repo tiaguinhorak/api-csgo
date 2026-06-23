@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Adds Weapons_ReloadClientData native to kgns weapons.smx so clutch bridge can
-# refresh in-memory g_iSkins after the site updates SQLite externally.
+# Adds Weapons_ReloadClientData + Weapons_RefreshWeapon natives to kgns weapons.smx
+# so clutch bridge can refresh in-memory g_iSkins and re-give weapons like !ws.
 #
 # Usage (on VPS as csgo):
 #   CSGO_ROOT=/home/csgo/server/csgo bash scripts/patch-weapons-reload-native.sh
@@ -32,13 +32,19 @@ fi
 cp -f "${REPO_ROOT}/sourcemod/include/weapons.inc" "${SCRIPTING}/include/weapons.inc"
 
 if ! grep -q 'Weapons_ReloadClientData' "${WEAPONS_SP}"; then
-  echo "Patching weapons.sp (CreateNative)..."
+  echo "Patching weapons.sp (CreateNative ReloadClientData)..."
   sed -i '/CreateNative("Weapons_SetClientKnife"/a\
 \tCreateNative("Weapons_ReloadClientData", Weapons_ReloadClientData_Native);' "${WEAPONS_SP}"
 fi
 
+if ! grep -q 'Weapons_RefreshWeapon' "${WEAPONS_SP}"; then
+  echo "Patching weapons.sp (CreateNative RefreshWeapon)..."
+  sed -i '/CreateNative("Weapons_ReloadClientData"/a\
+\tCreateNative("Weapons_RefreshWeapon", Weapons_RefreshWeapon_Native);' "${WEAPONS_SP}"
+fi
+
 if ! grep -q 'Weapons_ReloadClientData_Native' "${NATIVES_SP}"; then
-  echo "Patching weapons/natives.sp..."
+  echo "Patching weapons/natives.sp (ReloadClientData)..."
   cat >> "${NATIVES_SP}" <<'EOF'
 
 public int Weapons_ReloadClientData_Native(Handle plugin, int numparams)
@@ -58,6 +64,32 @@ public int Weapons_ReloadClientData_Native(Handle plugin, int numparams)
 EOF
 fi
 
+if ! grep -q 'Weapons_RefreshWeapon_Native' "${NATIVES_SP}"; then
+  echo "Patching weapons/natives.sp (RefreshWeapon)..."
+  cat >> "${NATIVES_SP}" <<'EOF'
+
+public int Weapons_RefreshWeapon_Native(Handle plugin, int numparams)
+{
+	int client = GetNativeCell(1);
+	int index = GetNativeCell(2);
+	if (client < 1 || client > MaxClients)
+	{
+		return ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d).", client);
+	}
+	if (!IsClientInGame(client))
+	{
+		return ThrowNativeError(SP_ERROR_NATIVE, "Client (%d) is not in game.", client);
+	}
+	if (index < 0 || index >= sizeof(g_WeaponClasses))
+	{
+		return ThrowNativeError(SP_ERROR_NATIVE, "Invalid weapon index (%d).", index);
+	}
+	RefreshWeapon(client, index, false);
+	return 0;
+}
+EOF
+fi
+
 echo "Compiling weapons.smx..."
 cd "${SCRIPTING}"
 if ! "${SPCOMP}" weapons.sp -o"${SM}/plugins/weapons.smx"; then
@@ -66,9 +98,14 @@ if ! "${SPCOMP}" weapons.sp -o"${SM}/plugins/weapons.smx"; then
 fi
 
 if ! grep -q 'Weapons_ReloadClientData' "${WEAPONS_SP}"; then
-  echo "ERROR: patch did not apply to weapons.sp" >&2
+  echo "ERROR: ReloadClientData patch did not apply to weapons.sp" >&2
   exit 1
 fi
 
-echo "Done. weapons.smx updated with Weapons_ReloadClientData native."
+if ! grep -q 'Weapons_RefreshWeapon' "${WEAPONS_SP}"; then
+  echo "ERROR: RefreshWeapon patch did not apply to weapons.sp" >&2
+  exit 1
+fi
+
+echo "Done. weapons.smx updated with Weapons_ReloadClientData + Weapons_RefreshWeapon."
 echo "Restart map or in screen: sm plugins reload weapons"
