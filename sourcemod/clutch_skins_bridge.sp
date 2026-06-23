@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.6.2"
+#define PLUGIN_VERSION "3.6.3"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -373,7 +373,7 @@ public Action Command_ReloadSkins(int client, int args) {
             ClutchBeginForcedSync(i);
         }
     }
-    ReplyToCommand(client, "[Clutch] Loadouts reaplicados do weapons DB.");
+    ReplyToCommand(client, "[Clutch] Loadouts reaplicados. Luvas atualizam no proximo spawn.");
     return Plugin_Handled;
 }
 
@@ -383,13 +383,13 @@ public Action Command_ApplySkins(int client, int args) {
             ClutchBeginForcedSync(i);
         }
     }
-    ReplyToCommand(client, "[Clutch] Reaplicando skins nos jogadores.");
+    ReplyToCommand(client, "[Clutch] Skins reaplicados. Luvas atualizam no proximo spawn.");
     return Plugin_Handled;
 }
 
 void ClutchBeginForcedSync(int client) {
 #if defined _clutch_gloves_included_
-    ClutchGlovesApplyClientSafe(client);
+    // Mid-game: refresh glove cache only — z_clutch_gloves applies on player_spawn.
     ClutchGlovesRefreshClientSafe(client);
 #endif
 
@@ -405,9 +405,6 @@ public Action Timer_ApplyWeaponsAfterGloves(Handle timer, DataPack pack) {
 
     int client = GetClientOfUserId(userid);
     if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
-#if defined _clutch_gloves_included_
-        ClutchGlovesApplyClientSafe(client);
-#endif
         ApplyClientSkins(client, true);
     }
     return Plugin_Stop;
@@ -449,7 +446,6 @@ public void OnClientPutInServer(int client) {
     }
     SDKHook(client, SDKHook_WeaponEquip, OnWeaponEquip);
 #if defined _clutch_gloves_included_
-    ClutchGlovesApplyClientSafe(client);
     ClutchGlovesRefreshClientSafe(client);
 #endif
     ScheduleApplyClientSkins(client);
@@ -501,19 +497,6 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     }
     int userid = GetClientUserId(client);
     CreateTimer(SPAWN_APPLY_AFTER_GLOVES_DELAY, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
-#if defined _clutch_gloves_included_
-    CreateTimer(SPAWN_GLOVE_DB_REFRESH_DELAY, Timer_RefreshGlovesFromDb, userid, TIMER_FLAG_NO_MAPCHANGE);
-#endif
-}
-
-public Action Timer_RefreshGlovesFromDb(Handle timer, any userid) {
-    int client = GetClientOfUserId(userid);
-#if defined _clutch_gloves_included_
-    if (client > 0) {
-        ClutchGlovesRefreshClientSafe(client);
-    }
-#endif
-    return Plugin_Stop;
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {

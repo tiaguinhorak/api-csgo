@@ -6,7 +6,7 @@
 #include <cstrike>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "1.3.0"
+#define PLUGIN_VERSION "1.4.0"
 #define GLOVE_THINK_TICK_MOD 8
 
 ConVar g_cvDb;
@@ -87,7 +87,7 @@ public void OnPluginStart() {
     AutoExecConfig(true, "clutch_gloves");
 
     HookEvent("player_spawn", Event_PlayerSpawn, EventHookMode_Pre);
-    RegAdminCmd("sm_clutch_gloves_refresh", Command_Refresh, ADMFLAG_ROOT, "Re-read gloves DB and apply");
+    RegAdminCmd("sm_clutch_gloves_refresh", Command_Refresh, ADMFLAG_ROOT, "Re-read gloves DB into cache (visual apply on spawn)");
     RegAdminCmd("sm_clutch_gloves_apply", Command_Apply, ADMFLAG_ROOT, "Apply gloves from cache (no DB)");
     RegAdminCmd("sm_clutch_gloves_status", Command_Status, ADMFLAG_ROOT, "Dump glove cache / wearable state");
 
@@ -307,8 +307,6 @@ void RefreshClientFromDatabase(int client, int altAttempt) {
         return;
     }
 
-    GivePlayerGloves(client);
-
     char steamId[32];
     if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
         return;
@@ -374,7 +372,7 @@ public void OnQueryGloves(Database database, DBResultSet results, const char[] e
             g_iPaint[client][CS_TEAM_CT]
         );
     }
-    GivePlayerGloves(client);
+    LogMessage("[ClutchGloves] Cache updated for %N — visual apply on next spawn", client);
 }
 
 void LoadGloveRow(int client, DBResultSet results) {
@@ -484,8 +482,39 @@ void ScrubStrayWearables(int client, int keepEnt) {
         }
         if (GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity") == client && entity != keepEnt) {
             AcceptEntityInput(entity, "KillHierarchy");
+            if (IsValidEntity(entity)) {
+                RemoveEntity(entity);
+            }
         }
     }
+}
+
+void DestroyPlayerWearables(int client) {
+    SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
+
+    int entity = -1;
+    while ((entity = FindEntityByClassname(entity, "wearable_item")) != -1) {
+        if (!IsValidEntity(entity)) {
+            continue;
+        }
+        if (GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity") != client) {
+            continue;
+        }
+        SetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity", -1);
+        if (HasEntProp(entity, Prop_Data, "m_hParent")) {
+            SetEntPropEnt(entity, Prop_Data, "m_hParent", -1);
+        }
+        if (HasEntProp(entity, Prop_Data, "m_hMoveParent")) {
+            SetEntPropEnt(entity, Prop_Data, "m_hMoveParent", -1);
+        }
+        AcceptEntityInput(entity, "KillHierarchy");
+        if (IsValidEntity(entity)) {
+            RemoveEntity(entity);
+        }
+    }
+
+    ClearGloveBody(client);
+    FixCustomArms(client);
 }
 
 void NetworkUpdate(int entity) {
@@ -510,17 +539,8 @@ void GivePlayerGloves(int client) {
     bool worldModel = g_cvWorldModel.BoolValue;
 
     if (group <= 0 || paint <= 0) {
+        DestroyPlayerWearables(client);
         DisableGloveThink(client);
-        int ent = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
-        if (ent != -1 && IsValidEntity(ent)) {
-            AcceptEntityInput(ent, "KillHierarchy");
-            SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
-        }
-        if (worldModel) {
-            ClearGloveBody(client);
-        } else if (g_cvForceBody.BoolValue) {
-            ClearGloveBody(client);
-        }
         return;
     }
 
@@ -536,10 +556,9 @@ void GivePlayerGloves(int client) {
             EnableGloveThink(client);
             return;
         }
-        AcceptEntityInput(ent, "KillHierarchy");
     }
 
-    FixCustomArms(client);
+    DestroyPlayerWearables(client);
 
     ent = CreateEntityByName("wearable_item");
     if (ent == -1) {
