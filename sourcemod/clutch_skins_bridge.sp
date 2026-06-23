@@ -22,7 +22,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.12"
+#define PLUGIN_VERSION "3.7.13"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -644,10 +644,11 @@ public Action Timer_ApplyAfterTeamChange(Handle timer, DataPack pack) {
 
 public Action Clutch_GiveNamedItemPre(
     int client,
-    const char[] classname,
-    const CEconItemView item,
-    bool originIsNull,
-    const float origin[3]
+    char classname[64],
+    CEconItemView &item,
+    bool &ignoredItemView,
+    bool &originIsNull,
+    float origin[3]
 ) {
     if (client <= 0 || IsFakeClient(client)) {
         return Plugin_Continue;
