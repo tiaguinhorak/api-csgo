@@ -43,6 +43,7 @@ sleep 2
 
 bash "${REPO_ROOT}/scripts/fix-csgo-bundled-libgcc.sh" || true
 bash "${REPO_ROOT}/scripts/ensure-csgo-srcds-layout.sh"
+bash "${REPO_ROOT}/scripts/ensure-csgo-steam-appid.sh" || true
 
 mkdir -p "${SERVER_ROOT}/csgo"
 echo "===== boot $(date -Is) =====" >> "${BOOT_LOG}"
