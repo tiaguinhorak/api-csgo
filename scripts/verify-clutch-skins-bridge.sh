@@ -103,6 +103,35 @@ if [[ -f "${BRIDGE_SMX}" ]]; then
   echo "TIP  bridge smx mtime: $(date -d "@${BRIDGE_MTIME}" 2>/dev/null || date -r "${BRIDGE_MTIME}" 2>/dev/null || echo unknown)"
 fi
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${REPO_ROOT}/.env"
+  set +a
+fi
+DB_PATH="${WEAPONS_DB_PATH:-${CSGO_ROOT}/addons/sourcemod/data/sqlite/sourcemod-local.sq3}"
+GLOVE_TABLE="${WEAPONS_TABLE_PREFIX:-}gloves"
+
+echo ""
+echo "=== Gloves DB (plugins + api-csgo) ==="
+echo "Path: ${DB_PATH}"
+if [[ -f "${DB_PATH}" ]] && command -v sqlite3 >/dev/null 2>&1; then
+  HAS_GLOVES="$(sqlite3 "${DB_PATH}" "SELECT name FROM sqlite_master WHERE type='table' AND name='${GLOVE_TABLE}' LIMIT 1;" 2>/dev/null || true)"
+  if [[ -n "${HAS_GLOVES}" ]]; then
+    COUNT="$(sqlite3 "${DB_PATH}" "SELECT COUNT(*) FROM ${GLOVE_TABLE};" 2>/dev/null || echo 0)"
+    echo "OK  table ${GLOVE_TABLE} (${COUNT} rows)"
+    sqlite3 "${DB_PATH}" \
+      "SELECT steamid, t_group, t_glove, ct_group, ct_glove FROM ${GLOVE_TABLE} LIMIT 8;" 2>/dev/null || true
+  else
+    echo "WARN table ${GLOVE_TABLE} missing — equip gloves on site or ./scripts/test-gloves-sync.sh"
+  fi
+else
+  echo "WARN cannot read ${DB_PATH}"
+fi
+echo "Query: ./scripts/query-gloves-db.sh [steam filter]"
+echo "Wrong path (no gloves table): ~/api-csgo/data/storage-local.sqlite"
+
 echo ""
 echo "Recent SM errors (clutch / gloves):"
 grep -iE 'clutch|ClutchGloves|z_clutch' "${SM}/logs/errors_"*.log 2>/dev/null | tail -12 || echo "  (none or no log yet)"
