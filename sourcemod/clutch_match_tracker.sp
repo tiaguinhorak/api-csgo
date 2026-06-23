@@ -179,7 +179,7 @@ void ParseRosterSide(const char[] pipeList, int slot) {
 public Action Cmd_MatchClear(int args) {
     LogMessage("[ClutchMatch] clear");
     ResetMatchState();
-  if (g_hDb != null) {
+    if (g_hDb != null) {
         char sql[128];
         Format(sql, sizeof(sql), "DELETE FROM %s WHERE phase != 'idle'", TABLE_MATCH_LIVE);
         g_hDb.Query(SimpleQueryCallback, sql);
