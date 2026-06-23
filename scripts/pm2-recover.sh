@@ -24,8 +24,8 @@ fi
 
 npm run build
 
-if ! grep -q 'gloves: result.gloves' dist/routes/csgo-skins-push.js; then
-  echo "[pm2-recover] ERROR: dist missing gloves sync in player-sync route" >&2
+if ! grep -q 'player-sync' dist/routes/csgo-stickers-push.js 2>/dev/null; then
+  echo "[pm2-recover] ERROR: dist missing stickers player-sync route" >&2
   exit 1
 fi
 
@@ -48,12 +48,12 @@ if ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
     sleep 5
     HEALTH="$(curl -sf "http://127.0.0.1:${API_PORT}/health" 2>/dev/null || true)"
   else
-  stale_rc=$?
-  if [[ "${stale_rc}" -eq 2 ]]; then
-    echo "[pm2-recover] Run: bash ${REPO_ROOT}/scripts/pm2-recover-no-root.sh" >&2
-    echo "Or (needs root): sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh" >&2
-    exit 2
-  fi
+    stale_rc=$?
+    if [[ "${stale_rc}" -eq 2 ]]; then
+      echo "[pm2-recover] Run: bash ${REPO_ROOT}/scripts/pm2-recover-no-root.sh" >&2
+      echo "Or (needs root): sudo bash ${REPO_ROOT}/scripts/fix-port-3000-as-root.sh" >&2
+      exit 2
+    fi
   fi
   if [[ -z "${HEALTH}" ]] || ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
     echo "[pm2-recover] health still wrong after kill-stale:" >&2
@@ -62,6 +62,10 @@ if ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
     pm2 logs api-csgo --lines 20 --nostream 2>/dev/null || true
     exit 1
   fi
+fi
+
+if ! echo "${HEALTH}" | grep -q 'stickersPlayerSync'; then
+  echo "[pm2-recover] WARN: /health missing stickersPlayerSync — old build still on :${API_PORT}?" >&2
 fi
 
 if [[ -f scripts/verify-api-running-build.sh ]]; then
