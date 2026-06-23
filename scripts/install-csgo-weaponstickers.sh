@@ -92,10 +92,16 @@ extract_archive() {
   esac
 }
 
-# Find .../addons/sourcemod/plugins inside an extracted tree and merge into CSGO.
+# Find addons/sourcemod (plugins, extensions, scripting) and merge into live server.
 merge_addons_tree() {
   local search_root="$1"
   local merged=0
+
+  while IFS= read -r sm_dir; do
+    echo "Merging sourcemod tree from ${sm_dir}"
+    cp -a "${sm_dir}/." "${SM}/"
+    merged=1
+  done < <(find "${search_root}" -type d -path '*/addons/sourcemod' 2>/dev/null)
 
   while IFS= read -r plugins_dir; do
     local sm_dir addons_dir
@@ -104,7 +110,7 @@ merge_addons_tree() {
     echo "Merging addons from ${addons_dir}"
     cp -a "${addons_dir}/." "${CSGO_ROOT}/addons/"
     merged=1
-  done < <(find "${search_root}" -type d -path '*/sourcemod/plugins' 2>/dev/null)
+  done < <(find "${search_root}" -type d -path '*/sourcemod/plugins' ! -path '*/addons/sourcemod/plugins' 2>/dev/null)
 
   # Some releases ship csgo/addons/...
   if [[ -d "${search_root}/csgo/addons" ]]; then
@@ -158,7 +164,18 @@ install_ripext() {
   echo ">>> REST in Pawn (sm-ripext) — required by eItems + WeaponStickers"
   curl -fsSL "${RIPEXT_LINUX_URL}" -o "${TMP_DIR}/ripext.tar.gz"
   extract_archive "${TMP_DIR}/ripext.tar.gz" "${TMP_DIR}/ripext"
-  merge_addons_tree "${TMP_DIR}/ripext"
+  if ! merge_addons_tree "${TMP_DIR}/ripext"; then
+    local rip_so
+    rip_so="$(find "${TMP_DIR}/ripext" -name 'rip.ext*.so' -print -quit 2>/dev/null || true)"
+    if [[ -n "${rip_so}" ]]; then
+      echo "Copying ${rip_so} -> ${SM}/extensions/"
+      mkdir -p "${SM}/extensions"
+      cp -a "${rip_so}" "${SM}/extensions/"
+    else
+      echo "ERROR: rip.ext.so not found inside sm-ripext package" >&2
+      return 1
+    fi
+  fi
   # Force load even before dependent plugins are up.
   touch "${SM}/extensions/rip.autoload" 2>/dev/null || true
 }
