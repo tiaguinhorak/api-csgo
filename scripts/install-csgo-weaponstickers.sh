@@ -192,32 +192,63 @@ install_multicolors() {
   fi
 }
 
+extract_rar_to_dir() {
+  local rar_file="$1"
+  local dest="$2"
+  rm -rf "${dest}"
+  mkdir -p "${dest}"
+
+  if command -v 7z >/dev/null 2>&1; then
+    if 7z x -o"${dest}" -y "${rar_file}" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "WARN: 7z failed on ${rar_file}" >&2
+  fi
+
+  if command -v bsdtar >/dev/null 2>&1; then
+    if bsdtar -xf "${rar_file}" -C "${dest}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if command -v unrar >/dev/null 2>&1; then
+    if (cd "${dest}" && unrar x -o+ -y "${rar_file}") >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if command -v unrar-free >/dev/null 2>&1; then
+    # cd into dest avoids unrar-free mkpath "File exists" on nested folders
+    if (cd "${dest}" && unrar-free x -o+ "${rar_file}") >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  echo "ERROR: could not extract RAR — install p7zip-full: sudo apt install -y p7zip-full" >&2
+  return 1
+}
+
 install_weaponstickers_z1ntex() {
   echo ""
   echo ">>> Download WeaponStickers v1.3.6 (z1ntex .rar)"
   local extract_dir="${TMP_DIR}/z1ntex-clean"
-  rm -rf "${extract_dir}"
-  mkdir -p "${extract_dir}"
   if ! curl -fsSL "${Z1NTEX_RAR_URL}" -o "${TMP_DIR}/weaponstickers.rar"; then
     return 1
   fi
-  if command -v 7z >/dev/null 2>&1; then
-    if ! 7z x -o"${extract_dir}" -y "${TMP_DIR}/weaponstickers.rar" >/dev/null; then
-      return 1
-    fi
-  elif command -v unrar >/dev/null 2>&1; then
-    if ! unrar x -o+ "${TMP_DIR}/weaponstickers.rar" "${extract_dir}/" >/dev/null; then
-      return 1
-    fi
-  elif command -v unrar-free >/dev/null 2>&1; then
-    if ! unrar-free x "${TMP_DIR}/weaponstickers.rar" "${extract_dir}/" >/dev/null; then
-      return 1
-    fi
-  else
-    echo "WARN: no unrar/7z — skipping z1ntex rar (quasemago zip fallback will run)"
+  if ! extract_rar_to_dir "${TMP_DIR}/weaponstickers.rar" "${extract_dir}"; then
     return 1
   fi
-  merge_addons_tree "${extract_dir}"
+  if ! merge_addons_tree "${extract_dir}"; then
+  local smx
+    smx="$(find "${extract_dir}" -name 'csgo_weaponstickers.smx' -print -quit 2>/dev/null || true)"
+    if [[ -n "${smx}" ]]; then
+      echo "Copying plugin from ${smx}"
+      cp -a "${smx}" "${SM}/plugins/csgo_weaponstickers.smx"
+      return 0
+    fi
+    return 1
+  fi
+  return 0
 }
 
 install_weaponstickers_quasemago() {
@@ -244,7 +275,7 @@ install_ptah() {
   merge_addons_tree "${TMP_DIR}/ptah"
 }
 
-echo "=== CSGO_WeaponStickers installer ==="
+echo "=== CSGO_WeaponStickers installer (v2026-06-23-z1ntex-extract) ==="
 echo "CSGO_ROOT=${CSGO_ROOT}"
 
 if [[ "${WEAPONSTICKERS_FORCE:-0}" == "1" ]]; then
