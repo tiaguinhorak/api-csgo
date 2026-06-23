@@ -66,23 +66,24 @@ echo "Using screen session: ${FULL_SCREEN}"
 
 send_cmd() {
   local cmd="$1"
+  local wait="${2:-0.4}"
   echo ">>> ${cmd}"
   screen -S "${FULL_SCREEN}" -p 0 -X stuff "${cmd}^M"
-  sleep 0.4
+  sleep "${wait}"
 }
 
-# reload fails when plugin was never loaded; load picks up new .smx from plugins/
 send_plugin() {
   local name="$1"
-  send_cmd "sm plugins reload ${name}"
-  send_cmd "sm plugins load ${name}"
+  send_cmd "sm plugins reload ${name}" 0.3
+  send_cmd "sm plugins load ${name}" 0.5
 }
 
 send_cmd "sm plugins reload weapons"
 send_cmd "sm plugins info weapons"
+send_cmd "sm plugins unload z_clutch_skins_bridge" 0.6
 send_plugin "z_clutch_gloves"
 send_cmd "sm plugins info z_clutch_gloves"
-send_plugin "z_clutch_skins_bridge"
+send_cmd "sm plugins load z_clutch_skins_bridge" 0.8
 send_cmd "sm plugins info z_clutch_skins_bridge"
 send_cmd "clutch_gloves_debug 1"
 send_cmd "clutch_skins_debug 1"

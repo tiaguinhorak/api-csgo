@@ -15,8 +15,11 @@
     bool g_bWeaponsReloadNative = false;
     bool g_bLoggedMissingReloadNative = false;
 #endif
+#if defined _clutch_gloves_included_
+    bool g_bGlovesNativeReady = false;
+#endif
 
-#define PLUGIN_VERSION "3.6.0"
+#define PLUGIN_VERSION "3.6.1"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -171,6 +174,11 @@ public void OnPluginStart() {
 }
 
 public void OnLibraryAdded(const char[] name) {
+#if defined _clutch_gloves_included_
+    if (StrEqual(name, "clutch_gloves")) {
+        RefreshGlovesNativeFlag();
+    }
+#endif
 #if defined _weapons_included_
     if (StrEqual(name, "weapons")) {
         RefreshWeaponsReloadNativeFlag();
@@ -179,6 +187,11 @@ public void OnLibraryAdded(const char[] name) {
 }
 
 public void OnLibraryRemoved(const char[] name) {
+#if defined _clutch_gloves_included_
+    if (StrEqual(name, "clutch_gloves")) {
+        g_bGlovesNativeReady = false;
+    }
+#endif
 #if defined _weapons_included_
     if (StrEqual(name, "weapons")) {
         g_bWeaponsReloadNative = false;
@@ -208,9 +221,10 @@ public void OnAllPluginsLoaded() {
         LogMessage("[Clutch] weapons.smx not loaded — knife models need kgns Weapons & Knives + PTaH");
     }
 #if defined _clutch_gloves_included_
-    if (!LibraryExists("clutch_gloves")) {
+    RefreshGlovesNativeFlag();
+    if (!g_bGlovesNativeReady) {
         LogError(
-            "[Clutch] z_clutch_gloves.smx not loaded — install via install-clutch-skins-bridge.sh (gloves will not work)"
+            "[Clutch] z_clutch_gloves.smx not loaded or natives missing — load z_clutch_gloves BEFORE z_clutch_skins_bridge"
         );
     }
 #else
@@ -220,6 +234,26 @@ public void OnAllPluginsLoaded() {
     RefreshWeaponsReloadNativeFlag();
 #endif
 }
+
+#if defined _clutch_gloves_included_
+void RefreshGlovesNativeFlag() {
+    g_bGlovesNativeReady = GetFeatureStatus(FeatureType_Native, "ClutchGloves_RefreshClient") == FeatureStatus_Available
+        && GetFeatureStatus(FeatureType_Native, "ClutchGloves_IsClientUsingGloves") == FeatureStatus_Available;
+}
+
+void ClutchGlovesRefreshClientSafe(int client) {
+    if (g_bGlovesNativeReady) {
+        ClutchGloves_RefreshClient(client);
+    }
+}
+
+bool ClutchGlovesIsClientUsingSafe(int client) {
+    if (!g_bGlovesNativeReady) {
+        return false;
+    }
+    return ClutchGloves_IsClientUsingGloves(client);
+}
+#endif
 
 bool ClutchIsKgnsGlovesPluginRunning() {
     char name[64];
@@ -337,9 +371,7 @@ public Action Command_ApplySkins(int client, int args) {
 
 void ClutchBeginForcedSync(int client) {
 #if defined _clutch_gloves_included_
-    if (LibraryExists("clutch_gloves")) {
-        ClutchGloves_RefreshClient(client);
-    }
+    ClutchGlovesRefreshClientSafe(client);
 #endif
 
     DataPack pack = new DataPack();
@@ -395,9 +427,7 @@ public void OnClientPutInServer(int client) {
     }
     SDKHook(client, SDKHook_WeaponEquip, OnWeaponEquip);
 #if defined _clutch_gloves_included_
-    if (LibraryExists("clutch_gloves")) {
-        ClutchGloves_RefreshClient(client);
-    }
+    ClutchGlovesRefreshClientSafe(client);
 #endif
     ScheduleApplyClientSkins(client);
 }
@@ -449,17 +479,15 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     int userid = GetClientUserId(client);
     CreateTimer(SPAWN_APPLY_AFTER_GLOVES_DELAY, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
 #if defined _clutch_gloves_included_
-    if (LibraryExists("clutch_gloves")) {
-        CreateTimer(SPAWN_GLOVE_DB_REFRESH_DELAY, Timer_RefreshGlovesFromDb, userid, TIMER_FLAG_NO_MAPCHANGE);
-    }
+    CreateTimer(SPAWN_GLOVE_DB_REFRESH_DELAY, Timer_RefreshGlovesFromDb, userid, TIMER_FLAG_NO_MAPCHANGE);
 #endif
 }
 
 public Action Timer_RefreshGlovesFromDb(Handle timer, any userid) {
     int client = GetClientOfUserId(userid);
 #if defined _clutch_gloves_included_
-    if (client > 0 && LibraryExists("clutch_gloves")) {
-        ClutchGloves_RefreshClient(client);
+    if (client > 0) {
+        ClutchGlovesRefreshClientSafe(client);
     }
 #endif
     return Plugin_Stop;
@@ -1187,7 +1215,7 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
 
 void QueryPlayerGloves(int client, const char[] steamId, int altAttempt) {
 #if defined _clutch_gloves_included_
-    if (LibraryExists("clutch_gloves")) {
+    if (g_bGlovesNativeReady) {
         return;
     }
 #endif
@@ -1279,8 +1307,8 @@ bool ClutchShouldUpdateClientModel(int client) {
 
 bool ClutchClientHasGlovesLoaded(int client) {
 #if defined _clutch_gloves_included_
-    if (LibraryExists("clutch_gloves")) {
-        return ClutchGloves_IsClientUsingGloves(client);
+    if (g_bGlovesNativeReady) {
+        return ClutchGlovesIsClientUsingSafe(client);
     }
 #endif
     return g_iLastGloveGroup[client] > 0 && g_iLastGlovePaint[client] > 0;
@@ -1288,7 +1316,7 @@ bool ClutchClientHasGlovesLoaded(int client) {
 
 void ClutchRequestClientModelUpdate(int client) {
 #if defined _clutch_gloves_included_
-    if (LibraryExists("clutch_gloves")) {
+    if (g_bGlovesNativeReady) {
         return;
     }
 #endif
@@ -1301,7 +1329,7 @@ void ClutchRequestClientModelUpdate(int client) {
 
 void ClutchEnableGloveThink(int client) {
 #if defined _clutch_gloves_included_
-    if (LibraryExists("clutch_gloves")) {
+    if (g_bGlovesNativeReady) {
         return;
     }
 #endif
@@ -1332,7 +1360,7 @@ public void OnGlovePreThink(int client) {
 
 void ClutchEnforceGloveState(int client) {
 #if defined _clutch_gloves_included_
-    if (LibraryExists("clutch_gloves")) {
+    if (g_bGlovesNativeReady) {
         return;
     }
 #endif
@@ -1526,7 +1554,7 @@ public Action Timer_RetryGlovesAfterTeam(Handle timer, DataPack pack) {
 
 void ClutchGivePlayerGloves(int client, int group, int paintkit, float wear) {
 #if defined _clutch_gloves_included_
-    if (LibraryExists("clutch_gloves")) {
+    if (g_bGlovesNativeReady) {
         return;
     }
 #endif
