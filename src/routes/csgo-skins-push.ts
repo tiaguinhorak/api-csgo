@@ -8,6 +8,7 @@ import {
 } from '../services/ws-weapons-config';
 import { reloadClutchSkinsInGame, reloadWeaponsPluginInGame } from '../services/clutch-rcon';
 import { syncWeaponsCfgFromSite } from '../services/sync-weapons-cfg-file';
+import { filterCsgoCompatibleWeapons } from '../services/paintkit-csgo-compat';
 
 const router = Router();
 
@@ -75,7 +76,8 @@ router.post('/player-sync', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await syncPlayerLoadoutToWeaponsDb(body.steamId, body.weapons, {
+    const filtered = await filterCsgoCompatibleWeapons(body.weapons);
+    const result = await syncPlayerLoadoutToWeaponsDb(body.steamId, filtered.weapons, {
       clearKnifeSlot: body.clearKnifeSlot,
       clearWeaponIds: body.clearWeaponIds,
       clearGloveTeam: body.clearGloveTeam,
@@ -87,7 +89,8 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       mode: 'db',
       steamId: result.steamId,
       steamIds: result.steamIds,
-      weapons: body.weapons.length,
+      weapons: filtered.weapons.length,
+      skippedCs2: filtered.skipped.length,
       columns: result.columns,
       updated: result.updated,
       gloves: result.gloves,

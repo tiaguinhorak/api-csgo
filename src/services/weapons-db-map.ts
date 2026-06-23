@@ -451,8 +451,7 @@ export function buildPlayerLoadoutSql(
 
     if (!w.paintkit || w.paintkit <= 0) continue;
 
-    // Team loadouts: team-exclusive weapons only in clutch_team_loadout (clear kgns column).
-    // Shared weapons (Deagle, AWP, …) also mirror to kgns so weapons.smx does not reset paint.
+    // Per-side paintkits (shared + team-exclusive) live in clutch_team_loadout only.
     if (w.team === 'T' || w.team === 'CT') {
       if (isMeleeWeaponId(w.weaponId)) {
         const teamColumn = weaponIdToDbColumn(w.weaponId);
@@ -462,13 +461,7 @@ export function buildPlayerLoadoutSql(
         updates.push('knife=0');
         continue;
       }
-      if (isTeamExclusiveWeapon(w.weaponId)) {
-        const teamColumn = weaponIdToDbColumn(w.weaponId);
-        if (teamColumn) {
-          updates.push(...clearColumnUpdates(teamColumn));
-        }
-        continue;
-      }
+      continue;
     }
 
 

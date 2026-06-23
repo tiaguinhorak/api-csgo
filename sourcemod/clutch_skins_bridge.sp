@@ -22,7 +22,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.13"
+#define PLUGIN_VERSION "3.7.14"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -1531,7 +1531,7 @@ void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = fa
     CS_UpdateClientModel(client);
 }
 
-void ScheduleWeaponsAfterGlovesApply(int client, bool force) {
+void ScheduleWeaponsAfterGlovesApply(int client, bool force, bool skipWeaponsReload = false) {
     if (!IsClientInGame(client) || IsFakeClient(client)) {
         return;
     }
@@ -1539,6 +1539,7 @@ void ScheduleWeaponsAfterGlovesApply(int client, bool force) {
     DataPack pack = new DataPack();
     pack.WriteCell(GetClientUserId(client));
     pack.WriteCell(force ? 1 : 0);
+    pack.WriteCell(skipWeaponsReload ? 1 : 0);
     CreateTimer(FORCE_WEAPONS_AFTER_GLOVES_DELAY, Timer_ApplyCachedWeaponsDelayed, pack, TIMER_FLAG_NO_MAPCHANGE);
 }
 
@@ -1546,6 +1547,7 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
     pack.Reset();
     int userid = pack.ReadCell();
     bool force = pack.ReadCell() == 1;
+    bool skipWeaponsReload = pack.ReadCell() == 1;
     delete pack;
 
     int client = GetClientOfUserId(userid);
@@ -1554,8 +1556,10 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
     }
 
 #if defined _weapons_included_
-    RefreshWeaponsReloadNativeFlag();
-    TryReloadWeaponsPluginData(client);
+    if (!skipWeaponsReload) {
+        RefreshWeaponsReloadNativeFlag();
+        TryReloadWeaponsPluginData(client);
+    }
 #endif
     ApplyAllCachedWeaponsToClient(client, force, false);
     ScheduleForceReapply(client, force, false);
@@ -1767,7 +1771,7 @@ public void T_TeamLoadoutCallback(Database database, DBResultSet results, const 
 
     g_bLoggedMissingLoadout[client] = false;
     QueryPlayerGloves(client, steamId, 0);
-    ScheduleWeaponsAfterGlovesApply(client, force);
+    ScheduleWeaponsAfterGlovesApply(client, force, true);
 }
 
 bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
