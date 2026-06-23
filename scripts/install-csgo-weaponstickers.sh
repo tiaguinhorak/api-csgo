@@ -239,7 +239,7 @@ install_weaponstickers_z1ntex() {
     return 1
   fi
   if ! merge_addons_tree "${extract_dir}"; then
-  local smx
+    local smx
     smx="$(find "${extract_dir}" -name 'csgo_weaponstickers.smx' -print -quit 2>/dev/null || true)"
     if [[ -n "${smx}" ]]; then
       echo "Copying plugin from ${smx}"
@@ -293,7 +293,11 @@ fi
 
 if ! has_weaponstickers_plugin; then
   if ! install_weaponstickers_z1ntex; then
-    echo "WARN: z1ntex rar install failed (install p7zip-full or unrar-free)"
+    echo "WARN: z1ntex SM 1.11 install failed (sudo apt install -y p7zip-full)"
+    if [[ "${WEAPONSTICKERS_FORCE:-0}" == "1" ]]; then
+      echo "ERROR: WEAPONSTICKERS_FORCE=1 but z1ntex not installed — fix RAR extractor and re-run." >&2
+      exit 1
+    fi
   fi
 fi
 
