@@ -181,6 +181,12 @@ export async function syncPlayerLoadoutToWeaponsDb(
       const tx = db.transaction(() => {
         for (const targetSteam of steamIds) {
           const teamLoadoutSql = buildTeamLoadoutSyncSql(tablePrefix, targetSteam, weapons);
+          const teamTagged = weapons.filter((w) => w.team === 'T' || w.team === 'CT').length;
+          if (teamLoadoutSql.length > 1 || teamTagged > 0) {
+            console.log(
+              `[csgo-skins] team loadout steam=${targetSteam} tagged=${teamTagged} sqlOps=${teamLoadoutSql.length}`,
+            );
+          }
           for (const sql of teamLoadoutSql) {
             db.exec(sql);
             updated = true;
