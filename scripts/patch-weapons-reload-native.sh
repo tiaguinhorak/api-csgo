@@ -32,14 +32,9 @@ fi
 cp -f "${REPO_ROOT}/sourcemod/include/weapons.inc" "${SCRIPTING}/include/weapons.inc"
 
 if ! grep -q 'Weapons_ReloadClientData' "${WEAPONS_SP}"; then
-  echo "Patching weapons.sp (CreateNative ReloadClientData)..."
-  sed -i '/CreateNative("Weapons_SetClientKnife"/a\
-\tCreateNative("Weapons_ReloadClientData", Weapons_ReloadClientData_Native);' "${WEAPONS_SP}"
-fi
-
-if ! grep -q 'Weapons_RefreshWeapon' "${WEAPONS_SP}"; then
-  echo "Patching weapons.sp (CreateNative RefreshWeapon)..."
-  sed -i '/CreateNative("Weapons_ReloadClientData"/a\
+  echo "Patching weapons.sp AskPluginLoad2 (ReloadClientData + RefreshWeapon natives)..."
+  sed -i '/CreateNative("Weapons_GetClientKnife"/a\
+\tCreateNative("Weapons_ReloadClientData", Weapons_ReloadClientData_Native);\
 \tCreateNative("Weapons_RefreshWeapon", Weapons_RefreshWeapon_Native);' "${WEAPONS_SP}"
 fi
 
@@ -108,4 +103,5 @@ if ! grep -q 'Weapons_RefreshWeapon' "${WEAPONS_SP}"; then
 fi
 
 echo "Done. weapons.smx updated with Weapons_ReloadClientData + Weapons_RefreshWeapon."
-echo "Restart map or in screen: sm plugins reload weapons"
+echo "In screen: sm plugins reload weapons"
+echo "Bridge should log z_clutch_gloves natives ready (no missing native warnings)."

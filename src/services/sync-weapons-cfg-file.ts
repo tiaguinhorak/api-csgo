@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fetchWsAllowlistFromGithub } from './ws-allowlist-github';
+import { fetchWsAllowlistFromLocalDb } from './ws-allowlist-local-db';
 import { fetchWsAllowlistFromSite } from './ws-allowlist-site';
 import type { WsSkinAllowEntry } from './ws-weapons-config';
 import { clearWsWeaponsAllowlistCache } from './ws-weapons-config';
@@ -63,6 +64,7 @@ export async function syncWeaponsCfgFromSite(): Promise<{
   path: string | null;
   count: number;
   siteCount: number;
+  dbCount: number;
   error?: string;
 }> {
   const lang = process.env.WS_WEAPONS_LANG?.trim() || 'english';
@@ -70,14 +72,21 @@ export async function syncWeaponsCfgFromSite(): Promise<{
   try {
     const base = await fetchWsAllowlistFromGithub(lang);
     let siteEntries: WsSkinAllowEntry[] = [];
+    let dbEntries: WsSkinAllowEntry[] = [];
     try {
       siteEntries = await fetchWsAllowlistFromSite();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[weapons-cfg] site allowlist fetch failed: ${message}`);
     }
+    try {
+      dbEntries = fetchWsAllowlistFromLocalDb();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[weapons-cfg] local DB allowlist failed: ${message}`);
+    }
 
-    const merged = mergeEntries(base, siteEntries);
+    const merged = mergeEntries(mergeEntries(base, siteEntries), dbEntries);
     const cfgPath = resolveWeaponsCfgPath(lang);
     if (!cfgPath) {
       return {
@@ -85,6 +94,7 @@ export async function syncWeaponsCfgFromSite(): Promise<{
         path: null,
         count: merged.length,
         siteCount: siteEntries.length,
+        dbCount: dbEntries.length,
         error: 'weapons config directory not found on VPS',
       };
     }
@@ -92,7 +102,7 @@ export async function syncWeaponsCfgFromSite(): Promise<{
     fs.writeFileSync(cfgPath, buildWeaponsCfgContent(merged), 'utf8');
     clearWsWeaponsAllowlistCache();
     console.log(
-      `[weapons-cfg] wrote ${merged.length} entries (${siteEntries.length} from site) → ${cfgPath}`,
+      `[weapons-cfg] wrote ${merged.length} entries (site=${siteEntries.length}, db=${dbEntries.length}) → ${cfgPath}`,
     );
 
     return {
@@ -100,6 +110,7 @@ export async function syncWeaponsCfgFromSite(): Promise<{
       path: cfgPath,
       count: merged.length,
       siteCount: siteEntries.length,
+      dbCount: dbEntries.length,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'sync failed';
@@ -108,6 +119,7 @@ export async function syncWeaponsCfgFromSite(): Promise<{
       path: null,
       count: 0,
       siteCount: 0,
+      dbCount: 0,
       error: message,
     };
   }
