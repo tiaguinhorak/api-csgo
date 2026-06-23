@@ -80,6 +80,6 @@ send_cmd "sm_clutch_applyskins"
 
 echo ""
 echo "Done. Expect z_clutch_skins_bridge Version: ${EXPECTED_VERSION}"
-echo "Gloves first, weapons ~1.5s later. Expect 3.5.1 + 'Spawn cache gloves' on respawn."
+echo "3.5.2: gloves first, no CS_UpdateClientModel, no knife spam when gloves on."
 echo "If weapons reload failed, change map (sm_map de_dust2) then re-run this script."
 echo "Respawn in-game after apply. New errors: tail addons/sourcemod/logs/errors_*.log"

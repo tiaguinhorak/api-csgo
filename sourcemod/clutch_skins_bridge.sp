@@ -15,7 +15,7 @@
     bool g_bLoggedMissingReloadNative = false;
 #endif
 
-#define PLUGIN_VERSION "3.5.1"
+#define PLUGIN_VERSION "3.5.2"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -673,7 +673,9 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
         LogMessage("[Clutch] Applied cached paintkit %d on %s for %N", paintkit, classname, client);
     }
 
-    if (isKnife) {
+    if (isKnife && ClutchClientHasGlovesLoaded(client)) {
+        ClutchEnforceGloveState(client);
+    } else if (isKnife) {
         ClutchRequestClientModelUpdate(client);
     }
 
@@ -1032,7 +1034,9 @@ void SetClutchWeaponProps(
     }
 
     ClutchNetworkUpdate(weapon);
-    if (isKnife) {
+    if (isKnife && ClutchClientHasGlovesLoaded(client)) {
+        ClutchEnforceGloveState(client);
+    } else if (isKnife) {
         ClutchRequestClientModelUpdate(client);
     }
 }
@@ -1074,6 +1078,16 @@ void ApplyAllCachedWeaponsToClient(int client, bool force) {
 
         char weaponKey[32];
         strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
+
+        if (IsMeleeWeaponKey(weaponKey)) {
+            if (g_CachedKnifeClass[client][0] == '\0') {
+                continue;
+            }
+            if (!StrEqual(weaponKey, g_CachedKnifeClass[client], false)) {
+                continue;
+            }
+        }
+
         int weapon = FindPlayerWeapon(client, weaponKey);
         if (weapon == -1) {
             continue;
@@ -1082,11 +1096,25 @@ void ApplyAllCachedWeaponsToClient(int client, bool force) {
         ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force);
     }
 
-    ClutchRequestClientModelUpdate(client);
+    if (ClutchClientHasGlovesLoaded(client)) {
+        ClutchEnforceGloveState(client);
+    } else {
+        CS_UpdateClientModel(client);
+    }
 }
 
 void ScheduleForceReapply(int client, bool force) {
     if (!IsClientInGame(client) || IsFakeClient(client)) {
+        return;
+    }
+
+    if (force && ClutchClientHasGlovesLoaded(client)) {
+        if (g_cvDebug.BoolValue) {
+            LogMessage(
+                "[Clutch] Skipping knife force-reapply passes (gloves active) for %N",
+                client
+            );
+        }
         return;
     }
 
@@ -1196,7 +1224,7 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
 
     g_bLoggedMissingLoadout[client] = false;
 #if defined _weapons_included_
-    if (!force) {
+    if (!force && !ClutchClientHasGlovesLoaded(client)) {
         TryReloadWeaponsPluginData(client);
     }
 #endif
@@ -1288,6 +1316,13 @@ bool ClutchShouldUpdateClientModel(int client) {
         return false;
     }
     return true;
+}
+
+bool ClutchClientHasGlovesLoaded(int client) {
+    if (g_iLastGloveGroup[client] > 0 && g_iLastGlovePaint[client] > 0) {
+        return true;
+    }
+    return g_iTeamGloveGroup[client][0] > 0 || g_iTeamGloveGroup[client][1] > 0;
 }
 
 void ClutchRequestClientModelUpdate(int client) {
@@ -1641,38 +1676,20 @@ public Action Timer_ApplyGlovesAfterClear(Handle timer, DataPack pack) {
 
     ClutchEnableGloveThink(client);
     ClutchEnforceGloveState(client);
-    CS_UpdateClientModel(client);
-
-    DataPack reenforcePack = new DataPack();
-    reenforcePack.WriteCell(GetClientUserId(client));
-    CreateTimer(0.05, Timer_ReenforceGlovesAfterModelUpdate, reenforcePack, TIMER_FLAG_NO_MAPCHANGE);
 
     RequestFrame(OnFrame_FinalizeGloveBody, GetClientUserId(client));
 
     ScheduleGloveViewMaintain(client, 0.25);
     ScheduleGloveViewMaintain(client, 0.75);
     ScheduleGloveViewMaintain(client, 2.0);
-    ScheduleGloveViewMaintain(client, 5.0);
 
     LogMessage(
-        "[Clutch] Applied gloves group %d paintkit %d for %N (world_model=%d body=1)",
+        "[Clutch] Applied gloves group %d paintkit %d for %N (world_model=%d body=1 no_cs_update)",
         group,
         paintkit,
         client,
         worldModel ? 1 : 0
     );
-    return Plugin_Stop;
-}
-
-public Action Timer_ReenforceGlovesAfterModelUpdate(Handle timer, DataPack pack) {
-    pack.Reset();
-    int userid = pack.ReadCell();
-    delete pack;
-
-    int client = GetClientOfUserId(userid);
-    if (client > 0 && IsClientInGame(client) && IsPlayerAlive(client)) {
-        ClutchEnforceGloveState(client);
-    }
     return Plugin_Stop;
 }
 
