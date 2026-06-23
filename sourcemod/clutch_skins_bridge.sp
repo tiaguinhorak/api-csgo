@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.9"
+#define PLUGIN_VERSION "3.7.10"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -1210,9 +1210,9 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
         return;
     }
 
-    if (HasEntProp(client, Prop_Send, "m_hViewModel")) {
+    if (HasEntProp(client, Prop_Data, "m_hViewModel")) {
         for (int slot = 0; slot <= 1; slot++) {
-            int viewModel = GetEntPropEnt(client, Prop_Send, "m_hViewModel", _, slot);
+            int viewModel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", slot);
             if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
                 ClutchCopyWeaponSkinProps(weapon, viewModel);
             }
