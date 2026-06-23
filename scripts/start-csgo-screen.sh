@@ -42,11 +42,7 @@ pkill -u "$(id -u)" -f srcds_linux 2>/dev/null || true
 sleep 2
 
 bash "${REPO_ROOT}/scripts/fix-csgo-bundled-libgcc.sh" || true
-
-if [[ ! -f "${SERVER_ROOT}/bin/srcds_linux" ]]; then
-  echo "[start-csgo] ERROR: ${SERVER_ROOT}/bin/srcds_linux missing — run steamcmd app_update 740 validate" >&2
-  exit 1
-fi
+bash "${REPO_ROOT}/scripts/ensure-csgo-srcds-layout.sh"
 
 mkdir -p "${SERVER_ROOT}/csgo"
 echo "===== boot $(date -Is) =====" >> "${BOOT_LOG}"

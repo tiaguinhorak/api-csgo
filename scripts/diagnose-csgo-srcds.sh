@@ -21,11 +21,24 @@ echo "SCREEN=${SCREEN_NAME}  PORT=${PORT}"
 echo ""
 
 echo "--- srcds_linux binary ---"
+SRCDS_BIN=""
 if [[ -f "${SERVER_ROOT}/bin/srcds_linux" ]]; then
-  ls -la "${SERVER_ROOT}/bin/srcds_linux"
-  ldd "${SERVER_ROOT}/bin/srcds_linux" 2>&1 | grep -i 'not found' || echo "(ldd: no missing libs)"
+  SRCDS_BIN="${SERVER_ROOT}/bin/srcds_linux"
+elif [[ -f "${SERVER_ROOT}/srcds_linux" ]]; then
+  SRCDS_BIN="${SERVER_ROOT}/srcds_linux"
+fi
+
+if [[ -n "${SRCDS_BIN}" ]]; then
+  ls -la "${SRCDS_BIN}"
+  if command -v file >/dev/null 2>&1; then
+    echo "file: $(file -b "${SRCDS_BIN}")"
+  fi
+  ldd "${SRCDS_BIN}" 2>&1 | grep -i 'not found' || echo "(ldd: no missing libs)"
+  if [[ "${SRCDS_BIN}" != "${SERVER_ROOT}/bin/srcds_linux" ]]; then
+    echo "HINT: run bash scripts/ensure-csgo-srcds-layout.sh to link bin/srcds_linux"
+  fi
 else
-  echo "MISSING: ${SERVER_ROOT}/bin/srcds_linux"
+  echo "MISSING: ${SERVER_ROOT}/bin/srcds_linux (and ${SERVER_ROOT}/srcds_linux)"
   if [[ -d "${SERVER_ROOT}/bin" ]]; then
     echo "bin/ contents:"
     ls -la "${SERVER_ROOT}/bin" 2>/dev/null | head -15 || true
