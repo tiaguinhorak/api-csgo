@@ -306,6 +306,37 @@ export function isGlovesWeaponId(weaponId: string): boolean {
 
 }
 
+/** Buy-menu team locks — shared weapons (Deagle, AWP, etc.) still use kgns columns. */
+const T_ONLY_WEAPON_IDS = new Set([
+  'weapon_glock',
+  'weapon_tec9',
+  'weapon_galilar',
+  'weapon_ak47',
+  'weapon_g3sg1',
+  'weapon_mac10',
+  'weapon_sawedoff',
+]);
+
+const CT_ONLY_WEAPON_IDS = new Set([
+  'weapon_hkp2000',
+  'weapon_usp_silencer',
+  'weapon_fiveseven',
+  'weapon_cz75a',
+  'weapon_famas',
+  'weapon_m4a1',
+  'weapon_m4a1_silencer',
+  'weapon_aug',
+  'weapon_sg556',
+  'weapon_scar20',
+  'weapon_mp9',
+  'weapon_mag7',
+]);
+
+export function isTeamExclusiveWeapon(weaponId: string): boolean {
+  const id = weaponId.trim().toLowerCase();
+  return T_ONLY_WEAPON_IDS.has(id) || CT_ONLY_WEAPON_IDS.has(id);
+}
+
 
 
 export function normalizeGloveWeaponId(weaponId: string): string {
@@ -420,16 +451,24 @@ export function buildPlayerLoadoutSql(
 
     if (!w.paintkit || w.paintkit <= 0) continue;
 
-    // Per-team loadouts go to clutch_team_loadout — clear kgns column so fallback does not apply stale skin.
+    // Team loadouts: team-exclusive weapons only in clutch_team_loadout (clear kgns column).
+    // Shared weapons (Deagle, AWP, …) also mirror to kgns so weapons.smx does not reset paint.
     if (w.team === 'T' || w.team === 'CT') {
-      const teamColumn = weaponIdToDbColumn(w.weaponId);
-      if (teamColumn) {
-        updates.push(...clearColumnUpdates(teamColumn));
-      }
       if (isMeleeWeaponId(w.weaponId)) {
+        const teamColumn = weaponIdToDbColumn(w.weaponId);
+        if (teamColumn) {
+          updates.push(...clearColumnUpdates(teamColumn));
+        }
         updates.push('knife=0');
+        continue;
       }
-      continue;
+      if (isTeamExclusiveWeapon(w.weaponId)) {
+        const teamColumn = weaponIdToDbColumn(w.weaponId);
+        if (teamColumn) {
+          updates.push(...clearColumnUpdates(teamColumn));
+        }
+        continue;
+      }
     }
 
 
