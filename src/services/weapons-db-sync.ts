@@ -6,6 +6,7 @@ import {
 import {
   buildGlovesLoadoutSql,
   buildPlayerLoadoutSql,
+  buildResetKgnsWeaponsRowSql,
   isMeleeWeaponId,
   type GlovesLoadoutSqlResult,
   type SyncLoadoutOptions,
@@ -191,6 +192,10 @@ export async function syncPlayerLoadoutToWeaponsDb(
             db.exec(sql);
             updated = true;
           }
+
+          db.exec(`INSERT OR IGNORE INTO ${tablePrefix}weapons (steamid) VALUES ('${targetSteam.replace(/'/g, "''")}')`);
+          db.exec(buildResetKgnsWeaponsRowSql(tablePrefix, targetSteam));
+          updated = true;
 
           const { insertSql, updateSql } = buildPlayerLoadoutSql(
             tablePrefix,

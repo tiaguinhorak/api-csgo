@@ -383,6 +383,23 @@ function clearColumnUpdates(column: string): string[] {
 
 }
 
+/** Zero entire kgns weapons row — web loadout uses clutch_team_loadout; stale !ws columns must not apply. */
+export function buildResetKgnsWeaponsRowSql(tablePrefix: string, steamId: string): string {
+  const escapedSteam = steamId.replace(/'/g, "''");
+  const table = `${tablePrefix}weapons`;
+  const updates: string[] = [];
+
+  for (const column of Object.values(WEAPON_ID_TO_DB_COLUMN)) {
+    updates.push(...clearColumnUpdates(column));
+  }
+  for (const column of KNIFE_DB_COLUMNS) {
+    updates.push(...clearColumnUpdates(column));
+  }
+  updates.push('knife=0');
+
+  return `UPDATE ${table} SET ${updates.join(', ')} WHERE steamid='${escapedSteam}'`;
+}
+
 
 
 export function buildPlayerLoadoutSql(
@@ -584,6 +601,15 @@ export function buildGlovesLoadoutSql(
   const effectiveT = tGlove ?? (!ctGlove ? legacyGlove : undefined);
   const effectiveCT = ctGlove ?? (!tGlove ? legacyGlove : undefined);
 
+  const updates: string[] = [];
+
+  if (!effectiveT) {
+    updates.push('t_group=0', 't_glove=0', 't_float=0');
+  }
+  if (!effectiveCT) {
+    updates.push('ct_group=0', 'ct_glove=0', 'ct_float=0');
+  }
+
   const clearAllFromWeapons =
     clearWeaponIds.some((id) => isGlovesWeaponId(id)) &&
     !effectiveT &&
@@ -603,8 +629,6 @@ export function buildGlovesLoadoutSql(
     const updateSql = `UPDATE ${table} SET ct_group=0, ct_glove=0, ct_float=0 WHERE steamid='${escapedSteam}'`;
     return { insertSql, updateSql, action: "clear" };
   }
-
-  const updates: string[] = [];
 
   function applySide(
     side: "T" | "CT",

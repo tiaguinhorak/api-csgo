@@ -22,7 +22,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.16"
+#define PLUGIN_VERSION "3.7.17"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -1711,7 +1711,6 @@ public void T_TeamLoadoutCallback(Database database, DBResultSet results, const 
 
     if (results == null) {
         LogError("[Clutch] team loadout query failed: %s", error);
-        QueryKgnsLoadout(client, steamId, altAttempt, force);
         return;
     }
 
@@ -1744,7 +1743,14 @@ public void T_TeamLoadoutCallback(Database database, DBResultSet results, const 
             QueryTeamLoadout(client, altSteam, 1, force);
             return;
         }
-        QueryKgnsLoadout(client, steamId, altAttempt, force);
+
+        PrepareTeamLoadoutCaches(client);
+        if (!g_bLoggedMissingLoadout[client]) {
+            LogMessage("[Clutch] Sem loadout web para %s (%N) — vanilla (sem fallback !ws)", steamId, client);
+            g_bLoggedMissingLoadout[client] = true;
+        }
+        QueryPlayerGloves(client, steamId, 0);
+        ScheduleWeaponsAfterGlovesApply(client, force, true);
         return;
     }
 

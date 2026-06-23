@@ -139,6 +139,19 @@ else
 fi
 
 echo ""
+echo ">>> sync loadouts equipados (site → SQLite)"
+if [[ -n "${CSGO_SKINS_SYNC_KEY:-}" ]]; then
+  curl -sf -X POST "http://127.0.0.1:${PORT:-3000}/api/csgo/skins/sync-from-site" \
+    -H "x-skins-sync-key: ${CSGO_SKINS_SYNC_KEY}" \
+    -H "Content-Type: application/json" | head -c 400 || {
+    echo "WARN: sync-from-site falhou" >&2
+  }
+  echo ""
+else
+  echo "Skip (sem CSGO_SKINS_SYNC_KEY)"
+fi
+
+echo ""
 echo ">>> sync weapons_english.cfg do catálogo do site"
 if [[ -n "${CSGO_SKINS_SYNC_KEY:-}" ]]; then
   bash "${REPO_ROOT}/scripts/sync-weapons-cfg-from-site.sh" || {
