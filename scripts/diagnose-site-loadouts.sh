@@ -30,12 +30,16 @@ URL="${SITE_URL}/api/csgo/skins/equipped-loadouts"
 echo "=== Site loadouts probe ==="
 echo "URL: ${URL}"
 
-HTTP_CODE="$(curl -s -o /tmp/clutch-site-loadouts.json -w '%{http_code}' \
+HTTP_CODE="$(curl -sS --connect-timeout 15 -m 30 -o /tmp/clutch-site-loadouts.json -w '%{http_code}' \
   -H "x-skins-sync-key: ${SYNC_KEY}" \
   -H "Accept: application/json" \
-  "${URL}")"
+  "${URL}" 2>/tmp/clutch-site-loadouts-curl.err || echo "000")"
 
 echo "HTTP ${HTTP_CODE}"
+if [[ "${HTTP_CODE}" == "000" ]]; then
+  echo "curl error: $(cat /tmp/clutch-site-loadouts-curl.err 2>/dev/null)" >&2
+  exit 1
+fi
 head -c 2000 /tmp/clutch-site-loadouts.json
 echo ""
 
