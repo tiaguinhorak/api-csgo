@@ -48,14 +48,36 @@ chmod +x "${SCRIPT_DIR}/diagnose-steam-and-skins.sh" 2>/dev/null || true
 echo "Copying source..."
 cp -f "${SP_SRC}" "${SM}/scripting/clutch_skins_bridge.sp"
 INC_SRC="${REPO_ROOT}/sourcemod/include/weapons.inc"
+GLOVES_INC_SRC="${REPO_ROOT}/sourcemod/include/clutch_gloves.inc"
+GLOVES_SP_SRC="${REPO_ROOT}/sourcemod/z_clutch_gloves.sp"
+GLOVES_CFG_SRC="${REPO_ROOT}/sourcemod/clutch_gloves.cfg"
 if [[ -f "${INC_SRC}" ]]; then
   cp -f "${INC_SRC}" "${SM}/scripting/include/weapons.inc"
 fi
+if [[ -f "${GLOVES_INC_SRC}" ]]; then
+  cp -f "${GLOVES_INC_SRC}" "${SM}/scripting/include/clutch_gloves.inc"
+fi
+if [[ -f "${GLOVES_SP_SRC}" ]]; then
+  cp -f "${GLOVES_SP_SRC}" "${SM}/scripting/z_clutch_gloves.sp"
+fi
 
 PLUGIN_SMX="z_clutch_skins_bridge.smx"
+GLOVES_SMX="z_clutch_gloves.smx"
 LEGACY_SMX="clutch_skins_bridge.smx"
 
-echo "Compiling..."
+echo "Compiling z_clutch_gloves..."
+if [[ -f "${SM}/scripting/z_clutch_gloves.sp" ]]; then
+  if ! (cd "${SM}/scripting" && "${SPCOMP}" z_clutch_gloves.sp -o"${SM}/plugins/${GLOVES_SMX}"); then
+    echo "Compile failed for z_clutch_gloves.sp" >&2
+    rm -f "${SM}/plugins/${GLOVES_SMX}"
+    exit 1
+  fi
+else
+  echo "ERROR: missing z_clutch_gloves.sp — git pull" >&2
+  exit 1
+fi
+
+echo "Compiling z_clutch_skins_bridge..."
 if ! (cd "${SM}/scripting" && "${SPCOMP}" clutch_skins_bridge.sp -o"${SM}/plugins/${PLUGIN_SMX}"); then
   echo "Compile failed — fix errors above. Run: cd ~/api-csgo && git pull" >&2
   rm -f "${SM}/plugins/${PLUGIN_SMX}"
@@ -96,6 +118,9 @@ detect_live_csgo_root() {
 
 mkdir -p "${CSGO_ROOT}/cfg/sourcemod"
 cp -f "${CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
+if [[ -f "${GLOVES_CFG_SRC}" ]]; then
+  cp -f "${GLOVES_CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_gloves.cfg"
+fi
 
 # Fix legacy doubled path in existing cfg (addons/sourcemod/data → data)
 CFG_DEPLOY="${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
@@ -151,11 +176,12 @@ else
 fi
 
 echo ""
-echo "OK — ${PLUGIN_SMX} installed (loads after weapons.smx)."
-echo "Expected plugin version: $(grep -E '#define PLUGIN_VERSION' "${SP_SRC}" | sed 's/.*"\(.*\)".*/\1/')"
+echo "OK — ${GLOVES_SMX} + ${PLUGIN_SMX} installed (gloves before skins bridge)."
+echo "Expected bridge version: $(grep -E '#define PLUGIN_VERSION' "${SP_SRC}" | sed 's/.*"\(.*\)".*/\1/')"
+echo "Expected gloves version: $(grep -E '#define PLUGIN_VERSION' "${GLOVES_SP_SRC}" | sed 's/.*"\(.*\)".*/\1/')"
 echo ""
-echo "Installed to: ${SM}/plugins/${PLUGIN_SMX}"
-ls -la "${SM}/plugins/${PLUGIN_SMX}"
+echo "Installed to: ${SM}/plugins/${GLOVES_SMX} and ${SM}/plugins/${PLUGIN_SMX}"
+ls -la "${SM}/plugins/${GLOVES_SMX}" "${SM}/plugins/${PLUGIN_SMX}"
 if command -v md5sum >/dev/null 2>&1; then
   md5sum "${SM}/plugins/${PLUGIN_SMX}"
 elif command -v md5 >/dev/null 2>&1; then
@@ -189,7 +215,7 @@ if [[ -f "${GLOVES_SMX}" ]]; then
 elif [[ -f "${GLOVES_DISABLED_DIR}/gloves.smx" ]]; then
   echo "kgns gloves.smx already in plugins/disabled/."
 else
-  echo "kgns gloves.smx not found — bridge applies gloves from SQLite only."
+  echo "kgns gloves.smx not found — using z_clutch_gloves.smx from this repo."
 fi
 # Legacy mistaken rename (still loaded as .smx in plugins/)
 LEGACY_DISABLED="${SM}/plugins/z_disabled_kgns_gloves.smx"

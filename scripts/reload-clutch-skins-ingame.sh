@@ -54,6 +54,7 @@ if [[ -z "${FULL_SCREEN}" ]]; then
   echo "" >&2
   echo "Or attach manually and run one command per line:" >&2
   echo "  screen -r csgo-clutch-#1" >&2
+  echo "  sm plugins reload z_clutch_gloves" >&2
   echo "  sm plugins reload z_clutch_skins_bridge" >&2
   echo "  sm plugins info z_clutch_skins_bridge" >&2
   echo "  clutch_skins_debug 1" >&2
@@ -72,14 +73,17 @@ send_cmd() {
 
 send_cmd "sm plugins reload weapons"
 send_cmd "sm plugins info weapons"
+send_cmd "sm plugins reload z_clutch_gloves"
+send_cmd "sm plugins info z_clutch_gloves"
 send_cmd "sm plugins reload z_clutch_skins_bridge"
 send_cmd "sm plugins info z_clutch_skins_bridge"
+send_cmd "clutch_gloves_debug 1"
 send_cmd "clutch_skins_debug 1"
 send_cmd "sm_reloadclutchskins"
 send_cmd "sm_clutch_applyskins"
 
 echo ""
-echo "Done. Expect z_clutch_skins_bridge Version: ${EXPECTED_VERSION}"
-echo "3.5.2: gloves first, no CS_UpdateClientModel, no knife spam when gloves on."
+echo "Done. Expect z_clutch_gloves + z_clutch_skins_bridge Version: ${EXPECTED_VERSION}"
+echo "3.6.0: gloves only in z_clutch_gloves (kgns-exact). Bridge = weapons/knife only."
 echo "If weapons reload failed, change map (sm_map de_dust2) then re-run this script."
 echo "Respawn in-game after apply. New errors: tail addons/sourcemod/logs/errors_*.log"
