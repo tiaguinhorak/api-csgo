@@ -41,6 +41,8 @@ else
   echo "  getent hosts ${HOST}"
   echo ""
   echo "Until DNS works, platform gate allowlist sync will fail."
+  echo "Workaround for loadout sync: set CLUTCH_SITE_RESOLVE_IP=<Hostinger IP> in .env"
+  echo "  then: ./scripts/sync-loadouts-from-site-curl.sh"
   echo "Temporary: sm_cvar clutch_platform_gate_enabled 0  (server console)"
   exit 1
 fi

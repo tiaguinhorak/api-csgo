@@ -33,10 +33,8 @@ if [[ -z "${CSGO_SKINS_SYNC_KEY:-}" ]]; then
 fi
 
 echo ""
-echo ">>> sync-from-site"
-RESULT="$(curl -sf -X POST "${API_URL}/api/csgo/skins/sync-from-site" \
-  -H "x-skins-sync-key: ${CSGO_SKINS_SYNC_KEY}" 2>/dev/null || true)"
-echo "${RESULT:-<no response>}"
+echo ">>> sync loadouts (curl → player-sync)"
+bash "${REPO_ROOT}/scripts/sync-loadouts-from-site-curl.sh"
 
 echo ""
 echo ">>> clutch_team_loadout rows"

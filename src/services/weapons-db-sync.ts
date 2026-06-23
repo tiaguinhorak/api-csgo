@@ -183,9 +183,15 @@ export async function syncPlayerLoadoutToWeaponsDb(
         for (const targetSteam of steamIds) {
           const teamLoadoutSql = buildTeamLoadoutSyncSql(tablePrefix, targetSteam, weapons);
           const teamTagged = weapons.filter((w) => w.team === 'T' || w.team === 'CT').length;
-          if (teamLoadoutSql.length > 1 || teamTagged > 0) {
+          const teamInserts = teamLoadoutSql.length - 1;
+          if (teamTagged > 0 || teamInserts > 0) {
             console.log(
-              `[csgo-skins] team loadout steam=${targetSteam} weapons=${weapons.length} tagged=${teamTagged} sqlOps=${teamLoadoutSql.length}`,
+              `[csgo-skins] team loadout steam=${targetSteam} weapons=${weapons.length} tagged=${teamTagged} inserts=${teamInserts}`,
+            );
+          }
+          if (teamTagged > 0 && teamInserts === 0) {
+            console.warn(
+              `[csgo-skins] team loadout EMPTY after sync steam=${targetSteam} — tagged=${teamTagged} but no weapon rows (only gloves or paintkit=0?)`,
             );
           }
           for (const sql of teamLoadoutSql) {
