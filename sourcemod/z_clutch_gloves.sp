@@ -6,12 +6,13 @@
 #include <cstrike>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "1.2.0"
+#define PLUGIN_VERSION "1.3.0"
 #define GLOVE_THINK_TICK_MOD 8
 
 ConVar g_cvDb;
 ConVar g_cvTablePrefix;
 ConVar g_cvWorldModel;
+ConVar g_cvForceBody;
 ConVar g_cvDebug;
 
 Database g_hDb = null;
@@ -64,7 +65,17 @@ public void OnPluginStart() {
     g_cvWorldModel = CreateConVar(
         "clutch_gloves_world_model",
         "0",
-        "0 = kgns view-only (no m_nBody, no m_hMoveParent). 1 = others see gloves on player model",
+        "0 = kgns view-only (no m_hMoveParent). 1 = others see gloves on player model",
+        FCVAR_NOTIFY,
+        true,
+        0.0,
+        true,
+        1.0
+    );
+    g_cvForceBody = CreateConVar(
+        "clutch_gloves_force_body",
+        "1",
+        "1 = m_nBody=1 hides default glove mesh (required on CS:GO Legacy). 0 = kgns vanilla",
         FCVAR_NOTIFY,
         true,
         0.0,
@@ -78,9 +89,15 @@ public void OnPluginStart() {
     HookEvent("player_spawn", Event_PlayerSpawn, EventHookMode_Pre);
     RegAdminCmd("sm_clutch_gloves_refresh", Command_Refresh, ADMFLAG_ROOT, "Re-read gloves DB and apply");
     RegAdminCmd("sm_clutch_gloves_apply", Command_Apply, ADMFLAG_ROOT, "Apply gloves from cache (no DB)");
+    RegAdminCmd("sm_clutch_gloves_status", Command_Status, ADMFLAG_ROOT, "Dump glove cache / wearable state");
 
     ConnectDatabase();
     LogMessage("[ClutchGloves] Plugin loaded v%s", PLUGIN_VERSION);
+}
+
+public void OnAllPluginsLoaded() {
+    SyncSharedConVars();
+    ConnectDatabase();
 }
 
 void SyncSharedConVars() {
@@ -203,6 +220,49 @@ public Action Command_Refresh(int client, int args) {
     return Plugin_Handled;
 }
 
+public Action Command_Status(int client, int args) {
+    LogMessage("[ClutchGloves] db=%s prefix=%s connected=%d", g_sDbName, g_sTablePrefix, g_hDb != null);
+
+    for (int i = 1; i <= MaxClients; i++) {
+        if (!IsClientInGame(i) || IsFakeClient(i)) {
+            continue;
+        }
+
+        char steamId[32];
+        if (!GetClientAuthId(i, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+            strcopy(steamId, sizeof(steamId), "auth-pending");
+        }
+
+        int team = GetClientTeam(i);
+        int wearable = GetEntPropEnt(i, Prop_Send, "m_hMyWearables");
+        int body = GetEntProp(i, Prop_Send, "m_nBody");
+        int wGroup = 0;
+        int wPaint = 0;
+
+        if (wearable != -1 && IsValidEntity(wearable)) {
+            wGroup = GetEntProp(wearable, Prop_Send, "m_iItemDefinitionIndex");
+            wPaint = GetEntProp(wearable, Prop_Send, "m_nFallbackPaintKit");
+        }
+
+        LogMessage(
+            "[ClutchGloves] %N steam=%s team=%d alive=%d body=%d cache T=%d/%d CT=%d/%d wearable=%d def=%d paint=%d",
+            i,
+            steamId,
+            team,
+            IsPlayerAlive(i) ? 1 : 0,
+            body,
+            g_iGroup[i][CS_TEAM_T],
+            g_iPaint[i][CS_TEAM_T],
+            g_iGroup[i][CS_TEAM_CT],
+            g_iPaint[i][CS_TEAM_CT],
+            wearable,
+            wGroup,
+            wPaint
+        );
+    }
+    return Plugin_Handled;
+}
+
 public Action Command_Apply(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
@@ -304,6 +364,16 @@ public void OnQueryGloves(Database database, DBResultSet results, const char[] e
     }
 
     LoadGloveRow(client, results);
+    if (g_cvDebug.BoolValue) {
+        LogMessage(
+            "[ClutchGloves] DB row %N T=%d/%d CT=%d/%d",
+            client,
+            g_iGroup[client][CS_TEAM_T],
+            g_iPaint[client][CS_TEAM_T],
+            g_iGroup[client][CS_TEAM_CT],
+            g_iPaint[client][CS_TEAM_CT]
+        );
+    }
     GivePlayerGloves(client);
 }
 
@@ -352,6 +422,18 @@ float DbFloat(DBResultSet results, const char[] column, float defaultValue) {
     return results.FetchFloat(field);
 }
 
+void EnforceGloveBody(int client) {
+    if (g_cvForceBody.BoolValue || g_cvWorldModel.BoolValue) {
+        SetEntProp(client, Prop_Send, "m_nBody", 1);
+    }
+}
+
+void ClearGloveBody(int client) {
+    if (g_cvForceBody.BoolValue || g_cvWorldModel.BoolValue) {
+        SetEntProp(client, Prop_Send, "m_nBody", 0);
+    }
+}
+
 void FixCustomArms(int client) {
     char armsModel[2];
     GetEntPropString(client, Prop_Send, "m_szArmsModel", armsModel, sizeof(armsModel));
@@ -391,6 +473,7 @@ public void OnGlovePreThink(int client) {
     }
 
     FixCustomArms(client);
+    EnforceGloveBody(client);
 }
 
 void ScrubStrayWearables(int client, int keepEnt) {
@@ -434,7 +517,9 @@ void GivePlayerGloves(int client) {
             SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
         }
         if (worldModel) {
-            SetEntProp(client, Prop_Send, "m_nBody", 0);
+            ClearGloveBody(client);
+        } else if (g_cvForceBody.BoolValue) {
+            ClearGloveBody(client);
         }
         return;
     }
@@ -446,6 +531,8 @@ void GivePlayerGloves(int client) {
         if (existingGroup == group && existingPaint == paint) {
             FixCustomArms(client);
             ScrubStrayWearables(client, ent);
+            EnforceGloveBody(client);
+            NetworkUpdate(ent);
             EnableGloveThink(client);
             return;
         }
@@ -468,6 +555,7 @@ void GivePlayerGloves(int client) {
     }
 
     SetEntProp(ent, Prop_Send, "m_iItemIDLow", -1);
+    SetEntProp(ent, Prop_Send, "m_iItemIDHigh", -1);
     SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", group);
     SetEntProp(ent, Prop_Send, "m_nFallbackPaintKit", paint);
     SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", wear);
@@ -482,24 +570,21 @@ void GivePlayerGloves(int client) {
     DispatchSpawn(ent);
 
     SetEntPropEnt(client, Prop_Send, "m_hMyWearables", ent);
-    if (worldModel) {
-        SetEntProp(client, Prop_Send, "m_nBody", 1);
-    }
+    EnforceGloveBody(client);
 
     ScrubStrayWearables(client, ent);
     NetworkUpdate(ent);
     EnableGloveThink(client);
 
-    if (g_cvDebug.BoolValue) {
-        LogMessage(
-            "[ClutchGloves] Applied group %d paintkit %d for %N (team %d world_model=%d)",
-            group,
-            paint,
-            client,
-            team,
-            worldModel ? 1 : 0
-        );
-    }
+    LogMessage(
+        "[ClutchGloves] Applied group %d paintkit %d for %N (team %d world=%d force_body=%d)",
+        group,
+        paint,
+        client,
+        team,
+        worldModel ? 1 : 0,
+        g_cvForceBody.BoolValue ? 1 : 0
+    );
 
     if (g_hForwardApplied != null) {
         Call_StartForward(g_hForwardApplied);

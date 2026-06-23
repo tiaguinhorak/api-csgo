@@ -128,6 +128,14 @@ cp -f "${CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
 if [[ -f "${GLOVES_CFG_SRC}" ]]; then
   cp -f "${GLOVES_CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_gloves.cfg"
 fi
+GLOVES_CFG_DEPLOY="${CSGO_ROOT}/cfg/sourcemod/clutch_gloves.cfg"
+if [[ -f "${GLOVES_CFG_DEPLOY}" ]]; then
+  if grep -q 'clutch_gloves_force_body' "${GLOVES_CFG_DEPLOY}"; then
+    sed -i 's|^clutch_gloves_force_body.*|clutch_gloves_force_body "1"|g' "${GLOVES_CFG_DEPLOY}"
+  else
+    printf '\nclutch_gloves_force_body "1"\n' >> "${GLOVES_CFG_DEPLOY}"
+  fi
+fi
 
 # Fix legacy doubled path in existing cfg (addons/sourcemod/data → data)
 CFG_DEPLOY="${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
