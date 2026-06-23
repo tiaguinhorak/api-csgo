@@ -60,6 +60,7 @@ for (const row of loadouts) {
 console.log(`[warmup-loadout] done synced=${ok} errors=${err} total=${loadouts.length}`);
 if (ok === 0 && loadouts.length > 0) process.exit(1);
 })();
+NODE
 
 echo ""
 echo ">>> clutch_team_loadout"
