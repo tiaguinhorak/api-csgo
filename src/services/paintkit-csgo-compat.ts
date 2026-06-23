@@ -12,7 +12,8 @@ export type CsgoCompatSkip = {
 };
 
 /**
- * Drops CS2-only paintkits before writing SQLite — kgns !ws list = CS:GO compatible skins.
+ * Drops CS2-only / non-!ws paintkits for catalog cfg generation.
+ * Do NOT use for web player-sync — equipped loadouts are authoritative from the site DB.
  */
 export async function filterCsgoCompatibleWeapons(
   weapons: SyncWeaponPayload[],

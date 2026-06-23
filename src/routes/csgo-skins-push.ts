@@ -8,7 +8,6 @@ import {
 } from '../services/ws-weapons-config';
 import { reloadClutchSkinsInGame, reloadWeaponsPluginInGame } from '../services/clutch-rcon';
 import { syncWeaponsCfgFromSite } from '../services/sync-weapons-cfg-file';
-import { filterCsgoCompatibleWeapons } from '../services/paintkit-csgo-compat';
 
 const router = Router();
 
@@ -76,8 +75,9 @@ router.post('/player-sync', async (req: Request, res: Response) => {
   }
 
   try {
-    const filtered = await filterCsgoCompatibleWeapons(body.weapons);
-    const result = await syncPlayerLoadoutToWeaponsDb(body.steamId, filtered.weapons, {
+    // Web-equipped loadouts are already CS:GO-scoped on the site — never strip via !ws allowlist.
+    const weapons = body.weapons;
+    const result = await syncPlayerLoadoutToWeaponsDb(body.steamId, weapons, {
       clearKnifeSlot: body.clearKnifeSlot,
       clearWeaponIds: body.clearWeaponIds,
       clearGloveTeam: body.clearGloveTeam,
@@ -89,8 +89,8 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       mode: 'db',
       steamId: result.steamId,
       steamIds: result.steamIds,
-      weapons: filtered.weapons.length,
-      skippedCs2: filtered.skipped.length,
+      weapons: weapons.length,
+      skippedCs2: 0,
       columns: result.columns,
       updated: result.updated,
       gloves: result.gloves,

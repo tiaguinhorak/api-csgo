@@ -185,7 +185,7 @@ export async function syncPlayerLoadoutToWeaponsDb(
           const teamTagged = weapons.filter((w) => w.team === 'T' || w.team === 'CT').length;
           if (teamLoadoutSql.length > 1 || teamTagged > 0) {
             console.log(
-              `[csgo-skins] team loadout steam=${targetSteam} tagged=${teamTagged} sqlOps=${teamLoadoutSql.length}`,
+              `[csgo-skins] team loadout steam=${targetSteam} weapons=${weapons.length} tagged=${teamTagged} sqlOps=${teamLoadoutSql.length}`,
             );
           }
           for (const sql of teamLoadoutSql) {
