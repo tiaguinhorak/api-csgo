@@ -16,6 +16,11 @@ DB_PATH="${WEAPONS_DB_PATH:-/home/csgo/server/csgo/addons/sourcemod/data/sqlite/
 PORT="${PORT:-3000}"
 API_URL="${CLUTCH_API_URL:-http://127.0.0.1:${PORT}}"
 
+if [[ "${WARMUP_VPS:-}" == "1" || "${CSGO_SERVER_POOL:-}" == "warmup" ]]; then
+  echo "Warmup VPS mode — direct SQLite sync (no local api-csgo)"
+  exec bash "${REPO_ROOT}/scripts/sync-team-loadouts-warmup.sh"
+fi
+
 echo "=== Team loadout sync ==="
 echo "DB: ${DB_PATH}"
 echo "API: ${API_URL}"
