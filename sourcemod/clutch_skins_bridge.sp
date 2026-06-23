@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.6.3"
+#define PLUGIN_VERSION "3.7.0"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -160,6 +160,7 @@ public void OnPluginStart() {
 
     HookEvent("player_spawn", OnPlayerSpawn, EventHookMode_Post);
     HookEvent("round_start", Event_RoundStart, EventHookMode_Post);
+    HookEvent("player_team", Event_PlayerTeam, EventHookMode_Post);
 
     PTaH(PTaH_GiveNamedItemPost, Hook, Clutch_GiveNamedItemPost);
 
@@ -329,6 +330,7 @@ public void WeaponsDatabaseConnected(Database database, const char[] error, any 
     g_hWeaponsDb = database;
     g_bGlovesTableReady = false;
     EnsureGlovesTable();
+    EnsureTeamLoadoutTable();
 
     if (g_cvDebug.BoolValue) {
         LogMessage("[Clutch] Connected to weapons database (v%s)", PLUGIN_VERSION);
@@ -356,6 +358,27 @@ public void T_EnsureGlovesTableCallback(Database database, DBResultSet results, 
         return;
     }
     g_bGlovesTableReady = true;
+}
+
+void EnsureTeamLoadoutTable() {
+    if (g_hWeaponsDb == null) {
+        return;
+    }
+
+    char query[768];
+    Format(
+        query,
+        sizeof(query),
+        "CREATE TABLE IF NOT EXISTS %sclutch_team_loadout (steamid varchar(32) NOT NULL, team char(2) NOT NULL, weapon_id varchar(64) NOT NULL, paintkit int NOT NULL DEFAULT 0, wear real NOT NULL DEFAULT 0.15, seed int NOT NULL DEFAULT 0, stattrak int NOT NULL DEFAULT 0, stattrak_count int NOT NULL DEFAULT 0, nametag varchar(64) NOT NULL DEFAULT '', knife_index int NOT NULL DEFAULT -1, PRIMARY KEY (steamid, team, weapon_id))",
+        g_sTablePrefix
+    );
+    g_hWeaponsDb.Query(T_EnsureTeamLoadoutTableCallback, query, _, DBPrio_High);
+}
+
+public void T_EnsureTeamLoadoutTableCallback(Database database, DBResultSet results, const char[] error, any data) {
+    if (results == null) {
+        LogError("[Clutch] team loadout table create failed: %s", error);
+    }
 }
 
 public Action Timer_RefreshFromDb(Handle timer) {
@@ -503,6 +526,25 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
     CreateTimer(3.0, Timer_ApplyAllPlayersSkins, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
+public void Event_PlayerTeam(Event event, const char[] name, bool dontBroadcast) {
+    int userid = event.GetInt("userid");
+    DataPack pack = new DataPack();
+    pack.WriteCell(userid);
+    CreateTimer(0.35, Timer_ApplyAfterTeamChange, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplyAfterTeamChange(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        ApplyClientSkins(client, true);
+    }
+    return Plugin_Stop;
+}
+
 public void Clutch_GiveNamedItemPost(
     int client,
     const char[] classname,
@@ -614,7 +656,15 @@ void ClearSlotCache(int client, int idx) {
 
 void ClearAllMeleeSlotCaches(int client) {
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
-        if (IsMeleeWeaponKey(g_ClutchWeaponKeys[i])) {
+        char weaponKey[32];
+        strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
+
+        if (!ClutchWeaponAllowedForTeam(weaponKey, csTeam)) {
+            ClearSlotCache(client, i);
+            continue;
+        }
+
+        if (IsMeleeWeaponKey(weaponKey)) {
             ClearSlotCache(client, i);
         }
     }
@@ -702,13 +752,6 @@ void ClutchPersistGloveLoadout(int client, int team, int group, int paint, float
     g_iTeamGloveGroup[client][idx] = group;
     g_iTeamGlovePaint[client][idx] = paint;
     g_fTeamGloveWear[client][idx] = wear;
-
-    if (group > 0 && paint > 0) {
-        int other = idx == 0 ? 1 : 0;
-        g_iTeamGloveGroup[client][other] = group;
-        g_iTeamGlovePaint[client][other] = paint;
-        g_fTeamGloveWear[client][other] = wear;
-    }
 }
 
 void ForceReapplyPlayerGloves(int client) {
@@ -1147,7 +1190,52 @@ void ClutchSetClientKnife(int client, const char[] knifeClass) {
 #endif
 }
 
-void QueryPlayerLoadout(int client, const char[] steamId, int altAttempt, bool force = false) {
+int GetClutchIndexForWeaponId(const char[] weaponId) {
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        if (StrEqual(weaponId, g_ClutchWeaponKeys[i], false)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool ClutchWeaponAllowedForTeam(const char[] weaponKey, int csTeam) {
+    if (csTeam != CS_TEAM_T && csTeam != CS_TEAM_CT) {
+        return true;
+    }
+
+    if (
+        StrEqual(weaponKey, "weapon_glock", false)
+        || StrEqual(weaponKey, "weapon_tec9", false)
+        || StrEqual(weaponKey, "weapon_galilar", false)
+        || StrEqual(weaponKey, "weapon_sg556", false)
+        || StrEqual(weaponKey, "weapon_scar20", false)
+        || StrEqual(weaponKey, "weapon_g3sg1", false)
+        || StrEqual(weaponKey, "weapon_mac10", false)
+        || StrEqual(weaponKey, "weapon_sawedoff", false)
+    ) {
+        return csTeam == CS_TEAM_T;
+    }
+
+    if (
+        StrEqual(weaponKey, "weapon_hkp2000", false)
+        || StrEqual(weaponKey, "weapon_usp_silencer", false)
+        || StrEqual(weaponKey, "weapon_fiveseven", false)
+        || StrEqual(weaponKey, "weapon_cz75a", false)
+        || StrEqual(weaponKey, "weapon_famas", false)
+        || StrEqual(weaponKey, "weapon_m4a1", false)
+        || StrEqual(weaponKey, "weapon_m4a1_silencer", false)
+        || StrEqual(weaponKey, "weapon_aug", false)
+        || StrEqual(weaponKey, "weapon_mp9", false)
+        || StrEqual(weaponKey, "weapon_mag7", false)
+    ) {
+        return csTeam == CS_TEAM_CT;
+    }
+
+    return true;
+}
+
+void QueryKgnsLoadout(int client, const char[] steamId, int altAttempt, bool force) {
     if (g_hWeaponsDb == null) {
         ConnectWeaponsDatabase();
         return;
@@ -1171,6 +1259,172 @@ void QueryPlayerLoadout(int client, const char[] steamId, int altAttempt, bool f
         escaped
     );
     g_hWeaponsDb.Query(T_ApplyFromDbCallback, query, pack);
+}
+
+void QueryTeamLoadout(int client, const char[] steamId, int altAttempt, bool force) {
+    if (g_hWeaponsDb == null) {
+        ConnectWeaponsDatabase();
+        return;
+    }
+
+    int csTeam = GetClientTeam(client);
+    char side[3];
+    if (csTeam == CS_TEAM_T) {
+        strcopy(side, sizeof(side), "T");
+    } else if (csTeam == CS_TEAM_CT) {
+        strcopy(side, sizeof(side), "CT");
+    } else {
+        QueryKgnsLoadout(client, steamId, altAttempt, force);
+        return;
+    }
+
+    char escaped[64];
+    g_hWeaponsDb.Escape(steamId, escaped, sizeof(escaped));
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteString(steamId);
+    pack.WriteCell(altAttempt);
+    pack.WriteCell(force ? 1 : 0);
+
+    char query[384];
+    Format(
+        query,
+        sizeof(query),
+        "SELECT weapon_id, paintkit, wear, seed, stattrak, stattrak_count, nametag, knife_index FROM %sclutch_team_loadout WHERE steamid='%s' AND team='%s'",
+        g_sTablePrefix,
+        escaped,
+        side
+    );
+    g_hWeaponsDb.Query(T_TeamLoadoutCallback, query, pack);
+}
+
+public void T_TeamLoadoutCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    char steamId[32];
+    pack.ReadString(steamId, sizeof(steamId));
+    int altAttempt = pack.ReadCell();
+    bool force = pack.ReadCell() == 1;
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return;
+    }
+
+    if (results == null) {
+        LogError("[Clutch] team loadout query failed: %s", error);
+        QueryKgnsLoadout(client, steamId, altAttempt, force);
+        return;
+    }
+
+    bool hadRows = ApplyTeamLoadoutFromResults(client, results, force);
+    if (!hadRows) {
+        QueryKgnsLoadout(client, steamId, altAttempt, force);
+        return;
+    }
+
+    g_bLoggedMissingLoadout[client] = false;
+    QueryPlayerGloves(client, steamId, 0);
+}
+
+bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
+    char knifeClass[64];
+    knifeClass[0] = '\0';
+    int knifePaintkit = 0;
+    float knifeWear = 0.15;
+    int knifeSeed = 0;
+    int knifeTrak = 0;
+    int knifeTrakCount = 0;
+    char knifeTag[64];
+    knifeTag[0] = '\0';
+
+    bool any = false;
+
+    while (results.FetchRow()) {
+        any = true;
+
+        char weaponId[64];
+        DbFetchString(results, "weapon_id", weaponId, sizeof(weaponId));
+
+        int paintkit = DbFetchInt(results, "paintkit", 0);
+        if (paintkit <= 0) {
+            continue;
+        }
+
+        float wear = DbFetchFloat(results, "wear", 0.15);
+        if (wear <= 0.0) {
+            wear = 0.15;
+        }
+        int seed = DbFetchInt(results, "seed", 0);
+        int stattrak = DbFetchInt(results, "stattrak", 0);
+        int stattrakCount = DbFetchInt(results, "stattrak_count", 0);
+        char nametag[64];
+        DbFetchString(results, "nametag", nametag, sizeof(nametag));
+        int knifeIdx = DbFetchInt(results, "knife_index", -1);
+
+        if (IsMeleeWeaponKey(weaponId)) {
+            knifePaintkit = paintkit;
+            knifeWear = wear;
+            knifeSeed = seed;
+            knifeTrak = stattrak;
+            knifeTrakCount = stattrakCount;
+            strcopy(knifeTag, sizeof(knifeTag), nametag);
+            if (knifeIdx >= 0) {
+                KnifeClassFromIndex(knifeIdx, knifeClass, sizeof(knifeClass));
+            }
+            if (knifeClass[0] == '\0') {
+                strcopy(knifeClass, sizeof(knifeClass), weaponId);
+            }
+            continue;
+        }
+
+        int idx = GetClutchIndexForWeaponId(weaponId);
+        if (idx < 0) {
+            continue;
+        }
+
+        UpdateSlotCache(client, idx, paintkit, wear, seed, stattrak, stattrakCount, nametag);
+
+        int weapon = FindPlayerWeapon(client, weaponId);
+        if (weapon != -1) {
+            SetClutchWeaponProps(client, weapon, paintkit, wear, seed, stattrak, stattrakCount, nametag, false);
+            g_iAppliedPaintkit[client][idx] = paintkit;
+        }
+    }
+
+    if (!any) {
+        return false;
+    }
+
+    if (knifePaintkit > 0 && knifeClass[0] != '\0') {
+        strcopy(g_CachedKnifeClass[client], CLUTCH_KNIFE_CLASS_LEN, knifeClass);
+        ClutchSetClientKnife(client, knifeClass);
+
+        int knifeWeapon = FindPlayerWeapon(client, knifeClass);
+        if (knifeWeapon != -1) {
+            SetClutchWeaponProps(client, knifeWeapon, knifePaintkit, knifeWear, knifeSeed, knifeTrak, knifeTrakCount, knifeTag, true);
+        }
+
+        DataPack knifePack = new DataPack();
+        knifePack.WriteCell(GetClientUserId(client));
+        knifePack.WriteString(knifeClass);
+        knifePack.WriteCell(knifePaintkit);
+        knifePack.WriteFloat(knifeWear);
+        knifePack.WriteCell(knifeSeed);
+        knifePack.WriteCell(knifeTrak);
+        knifePack.WriteCell(knifeTrakCount);
+        knifePack.WriteString(knifeTag);
+        CreateTimer(0.35, Timer_ApplyKnifeSkinDelayed, knifePack, TIMER_FLAG_NO_MAPCHANGE);
+    }
+
+    ScheduleForceReapply(client, force);
+    return true;
+}
+
+void QueryPlayerLoadout(int client, const char[] steamId, int altAttempt, bool force = false) {
+    QueryTeamLoadout(client, steamId, altAttempt, force);
 }
 
 public void T_ApplyFromDbCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
@@ -1199,7 +1453,7 @@ public void T_ApplyFromDbCallback(Database database, DBResultSet results, const 
             } else if (steamId[6] == '0') {
                 steamId[6] = '1';
             }
-            QueryPlayerLoadout(client, steamId, 1, force);
+            QueryKgnsLoadout(client, steamId, 1, force);
             return;
         }
 
@@ -1787,6 +2041,8 @@ void DbFetchString(DBResultSet results, const char[] column, char[] buffer, int 
 }
 
 void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
+    int csTeam = GetClientTeam(client);
+
     char knifeClass[64];
     knifeClass[0] = '\0';
 
@@ -1806,6 +2062,11 @@ void ApplyLoadoutFromDbRow(int client, DBResultSet results, bool force) {
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
         char weaponKey[32];
         strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
+
+        if (!ClutchWeaponAllowedForTeam(weaponKey, csTeam)) {
+            ClearSlotCache(client, i);
+            continue;
+        }
 
         if (IsMeleeWeaponKey(weaponKey)) {
             if (knifeClass[0] != '\0' && !StrEqual(weaponKey, knifeClass, false)) {

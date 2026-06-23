@@ -250,6 +250,10 @@ export type SyncWeaponPayload = {
 
   defIndex?: number;
 
+  /** Terrorist / CT — gloves sync per side; optional for weapons. */
+
+  team?: "T" | "CT";
+
 };
 
 
@@ -263,6 +267,10 @@ export type SyncLoadoutOptions = {
   /** Explicit weapon ids to clear (unequip). */
 
   clearWeaponIds?: string[];
+
+  /** Clear only one glove side (t_* or ct_* columns). */
+
+  clearGloveTeam?: "T" | "CT";
 
 };
 
@@ -412,6 +420,9 @@ export function buildPlayerLoadoutSql(
 
     if (!w.paintkit || w.paintkit <= 0) continue;
 
+    // Per-team loadouts from the site go to clutch_team_loadout — not kgns columns.
+    if (w.team === 'T' || w.team === 'CT') continue;
+
 
 
     const column = weaponIdToDbColumn(w.weaponId);
@@ -505,51 +516,88 @@ export function buildGlovesLoadoutSql(
   tablePrefix: string,
   steamId: string,
   weapons: SyncWeaponPayload[],
-  clearWeaponIds?: string[],
+  options?: Pick<SyncLoadoutOptions, "clearWeaponIds" | "clearGloveTeam">,
 ): GlovesLoadoutSqlResult {
   const escapedSteam = steamId.replace(/'/g, "''");
   const table = glovesTableName(tablePrefix);
   const insertSql = `INSERT OR IGNORE INTO ${table} (steamid) VALUES ('${escapedSteam}')`;
+  const clearWeaponIds = options?.clearWeaponIds ?? [];
+  const clearGloveTeam = options?.clearGloveTeam;
 
-  const shouldClear =
-    (clearWeaponIds ?? []).some((id) => isGlovesWeaponId(id)) ||
-    !weapons.some((w) => isGlovesWeaponId(w.weaponId) && w.paintkit > 0);
+  const tGlove = weapons.find(
+    (w) => isGlovesWeaponId(w.weaponId) && w.paintkit > 0 && w.team === "T",
+  );
+  const ctGlove = weapons.find(
+    (w) => isGlovesWeaponId(w.weaponId) && w.paintkit > 0 && w.team === "CT",
+  );
+  const legacyGlove = weapons.find(
+    (w) => isGlovesWeaponId(w.weaponId) && w.paintkit > 0 && !w.team,
+  );
 
-  if (shouldClear) {
+  const effectiveT = tGlove ?? (!ctGlove ? legacyGlove : undefined);
+  const effectiveCT = ctGlove ?? (!tGlove ? legacyGlove : undefined);
+
+  const clearAllFromWeapons =
+    clearWeaponIds.some((id) => isGlovesWeaponId(id)) &&
+    !effectiveT &&
+    !effectiveCT;
+
+  if (clearAllFromWeapons && !clearGloveTeam) {
     const updateSql = `UPDATE ${table} SET t_group=0, t_glove=0, t_float=0, ct_group=0, ct_glove=0, ct_float=0 WHERE steamid='${escapedSteam}'`;
     return { insertSql, updateSql, action: "clear" };
   }
 
-  const equipped = weapons.find((w) => isGlovesWeaponId(w.weaponId) && w.paintkit > 0);
-  if (!equipped) {
+  if (clearGloveTeam === "T" && !effectiveT) {
+    const updateSql = `UPDATE ${table} SET t_group=0, t_glove=0, t_float=0 WHERE steamid='${escapedSteam}'`;
+    return { insertSql, updateSql, action: "clear" };
+  }
+
+  if (clearGloveTeam === "CT" && !effectiveCT) {
+    const updateSql = `UPDATE ${table} SET ct_group=0, ct_glove=0, ct_float=0 WHERE steamid='${escapedSteam}'`;
+    return { insertSql, updateSql, action: "clear" };
+  }
+
+  const updates: string[] = [];
+
+  function applySide(
+    side: "T" | "CT",
+    glove: SyncWeaponPayload | undefined,
+  ): { group?: number; paintkit?: number; weaponId?: string } {
+    if (!glove) return {};
+    const group = resolveGloveDefIndex(glove.weaponId, glove.defIndex);
+    if (!group) {
+      console.warn(
+        `[csgo-skins] glove defindex unresolved for weaponId=${glove.weaponId} defIndex=${glove.defIndex ?? "n/a"} paintkit=${glove.paintkit}`,
+      );
+      return { weaponId: glove.weaponId, paintkit: glove.paintkit };
+    }
+    const wear = (glove.wear ?? WEAR_DEFAULT).toFixed(2);
+    const paint = glove.paintkit;
+    if (side === "T") {
+      updates.push(`t_group=${group}`, `t_glove=${paint}`, `t_float=${wear}`);
+    } else {
+      updates.push(`ct_group=${group}`, `ct_glove=${paint}`, `ct_float=${wear}`);
+    }
+    return { group, paintkit: paint, weaponId: glove.weaponId };
+  }
+
+  const tMeta = applySide("T", effectiveT);
+  const ctMeta = applySide("CT", effectiveCT);
+
+  if (!updates.length) {
     return { insertSql, updateSql: "", action: "none" };
   }
 
-  const group = resolveGloveDefIndex(equipped.weaponId, equipped.defIndex);
-  if (!group) {
-    console.warn(
-      `[csgo-skins] glove defindex unresolved for weaponId=${equipped.weaponId} defIndex=${equipped.defIndex ?? "n/a"} paintkit=${equipped.paintkit}`,
-    );
-    return {
-      insertSql,
-      updateSql: "",
-      action: "skipped",
-      weaponId: equipped.weaponId,
-      paintkit: equipped.paintkit,
-    };
-  }
-
-  const wear = (equipped.wear ?? WEAR_DEFAULT).toFixed(2);
-  const paint = equipped.paintkit;
-  const updateSql = `UPDATE ${table} SET t_group=${group}, t_glove=${paint}, t_float=${wear}, ct_group=${group}, ct_glove=${paint}, ct_float=${wear} WHERE steamid='${escapedSteam}'`;
+  const updateSql = `UPDATE ${table} SET ${updates.join(", ")} WHERE steamid='${escapedSteam}'`;
+  const appliedMeta = ctMeta.group ? ctMeta : tMeta;
 
   return {
     insertSql,
     updateSql,
-    action: "apply",
-    group,
-    paintkit: paint,
-    weaponId: equipped.weaponId,
+    action: appliedMeta.group ? "apply" : "skipped",
+    group: appliedMeta.group,
+    paintkit: appliedMeta.paintkit,
+    weaponId: appliedMeta.weaponId,
   };
 }
 

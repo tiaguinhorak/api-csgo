@@ -31,6 +31,7 @@ type PlayerSyncBody = {
   weapons: SyncWeaponPayload[];
   clearKnifeSlot?: boolean;
   clearWeaponIds?: string[];
+  clearGloveTeam?: "T" | "CT";
 };
 
 router.get('/ws-allowlist', async (_req: Request, res: Response) => {
@@ -61,6 +62,7 @@ router.post('/player-sync', async (req: Request, res: Response) => {
     const result = await syncPlayerLoadoutToWeaponsDb(body.steamId, body.weapons, {
       clearKnifeSlot: body.clearKnifeSlot,
       clearWeaponIds: body.clearWeaponIds,
+      clearGloveTeam: body.clearGloveTeam,
     });
     const rconReload = await reloadClutchSkinsInGame();
 

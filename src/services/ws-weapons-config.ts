@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fetchWsAllowlistFromGithub } from './ws-allowlist-github';
+import { fetchWsAllowlistFromSite } from './ws-allowlist-site';
 import { parseGlovesCfgEntries } from './parse-gloves-cfg';
 import { getSourceModRoots } from './weapons-db-path';
 
@@ -10,7 +11,7 @@ export type WsSkinAllowEntry = {
   name: string;
 };
 
-export type WsAllowlistSource = 'github' | 'vps-config' | 'all';
+export type WsAllowlistSource = 'github' | 'vps-config' | 'all' | 'site-db';
 
 const DEFAULT_LANG = 'english';
 
@@ -73,6 +74,9 @@ export function resolveWsAllowlistSource(): WsAllowlistSource {
   }
   if (raw === 'all' || raw === 'none' || raw === 'off') {
     return 'all';
+  }
+  if (raw === 'site-db' || raw === 'site') {
+    return 'site-db';
   }
   return 'github';
 }
@@ -142,6 +146,29 @@ export async function loadWsWeaponsAllowlist(force = false): Promise<{
     cachedSourcePath = null;
     cachedAt = now;
     return { entries: [], source, sourcePath: null, count: 0 };
+  }
+
+  if (source === 'site-db') {
+    try {
+      cachedEntries = await fetchWsAllowlistFromSite();
+      cachedSource = source;
+      cachedSourcePath = `site:${process.env.CLUTCH_SITE_URL ?? 'CLUTCH_SITE_URL'}/api/csgo/catalog/allowlist`;
+      cachedAt = now;
+      return {
+        entries: cachedEntries,
+        source,
+        sourcePath: cachedSourcePath,
+        count: cachedEntries.length,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[ws-allowlist] site-db fetch failed: ${message}`);
+      cachedEntries = [];
+      cachedSource = source;
+      cachedSourcePath = null;
+      cachedAt = now;
+      return { entries: [], source, sourcePath: null, count: 0 };
+    }
   }
 
   if (source === 'github') {

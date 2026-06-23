@@ -1,5 +1,9 @@
 import Database from 'better-sqlite3';
 import {
+  buildEnsureTeamLoadoutTableSql,
+  buildTeamLoadoutSyncSql,
+} from './team-loadout-db-map';
+import {
   buildGlovesLoadoutSql,
   buildPlayerLoadoutSql,
   isMeleeWeaponId,
@@ -173,8 +177,15 @@ export async function syncPlayerLoadoutToWeaponsDb(
 
     await runWithRetryAsync(() => {
       ensureGlovesTable(db, tablePrefix);
+      db.exec(buildEnsureTeamLoadoutTableSql(tablePrefix));
       const tx = db.transaction(() => {
         for (const targetSteam of steamIds) {
+          const teamLoadoutSql = buildTeamLoadoutSyncSql(tablePrefix, targetSteam, weapons);
+          for (const sql of teamLoadoutSql) {
+            db.exec(sql);
+            updated = true;
+          }
+
           const { insertSql, updateSql } = buildPlayerLoadoutSql(
             tablePrefix,
             targetSteam,
@@ -192,7 +203,10 @@ export async function syncPlayerLoadoutToWeaponsDb(
             tablePrefix,
             targetSteam,
             weapons,
-            syncOptions.clearWeaponIds,
+            {
+              clearWeaponIds: syncOptions.clearWeaponIds,
+              clearGloveTeam: syncOptions.clearGloveTeam,
+            },
           );
           glovesResult = glovesSql;
           db.exec(glovesSql.insertSql);
@@ -227,6 +241,12 @@ export async function syncPlayerLoadoutToWeaponsDb(
       gloves: glovesResult,
     };
   });
+}
+
+/** STEAM_0 / STEAM_1 variants for kgns + SourceMod sticker/weapons tables. */
+export function resolvePluginSteamIds(steamId: string): string[] {
+  const db = openWeaponsDatabase();
+  return collectSteamIdsToUpdate(db, steamId);
 }
 
 export function closeWeaponsDatabase(): void {

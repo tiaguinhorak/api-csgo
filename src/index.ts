@@ -6,6 +6,7 @@ import matchesRouter from './routes/matches';
 import serversRouter from './routes/servers';
 import skinsRouter from './routes/skins';
 import csgoSkinsPushRouter, { logSkinsAuthStatus } from './routes/csgo-skins-push';
+import csgoStickersPushRouter from './routes/csgo-stickers-push';
 import { skinManager } from './services/skin-manager';
 import { resolveWeaponsDbPath } from './services/weapons-db-path';
 import { assertProductionApiKey, requireApiAuth } from './middleware/auth';
@@ -43,6 +44,7 @@ app.use('/api/matches', matchesRouter);
 app.use('/api/servers', serversRouter);
 app.use('/api/skins', skinsRouter);
 app.use('/api/csgo/skins', csgoSkinsPushRouter);
+app.use('/api/csgo/stickers', csgoStickersPushRouter);
 
 skinManager.initializeDefaultSkins();
 logSkinsAuthStatus();
