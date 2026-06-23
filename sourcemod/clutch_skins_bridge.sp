@@ -1242,6 +1242,10 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
+#if defined _weapons_included_
+    RefreshWeaponsReloadNativeFlag();
+    TryReloadWeaponsPluginData(client);
+#endif
     ApplyAllCachedWeaponsToClient(client, force);
     ScheduleForceReapply(client, force);
     return Plugin_Stop;
