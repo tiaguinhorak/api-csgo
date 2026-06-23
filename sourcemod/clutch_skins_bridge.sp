@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.7"
+#define PLUGIN_VERSION "3.7.8"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -1151,7 +1151,7 @@ void SetClutchWeaponProps(
         SetEntProp(weapon, Prop_Send, "m_bInitialized", 1);
     }
 
-    ClutchNetworkUpdate(weapon);
+    ClutchNetworkUpdateWeaponSkin(weapon);
     if (isKnife && ClutchClientHasGlovesLoaded(client)) {
         return;
     } else if (isKnife) {
@@ -1164,6 +1164,30 @@ void ClutchNetworkUpdate(int entity) {
     if (offset != -1) {
         ChangeEdictState(entity, offset);
     }
+}
+
+void ClutchNetworkUpdateWeaponSkin(int entity) {
+    int paintOffset = FindSendPropInfo("CBaseAttributableItem", "m_nFallbackPaintKit");
+    if (paintOffset != -1) {
+        ChangeEdictState(entity, paintOffset);
+    }
+    int wearOffset = FindSendPropInfo("CBaseAttributableItem", "m_flFallbackWear");
+    if (wearOffset != -1) {
+        ChangeEdictState(entity, wearOffset);
+    }
+    int seedOffset = FindSendPropInfo("CBaseAttributableItem", "m_nFallbackSeed");
+    if (seedOffset != -1) {
+        ChangeEdictState(entity, seedOffset);
+    }
+    int idLowOffset = FindSendPropInfo("CBaseAttributableItem", "m_iItemIDLow");
+    if (idLowOffset != -1) {
+        ChangeEdictState(entity, idLowOffset);
+    }
+    int idHighOffset = FindSendPropInfo("CBaseAttributableItem", "m_iItemIDHigh");
+    if (idHighOffset != -1) {
+        ChangeEdictState(entity, idHighOffset);
+    }
+    ClutchNetworkUpdate(entity);
 }
 
 #if defined _weapons_included_
