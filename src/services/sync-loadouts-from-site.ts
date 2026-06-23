@@ -1,5 +1,6 @@
 import type { SyncWeaponPayload } from './weapons-db-map';
 import { reloadClutchSkinsInGame } from './clutch-rcon';
+import { syncAllStickersFromSite } from './sync-stickers-from-site';
 import { syncPlayerLoadoutToWeaponsDb } from './weapons-db-sync';
 
 type SiteLoadoutPayload = {
@@ -33,6 +34,7 @@ function resolveSkinsSyncKey(): string | null {
 export async function syncAllLoadoutsFromSite(): Promise<{
   ok: boolean;
   synced: number;
+  stickersSynced: number;
   errors: string[];
   siteUrl: string | null;
   rconReload: boolean;
@@ -44,6 +46,7 @@ export async function syncAllLoadoutsFromSite(): Promise<{
     return {
       ok: false,
       synced: 0,
+      stickersSynced: 0,
       errors: ['CLUTCH_SITE_URL or SITE_ORIGIN and CSGO_SKINS_SYNC_KEY required'],
       siteUrl,
       rconReload: false,
@@ -66,6 +69,7 @@ export async function syncAllLoadoutsFromSite(): Promise<{
       return {
         ok: false,
         synced: 0,
+        stickersSynced: 0,
         errors: [`Site API HTTP ${res.status}: ${text.slice(0, 200)}`],
         siteUrl,
         rconReload: false,
@@ -79,6 +83,7 @@ export async function syncAllLoadoutsFromSite(): Promise<{
     return {
       ok: false,
       synced: 0,
+      stickersSynced: 0,
       errors: [message],
       siteUrl,
       rconReload: false,
@@ -101,11 +106,17 @@ export async function syncAllLoadoutsFromSite(): Promise<{
     }
   }
 
+  const stickerResult = await syncAllStickersFromSite();
+  for (const stickerError of stickerResult.errors) {
+    errors.push(`stickers: ${stickerError}`);
+  }
+
   const rconReload = synced > 0 ? await reloadClutchSkinsInGame() : false;
 
   return {
     ok: errors.length === 0,
     synced,
+    stickersSynced: stickerResult.synced,
     errors,
     siteUrl,
     rconReload,

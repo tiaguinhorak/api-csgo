@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { syncAllStickersFromSite } from '../services/sync-stickers-from-site';
 import { syncPlayerStickersToDb } from '../services/stickers-db-sync';
 import type { StickerSyncEntry } from '../services/stickers-db-map';
 
@@ -29,6 +30,24 @@ router.post('/player-sync', async (req: Request, res: Response) => {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'sticker sync failed';
     console.error('[csgo-stickers player-sync]', message);
+    return res.status(500).json({ error: message });
+  }
+});
+
+router.post('/sync-from-site', async (_req: Request, res: Response) => {
+  try {
+    const result = await syncAllStickersFromSite();
+    if (!result.ok && result.synced === 0) {
+      return res.status(500).json(result);
+    }
+    return res.json({
+      mode: 'api',
+      ...result,
+      ok: result.errors.length === 0 || result.synced > 0,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'sync-from-site failed';
+    console.error('[csgo-stickers sync-from-site]', message);
     return res.status(500).json({ error: message });
   }
 });

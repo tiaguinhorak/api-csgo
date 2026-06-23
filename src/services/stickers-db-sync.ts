@@ -14,10 +14,11 @@ function resolveStickersDbPath(): string {
 
   const fromWeapons = process.env.WEAPONS_DB_PATH?.trim();
   if (fromWeapons) {
-    return path.join(path.dirname(fromWeapons), 'csgo_weaponstickers.sqlite');
+    // SourceMod SQLite driver: databases.cfg "database" "csgo_weaponstickers" → csgo_weaponstickers.sq3
+    return path.join(path.dirname(fromWeapons), 'csgo_weaponstickers.sq3');
   }
 
-  return '/home/csgo/server/csgo/addons/csgo_weaponstickers/csgo_weaponstickers.sqlite';
+  return '/home/csgo/server/csgo/addons/sourcemod/data/sqlite/csgo_weaponstickers.sq3';
 }
 
 let stickersDb: Database.Database | null = null;

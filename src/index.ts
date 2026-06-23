@@ -34,6 +34,8 @@ app.get('/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     /** Present when player-sync writes the gloves SQLite table (commit a77152a+). */
     glovesPlayerSync: true,
+    /** Present when sticker player-sync route is deployed. */
+    stickersPlayerSync: true,
   });
 });
 

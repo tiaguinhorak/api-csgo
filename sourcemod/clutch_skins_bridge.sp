@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.0"
+#define PLUGIN_VERSION "3.7.1"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -655,6 +655,7 @@ void ClearSlotCache(int client, int idx) {
 }
 
 void ClearAllMeleeSlotCaches(int client) {
+    int csTeam = GetClientTeam(client);
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
         char weaponKey[32];
         strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
@@ -668,6 +669,26 @@ void ClearAllMeleeSlotCaches(int client) {
             ClearSlotCache(client, i);
         }
     }
+    g_CachedKnifeClass[client][0] = '\0';
+    g_iLastKnifePaint[client] = 0;
+}
+
+void PrepareTeamLoadoutCaches(int client) {
+    int csTeam = GetClientTeam(client);
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        char weaponKey[32];
+        strcopy(weaponKey, sizeof(weaponKey), g_ClutchWeaponKeys[i]);
+
+        if (!ClutchWeaponAllowedForTeam(weaponKey, csTeam)) {
+            ClearSlotCache(client, i);
+            continue;
+        }
+
+        if (!IsMeleeWeaponKey(weaponKey)) {
+            ClearSlotCache(client, i);
+        }
+    }
+
     g_CachedKnifeClass[client][0] = '\0';
     g_iLastKnifePaint[client] = 0;
 }
@@ -1330,6 +1351,8 @@ public void T_TeamLoadoutCallback(Database database, DBResultSet results, const 
 }
 
 bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
+    PrepareTeamLoadoutCaches(client);
+
     char knifeClass[64];
     knifeClass[0] = '\0';
     int knifePaintkit = 0;

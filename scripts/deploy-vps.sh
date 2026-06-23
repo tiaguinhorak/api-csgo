@@ -112,6 +112,14 @@ if [[ "${SKIP_PLUGIN}" -eq 0 ]]; then
   echo ""
   echo ">>> install clutch_skins_bridge plugin"
   "${REPO_ROOT}/scripts/install-clutch-skins-bridge.sh"
+
+  echo ""
+  echo ">>> install CSGO_WeaponStickers + eItems (optional — skip if already installed)"
+  if [[ -f "${REPO_ROOT}/scripts/install-csgo-weaponstickers.sh" ]]; then
+    bash "${REPO_ROOT}/scripts/install-csgo-weaponstickers.sh" || {
+      echo "WARN: install-csgo-weaponstickers.sh failed — run manually after fixing deps" >&2
+    }
+  fi
 fi
 
 echo ""

@@ -420,8 +420,17 @@ export function buildPlayerLoadoutSql(
 
     if (!w.paintkit || w.paintkit <= 0) continue;
 
-    // Per-team loadouts from the site go to clutch_team_loadout — not kgns columns.
-    if (w.team === 'T' || w.team === 'CT') continue;
+    // Per-team loadouts go to clutch_team_loadout — clear kgns column so fallback does not apply stale skin.
+    if (w.team === 'T' || w.team === 'CT') {
+      const teamColumn = weaponIdToDbColumn(w.weaponId);
+      if (teamColumn) {
+        updates.push(...clearColumnUpdates(teamColumn));
+      }
+      if (isMeleeWeaponId(w.weaponId)) {
+        updates.push('knife=0');
+      }
+      continue;
+    }
 
 
 
