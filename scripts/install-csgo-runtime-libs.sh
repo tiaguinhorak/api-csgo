@@ -6,6 +6,8 @@
 #   bash scripts/install-csgo-runtime-libs.sh
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "ERROR: apt-get não encontrado — só Ubuntu/Debian." >&2
   exit 1
@@ -42,6 +44,8 @@ else
     libssh-4:i386 librtmp1:i386 libbrotli1:i386 libidn2-0:i386 \
     2>/dev/null || true
 fi
+
+bash "${REPO_ROOT}/scripts/fix-csgo-bundled-libgcc.sh" || true
 
 SERVER_ROOT="${CSGO_SERVER_DIR:-/home/csgo/server}"
 if [[ -f "${SERVER_ROOT}/bin/libtier0.so" ]]; then
