@@ -285,12 +285,21 @@ echo "Stickers DB (plugin reads here): ${STICKERS_DB}"
 
 echo ""
 echo "=== Plugin files ==="
-ls -la "${SM}/plugins/csgo_weaponstickers.smx" 2>/dev/null \
-  || echo "ERROR: csgo_weaponstickers.smx missing — check unrar: sudo apt install unrar-free"
-ls -la "${SM}/plugins/eItems.smx" "${SM}/plugins/eitems.smx" 2>/dev/null \
-  || echo "WARN: eItems.smx missing"
-ls -la "${SM}/extensions/PTaH.ext"*.so 2>/dev/null \
-  || echo "WARN: PTaH extension missing"
+if has_weaponstickers_plugin; then
+  ls -la "${SM}/plugins/csgo_weaponstickers.smx"
+else
+  echo "ERROR: csgo_weaponstickers.smx missing"
+fi
+if has_eitems_plugin; then
+  ls -la "${SM}/plugins/eItems.smx" 2>/dev/null || ls -la "${SM}/plugins/eitems.smx"
+else
+  echo "WARN: eItems.smx missing — run install again or check eItems zip"
+fi
+if has_ptah_extension; then
+  ls -la "${SM}/extensions/PTaH.ext"*.so 2>/dev/null | head -3
+else
+  echo "WARN: PTaH extension missing"
+fi
 
 if ! has_weaponstickers_plugin || ! has_eitems_plugin; then
   echo ""

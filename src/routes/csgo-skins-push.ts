@@ -7,6 +7,7 @@ import {
   loadWsWeaponsAllowlist,
 } from '../services/ws-weapons-config';
 import { reloadClutchSkinsInGame } from '../services/clutch-rcon';
+import { syncWeaponsCfgFromSite } from '../services/sync-weapons-cfg-file';
 
 const router = Router();
 
@@ -48,6 +49,20 @@ router.get('/ws-allowlist', async (_req: Request, res: Response) => {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'allowlist failed';
+    return res.status(500).json({ error: message });
+  }
+});
+
+router.post('/sync-weapons-cfg', async (_req: Request, res: Response) => {
+  try {
+    const result = await syncWeaponsCfgFromSite();
+    if (!result.ok) {
+      return res.status(500).json({ ok: false, error: result.error ?? 'sync failed' });
+    }
+    const rconReload = await reloadClutchSkinsInGame();
+    return res.json({ ...result, rconReload });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'sync failed';
     return res.status(500).json({ error: message });
   }
 });

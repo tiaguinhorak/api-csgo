@@ -236,3 +236,10 @@ export function buildWsAllowlistSet(entries: WsSkinAllowEntry[]): Set<string> {
   }
   return set;
 }
+
+export function clearWsWeaponsAllowlistCache(): void {
+  cachedEntries = null;
+  cachedSource = null;
+  cachedSourcePath = null;
+  cachedAt = 0;
+}

@@ -45,6 +45,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SP_SRC="${REPO_ROOT}/sourcemod/clutch_skins_bridge.sp"
 CFG_SRC="${REPO_ROOT}/sourcemod/clutch_skins_bridge.cfg"
+OVERRIDES_SRC="${REPO_ROOT}/sourcemod/configs/admin_overrides_clutch.cfg"
 
 if [[ ! -f "${SP_SRC}" ]]; then
   echo "Missing ${SP_SRC} — git pull em ~/api-csgo" >&2
@@ -127,6 +128,21 @@ mkdir -p "${CSGO_ROOT}/cfg/sourcemod"
 cp -f "${CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
 if [[ -f "${GLOVES_CFG_SRC}" ]]; then
   cp -f "${GLOVES_CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_gloves.cfg"
+fi
+
+ADMIN_OVERRIDES="${SM}/configs/admin_overrides.cfg"
+if [[ -f "${OVERRIDES_SRC}" ]]; then
+  MARKER="clutch_inventory_only_ws_admin"
+  if [[ -f "${ADMIN_OVERRIDES}" ]] && grep -q "${MARKER}" "${ADMIN_OVERRIDES}"; then
+    echo "admin_overrides.cfg already has Clutch !ws restrictions (${MARKER})"
+  else
+    {
+      echo ""
+      echo "// ${MARKER} — players use web inventory; admins keep !ws"
+      cat "${OVERRIDES_SRC}"
+    } >> "${ADMIN_OVERRIDES}"
+    echo "Appended !ws admin-only overrides to ${ADMIN_OVERRIDES}"
+  fi
 fi
 GLOVES_CFG_DEPLOY="${CSGO_ROOT}/cfg/sourcemod/clutch_gloves.cfg"
 if [[ -f "${GLOVES_CFG_DEPLOY}" ]]; then

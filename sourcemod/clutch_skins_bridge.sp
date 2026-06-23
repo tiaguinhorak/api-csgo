@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.3"
+#define PLUGIN_VERSION "3.7.4"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -155,6 +155,9 @@ public void OnPluginStart() {
 
     RegAdminCmd("sm_reloadclutchskins", Command_ReloadSkins, ADMFLAG_ROOT, "Re-apply clutch skins from weapons DB");
     RegAdminCmd("sm_clutch_applyskins", Command_ApplySkins, ADMFLAG_ROOT, "Re-apply clutch skins to all players");
+
+    AddCommandListener(ClutchBlockWsChatForPlayers, "say");
+    AddCommandListener(ClutchBlockWsChatForPlayers, "say_team");
 
     ConnectWeaponsDatabase();
 
@@ -407,6 +410,60 @@ public Action Command_ApplySkins(int client, int args) {
         }
     }
     ReplyToCommand(client, "[Clutch] Skins reaplicados. Luvas atualizam no proximo spawn.");
+    return Plugin_Handled;
+}
+
+bool ClutchIsBlockedWsChatToken(const char[] token) {
+    return StrEqual(token, "ws", false)
+        || StrEqual(token, "skin", false)
+        || StrEqual(token, "skins", false)
+        || StrEqual(token, "knife", false)
+        || StrEqual(token, "gloves", false)
+        || StrEqual(token, "wslang", false)
+        || StrEqual(token, "seed", false)
+        || StrEqual(token, "nametag", false);
+}
+
+bool ClutchIsManualSkinChatCommand(const char[] msg) {
+    if (msg[0] != '!' && msg[0] != '/') {
+        return false;
+    }
+
+    char copy[64];
+    strcopy(copy, sizeof(copy), msg[1]);
+    TrimString(copy);
+    if (copy[0] == '\0') {
+        return false;
+    }
+
+    char token[32];
+    int pos = BreakString(copy, token, sizeof(token));
+    if (pos == -1) {
+        strcopy(token, sizeof(token), copy);
+    }
+
+    return ClutchIsBlockedWsChatToken(token);
+}
+
+public Action ClutchBlockWsChatForPlayers(int client, const char[] command, int argc) {
+    if (client <= 0 || IsFakeClient(client)) {
+        return Plugin_Continue;
+    }
+
+    char msg[256];
+    GetCmdArgString(msg, sizeof(msg));
+    TrimString(msg);
+    RemoveQuotes(msg);
+
+    if (!ClutchIsManualSkinChatCommand(msg)) {
+        return Plugin_Continue;
+    }
+
+    if (CheckCommandAccess(client, "sm_ws", ADMFLAG_GENERIC, true)) {
+        return Plugin_Continue;
+    }
+
+    PrintToChat(client, " [Clutch] Equipe skins pelo inventario no site.");
     return Plugin_Handled;
 }
 

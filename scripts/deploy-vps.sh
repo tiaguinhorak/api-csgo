@@ -108,6 +108,16 @@ if [[ -z "${CSGO_SKINS_SYNC_KEY:-}" && -z "${API_KEY:-}" ]]; then
   echo "WARN: No CSGO_SKINS_SYNC_KEY or API_KEY in .env — site push may get HTTP 401"
 fi
 
+echo ""
+echo ">>> sync weapons_english.cfg from site catalog"
+if [[ -n "${CSGO_SKINS_SYNC_KEY:-}" ]]; then
+  bash "${REPO_ROOT}/scripts/sync-weapons-cfg-from-site.sh" || {
+    echo "WARN: weapons cfg sync failed — run ./scripts/sync-weapons-cfg-from-site.sh after fixing CLUTCH_SITE_URL" >&2
+  }
+else
+  echo "Skip (no CSGO_SKINS_SYNC_KEY)"
+fi
+
 if [[ "${SKIP_PLUGIN}" -eq 0 ]]; then
   echo ""
   echo ">>> install clutch_skins_bridge plugin"
