@@ -3,7 +3,7 @@
 
 #include <sourcemod>
 
-#define PLUGIN_VERSION "1.0.1"
+#define PLUGIN_VERSION "1.0.2"
 #define TABLE_ALLOWLIST "clutch_steam_allowlist"
 
 Database g_hDb = null;
@@ -111,7 +111,7 @@ void CheckClientGate(int client) {
         return;
     }
 
-    if (CheckCommandAccess(client, ADMFLAG_GENERIC, true)) {
+    if (GetUserAdmin(client) != INVALID_ADMIN_ID) {
         LogMessage("[ClutchGate] admin bypass %N", client);
         return;
     }

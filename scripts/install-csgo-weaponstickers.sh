@@ -210,6 +210,15 @@ verify_ripext_size() {
   fi
   size="$(wc -c < "${rip_so}" | tr -d ' ')"
   echo "rip.ext.so size: ${size} bytes (sm-ripext 1.3.2 expects ~5008816)"
+  if command -v file >/dev/null 2>&1; then
+    local arch
+    arch="$(file -b "${rip_so}")"
+    echo "rip.ext.so arch: ${arch}"
+    if [[ "${arch}" != *"32-bit"* ]]; then
+      echo "ERROR: rip.ext.so is not 32-bit — CS:GO srcds cannot load it. Re-run installer." >&2
+      return 1
+    fi
+  fi
   if [[ "${size}" -lt 4000000 ]]; then
     echo "ERROR: rip.ext.so is too small — likely wrong/corrupt build. Re-run installer." >&2
     return 1
@@ -276,10 +285,21 @@ install_ripext() {
     echo "WARN: merge_addons_tree failed for ripext — copying .so files manually"
   fi
   mkdir -p "${SM}/extensions"
-  while IFS= read -r -d '' so_file; do
-    echo "Copying ${so_file} -> ${SM}/extensions/"
-    cp -a "${so_file}" "${SM}/extensions/"
-  done < <(find "${TMP_DIR}/ripext" -name '*.so' -path '*/extensions/*' -print0 2>/dev/null)
+  local rip_32="${TMP_DIR}/ripext/addons/sourcemod/extensions/rip.ext.so"
+  if [[ -f "${rip_32}" ]]; then
+    echo "Copying 32-bit ${rip_32} -> ${SM}/extensions/"
+    cp -a "${rip_32}" "${SM}/extensions/"
+  else
+    while IFS= read -r -d '' so_file; do
+      if [[ "${so_file}" == *"/x64/"* ]]; then
+        continue
+      fi
+      echo "Copying ${so_file} -> ${SM}/extensions/"
+      cp -a "${so_file}" "${SM}/extensions/"
+    done < <(find "${TMP_DIR}/ripext" -name 'rip.ext.so' -path '*/extensions/*' ! -path '*/x64/*' -print0 2>/dev/null)
+  fi
+  # Never ship x64 extension binaries into CS:GO srcds (32-bit) extensions folder
+  rm -rf "${SM}/extensions/x64" 2>/dev/null || true
   # CA bundle for HTTPS (ripext 1.0.3+)
   while IFS= read -r -d '' cfg_dir; do
     if [[ -d "${cfg_dir}" ]]; then

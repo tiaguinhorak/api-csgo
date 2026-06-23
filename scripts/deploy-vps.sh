@@ -126,10 +126,14 @@ fi
 echo ""
 echo ">>> sync allowlist Steam (platform gate)"
 if [[ -n "${CSGO_SKINS_SYNC_KEY:-}" && -n "${CLUTCH_SITE_URL:-}" ]]; then
-  bash "${REPO_ROOT}/scripts/sync-steam-allowlist.sh" || {
-    echo "WARN: sync allowlist falhou — verifique CLUTCH_SITE_URL e site deploy" >&2
-  }
-  bash "${REPO_ROOT}/scripts/verify-steam-allowlist.sh" || true
+  if ! bash "${REPO_ROOT}/scripts/check-site-dns.sh"; then
+    echo "WARN: DNS/site check failed — allowlist sync skipped" >&2
+  else
+    bash "${REPO_ROOT}/scripts/sync-steam-allowlist.sh" || {
+      echo "WARN: sync allowlist falhou — verifique CLUTCH_SITE_URL e site deploy" >&2
+    }
+    bash "${REPO_ROOT}/scripts/verify-steam-allowlist.sh" || true
+  fi
 else
   echo "Skip (defina CLUTCH_SITE_URL + CSGO_SKINS_SYNC_KEY no .env)"
 fi
