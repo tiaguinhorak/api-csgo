@@ -25,6 +25,7 @@ class ServerManager {
       status: 'offline',
       port: dto.port ?? 27015,
       tickrate: dto.tickrate || config.csgo.defaultTickrate,
+      pool: dto.pool ?? 'public',
     };
 
     this.servers.set(server.id, server);
@@ -43,7 +44,40 @@ class ServerManager {
   }
 
   getAvailableServer(): GameServer | undefined {
-    return this.listServers('online').find(s => !s.currentMatchId);
+    return this.listServers('online').find((s) => !s.currentMatchId);
+  }
+
+  /**
+   * Reserva um servidor livre para a partida (evita duas partidas no mesmo host).
+   * Retorna null se todos estão ocupados ou o preferredId está inválido/ocupado.
+   */
+  reserveServerForMatch(matchId: string, preferredServerId?: string): GameServer | null {
+    const tryReserve = (server: GameServer | undefined): GameServer | null => {
+      if (!server) return null;
+      const pool = server.pool ?? 'ranked';
+      if (pool !== 'ranked') return null;
+      if (server.currentMatchId) return null;
+      if (server.status !== 'online') return null;
+      server.currentMatchId = matchId;
+      server.status = 'busy';
+      stateStore.persist();
+      return server;
+    };
+
+    if (preferredServerId) {
+      return tryReserve(this.servers.get(preferredServerId));
+    }
+
+    for (const server of this.listServers('online')) {
+      const pool = server.pool ?? 'ranked';
+      if (pool !== 'ranked') continue;
+      if (!server.currentMatchId) {
+        const reserved = tryReserve(server);
+        if (reserved) return reserved;
+      }
+    }
+
+    return null;
   }
 
   private getSshConnection(server: GameServer) {

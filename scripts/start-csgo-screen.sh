@@ -24,6 +24,8 @@ RCON="${CSGO_RCON_PASSWORD:-clutchclube}"
 GSLT="${CSGO_GSLT_TOKEN:-}"
 MAP="${CSGO_START_MAP:-de_dust2}"
 MAXPLAYERS="${CSGO_MAXPLAYERS:-10}"
+GAME_TYPE="${CSGO_GAME_TYPE:-0}"
+GAME_MODE="${CSGO_GAME_MODE:-1}"
 BOOT_LOG="${SERVER_ROOT}/csgo/clutch-srcds-boot.log"
 
 if [[ ! -x "${SERVER_ROOT}/srcds_run" ]]; then
@@ -41,7 +43,7 @@ sleep 2
 mkdir -p "${SERVER_ROOT}/csgo"
 echo "===== boot $(date -Is) =====" >> "${BOOT_LOG}"
 
-RUNLINE="cd '${SERVER_ROOT}' && ./srcds_run -tickrate 128 -game csgo -console -usercon -port ${PORT} +game_type 0 +game_mode 1 +map ${MAP} +rcon_password '${RCON}' -maxplayers ${MAXPLAYERS}"
+RUNLINE="cd '${SERVER_ROOT}' && ./srcds_run -tickrate 128 -game csgo -console -usercon -port ${PORT} +game_type ${GAME_TYPE} +game_mode ${GAME_MODE} +map ${MAP} +rcon_password '${RCON}' -maxplayers ${MAXPLAYERS}"
 if [[ -n "${GSLT}" ]]; then
   RUNLINE+=" +sv_setsteamaccount '${GSLT}'"
 else

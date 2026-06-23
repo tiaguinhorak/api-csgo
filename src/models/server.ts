@@ -14,6 +14,8 @@ export interface GameServer {
   currentMatchId?: string;
   port: number;
   tickrate: number;
+  /** ranked = fila 5v5; warmup = casual público; public = legado */
+  pool?: 'ranked' | 'warmup' | 'public';
 }
 
 export interface CreateServerDTO {
@@ -28,4 +30,5 @@ export interface CreateServerDTO {
   csgoDir: string;
   port?: number;
   tickrate?: number;
+  pool?: 'ranked' | 'warmup' | 'public';
 }

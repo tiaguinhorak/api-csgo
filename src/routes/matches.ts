@@ -90,18 +90,25 @@ router.get('/:id/veto-state', (req: Request, res: Response) => {
 
 router.post('/:id/start', async (req: Request, res: Response) => {
   try {
-    const match = matchManager.getMatch(String(req.params.id));
+    const matchId = String(req.params.id);
+    const match = matchManager.getMatch(matchId);
     if (!match) return res.status(404).json({ error: 'Match not found' });
 
-    const serverId = req.body.serverId || serverManager.getAvailableServer()?.id;
-    if (!serverId) return res.status(400).json({ error: 'No available server' });
+    const preferredId =
+      typeof req.body?.serverId === 'string' ? req.body.serverId : undefined;
 
-    const server = serverManager.getServer(serverId);
-    if (!server) return res.status(404).json({ error: 'Server not found' });
+    const server = serverManager.reserveServerForMatch(matchId, preferredId);
+    if (!server) {
+      return res.status(400).json({ error: 'No available server' });
+    }
 
-    const updatedMatch = await matchManager.startMatch(String(req.params.id), server);
-    serverManager.assignMatch(serverId, match.id);
-    res.json(updatedMatch);
+    try {
+      const updatedMatch = await matchManager.startMatch(matchId, server);
+      res.json(updatedMatch);
+    } catch (startError) {
+      serverManager.releaseServer(server.id);
+      throw startError;
+    }
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }

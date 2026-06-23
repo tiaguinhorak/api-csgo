@@ -110,6 +110,21 @@ export async function processMatchLiveDbChanges(): Promise<void> {
       if (!wasMatchResultForwarded(match.id)) {
         await forwardMatchResultToSite(match, row);
       }
+
+      if (match.status === 'live') {
+        try {
+          const { matchManager } = await import('./match-manager');
+          const { serverManager } = await import('./server-manager');
+          await matchManager.endMatch(match.id);
+          if (match.serverId) {
+            serverManager.releaseServer(match.serverId);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn(`[match-live] auto-release failed: ${message}`);
+        }
+      }
+
       continue;
     }
 
