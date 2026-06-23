@@ -5,7 +5,7 @@
 #   cd ~/api-csgo && git pull
 #   bash scripts/install-csgo-weaponstickers.sh
 #
-# Requer: curl, unzip, unrar ou 7z (para extrair o release .rar)
+# Requer: curl, unzip (+ unrar ou 7z para o release z1ntex .rar)
 
 set -euo pipefail
 
@@ -46,9 +46,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
-WEAPONSTICKERS_RAR_URL="https://github.com/z1ntex/CSGO_WeaponStickers/releases/download/v1.3.6/sm.1.11%2B.WeaponStickers.v1.3.6.rar"
+Z1NTEX_RAR_URL="https://github.com/z1ntex/CSGO_WeaponStickers/releases/download/v1.3.6/sm.1.11%2B.WeaponStickers.v1.3.6.rar"
+QUASEMAGO_ZIP_URL="https://github.com/quasemago/CSGO_WeaponStickers/releases/download/v1.0.13c/weaponstickers_1.0.13c.zip"
 EITEMS_ZIP_URL="https://github.com/quasemago/eItems/releases/download/0.10_noapi/eItems_0.10.No.API.zip"
-PTAH_URL="https://github.com/komashchenko/PTaH/releases/latest/download/PTaH.zip"
+PTAH_LINUX_URL="https://github.com/komashchenko/PTaH/releases/download/v1.1.4/linux.zip"
 
 if [[ ! -d "${SM}/plugins" ]]; then
   echo "SourceMod not found at ${SM}" >&2
@@ -58,6 +59,7 @@ fi
 extract_archive() {
   local file="$1"
   local dest="$2"
+  mkdir -p "${dest}"
   case "${file}" in
     *.zip)
       unzip -qo "${file}" -d "${dest}"
@@ -65,81 +67,132 @@ extract_archive() {
     *.rar)
       if command -v unrar >/dev/null 2>&1; then
         unrar x -o+ "${file}" "${dest}/" >/dev/null
+      elif command -v unrar-free >/dev/null 2>&1; then
+        unrar-free x "${file}" "${dest}/" >/dev/null
       elif command -v 7z >/dev/null 2>&1; then
         7z x -o"${dest}" -y "${file}" >/dev/null
       elif command -v bsdtar >/dev/null 2>&1; then
         bsdtar -xf "${file}" -C "${dest}"
       else
-        echo "ERROR: need unrar, 7z, or bsdtar to extract ${file}" >&2
+        echo "ERROR: need unrar, unrar-free, 7z, or bsdtar for ${file}" >&2
         echo "  Ubuntu: sudo apt install unrar-free   (or p7zip-full)" >&2
-        exit 1
+        return 1
       fi
       ;;
     *)
       echo "Unknown archive: ${file}" >&2
-      exit 1
+      return 1
       ;;
   esac
 }
 
-copy_tree_into_csgo() {
-  local src_root="$1"
-  # Release may be csgo/..., or flat addons/...
-  if [[ -d "${src_root}/csgo" ]]; then
-    cp -a "${src_root}/csgo/." "${CSGO_ROOT}/"
+# Find .../addons/sourcemod/plugins inside an extracted tree and merge into CSGO.
+merge_addons_tree() {
+  local search_root="$1"
+  local merged=0
+
+  while IFS= read -r plugins_dir; do
+    local sm_dir addons_dir
+    sm_dir="$(dirname "${plugins_dir}")"
+    addons_dir="$(dirname "${sm_dir}")"
+    echo "Merging addons from ${addons_dir}"
+    cp -a "${addons_dir}/." "${CSGO_ROOT}/addons/"
+    merged=1
+  done < <(find "${search_root}" -type d -path '*/sourcemod/plugins' 2>/dev/null)
+
+  # Some releases ship csgo/addons/...
+  if [[ -d "${search_root}/csgo/addons" ]]; then
+    echo "Merging csgo/addons from ${search_root}/csgo"
+    cp -a "${search_root}/csgo/addons/." "${CSGO_ROOT}/addons/"
+    merged=1
+  fi
+
+  # Materials for sticker models (z1ntex rar often has csgo/materials)
+  while IFS= read -r materials_dir; do
+    local parent
+    parent="$(dirname "${materials_dir}")"
+    if [[ "$(basename "${parent}")" == "csgo" ]]; then
+      echo "Merging materials from ${materials_dir}"
+      mkdir -p "${CSGO_ROOT}/materials"
+      cp -a "${materials_dir}/." "${CSGO_ROOT}/materials/"
+      merged=1
+    fi
+  done < <(find "${search_root}" -type d -name 'materials' 2>/dev/null)
+
+  if [[ "${merged}" -eq 1 ]]; then
     return 0
   fi
-  if [[ -d "${src_root}/addons" ]]; then
-    cp -a "${src_root}/addons/." "${CSGO_ROOT}/addons/"
-    return 0
-  fi
-  # Search one level down (common zip layout)
-  local sub
-  for sub in "${src_root}"/*; do
-    if [[ -d "${sub}/csgo" ]]; then
-      cp -a "${sub}/csgo/." "${CSGO_ROOT}/"
-      return 0
-    fi
-    if [[ -d "${sub}/addons" ]]; then
-      cp -a "${sub}/addons/." "${CSGO_ROOT}/addons/"
-      return 0
-    fi
-  done
-  echo "WARN: could not find csgo/ or addons/ in extracted archive — copy files manually from ${src_root}"
   return 1
+}
+
+has_weaponstickers_plugin() {
+  [[ -f "${SM}/plugins/csgo_weaponstickers.smx" ]]
+}
+
+has_eitems_plugin() {
+  [[ -f "${SM}/plugins/eItems.smx" || -f "${SM}/plugins/eitems.smx" ]]
+}
+
+has_ptah_extension() {
+  compgen -G "${SM}/extensions/PTaH.ext*.so" >/dev/null 2>&1 \
+    || [[ -f "${SM}/extensions/PTaH.ext.so" ]]
+}
+
+install_weaponstickers_z1ntex() {
+  echo ""
+  echo ">>> Download WeaponStickers v1.3.6 (z1ntex .rar)"
+  if ! curl -fsSL "${Z1NTEX_RAR_URL}" -o "${TMP_DIR}/weaponstickers.rar"; then
+    return 1
+  fi
+  if ! extract_archive "${TMP_DIR}/weaponstickers.rar" "${TMP_DIR}/z1ntex"; then
+    return 1
+  fi
+  merge_addons_tree "${TMP_DIR}/z1ntex"
+}
+
+install_weaponstickers_quasemago() {
+  echo ""
+  echo ">>> Fallback: WeaponStickers v1.0.13c (quasemago .zip)"
+  curl -fsSL "${QUASEMAGO_ZIP_URL}" -o "${TMP_DIR}/weaponstickers.zip"
+  extract_archive "${TMP_DIR}/weaponstickers.zip" "${TMP_DIR}/quasemago"
+  merge_addons_tree "${TMP_DIR}/quasemago"
+}
+
+install_eitems() {
+  echo ""
+  echo ">>> Download eItems 0.10 No API"
+  curl -fsSL "${EITEMS_ZIP_URL}" -o "${TMP_DIR}/eitems.zip"
+  extract_archive "${TMP_DIR}/eitems.zip" "${TMP_DIR}/eitems"
+  merge_addons_tree "${TMP_DIR}/eitems"
+}
+
+install_ptah() {
+  echo ""
+  echo ">>> PTaH extension (linux.zip v1.1.4)"
+  curl -fsSL "${PTAH_LINUX_URL}" -o "${TMP_DIR}/ptah.zip"
+  extract_archive "${TMP_DIR}/ptah.zip" "${TMP_DIR}/ptah"
+  merge_addons_tree "${TMP_DIR}/ptah"
 }
 
 echo "=== CSGO_WeaponStickers installer ==="
 echo "CSGO_ROOT=${CSGO_ROOT}"
 
-echo ""
-echo ">>> Download WeaponStickers v1.3.6 (z1ntex)"
-curl -fsSL "${WEAPONSTICKERS_RAR_URL}" -o "${TMP_DIR}/weaponstickers.rar"
-extract_archive "${TMP_DIR}/weaponstickers.rar" "${TMP_DIR}/stickers"
-copy_tree_into_csgo "${TMP_DIR}/stickers" || true
-
-echo ""
-echo ">>> Download eItems 0.10 No API (if not bundled)"
-if [[ ! -f "${SM}/plugins/eitems.smx" ]]; then
-  curl -fsSL "${EITEMS_ZIP_URL}" -o "${TMP_DIR}/eitems.zip"
-  extract_archive "${TMP_DIR}/eitems.zip" "${TMP_DIR}/eitems"
-  copy_tree_into_csgo "${TMP_DIR}/eitems" || true
-else
-  echo "eitems.smx already present — skip download"
+if ! has_weaponstickers_plugin; then
+  if ! install_weaponstickers_z1ntex; then
+    echo "WARN: z1ntex rar install failed (install unrar-free if needed)"
+  fi
 fi
 
-echo ""
-echo ">>> PTaH extension (required by eItems / stickers)"
-if [[ ! -f "${SM}/extensions/PTaH.ext.so" && ! -f "${SM}/extensions/PTaH.ext.dll" ]]; then
-  curl -fsSL "${PTAH_URL}" -o "${TMP_DIR}/ptah.zip"
-  extract_archive "${TMP_DIR}/ptah.zip" "${TMP_DIR}/ptah"
-  if [[ -d "${TMP_DIR}/ptah/addons" ]]; then
-    cp -a "${TMP_DIR}/ptah/addons/." "${CSGO_ROOT}/addons/"
-  else
-    find "${TMP_DIR}/ptah" -name 'PTaH.ext.*' -exec cp -a {} "${SM}/extensions/" \; 2>/dev/null || true
-  fi
-else
-  echo "PTaH extension already present"
+if ! has_weaponstickers_plugin; then
+  install_weaponstickers_quasemago
+fi
+
+if ! has_eitems_plugin; then
+  install_eitems
+fi
+
+if ! has_ptah_extension; then
+  install_ptah
 fi
 
 echo ""
@@ -213,24 +266,25 @@ STICKERS_DB="${SM}/data/sqlite/csgo_weaponstickers.sq3"
 mkdir -p "$(dirname "${STICKERS_DB}")"
 echo ""
 echo "Stickers DB (plugin reads here): ${STICKERS_DB}"
-echo "api-csgo writes same file when WEAPONS_DB_PATH points to sourcemod-local.sq3 dir"
 
 echo ""
 echo "=== Plugin files ==="
-ls -la "${SM}/plugins/csgo_weaponstickers.smx" 2>/dev/null || ls -la "${SM}/plugins/"*weaponstickers*.smx 2>/dev/null || echo "WARN: csgo_weaponstickers.smx not found — check extract"
-ls -la "${SM}/plugins/eitems.smx" 2>/dev/null || echo "WARN: eitems.smx not found"
+ls -la "${SM}/plugins/csgo_weaponstickers.smx" 2>/dev/null \
+  || echo "ERROR: csgo_weaponstickers.smx missing — check unrar: sudo apt install unrar-free"
+ls -la "${SM}/plugins/eItems.smx" "${SM}/plugins/eitems.smx" 2>/dev/null \
+  || echo "WARN: eItems.smx missing"
+ls -la "${SM}/extensions/PTaH.ext"*.so 2>/dev/null \
+  || echo "WARN: PTaH extension missing"
+
+if ! has_weaponstickers_plugin || ! has_eitems_plugin; then
+  echo ""
+  echo "ERROR: install incomplete — fix errors above and re-run." >&2
+  exit 1
+fi
 
 echo ""
 echo "=== Done ==="
-echo "Restart srcds OR in screen:"
-echo "  sm plugins load eitems"
+echo "In screen:"
+echo "  sm plugins load eItems"
 echo "  sm plugins load csgo_weaponstickers"
-echo ""
-echo "Verify:"
 echo "  sm plugins list | grep -iE 'eitems|weaponstickers'"
-echo ""
-echo "api-csgo: git pull && npm run build && npm run pm2:restart"
-echo "Test route:"
-echo "  curl -s -X POST http://127.0.0.1:\${PORT:-3000}/api/csgo/stickers/player-sync \\"
-echo "    -H 'x-skins-sync-key: \$CSGO_SKINS_SYNC_KEY' -H 'Content-Type: application/json' \\"
-echo "    -d '{\"steamId\":\"STEAM_1:0:0\",\"entries\":[]}'"
