@@ -76,6 +76,8 @@ fi
 chmod +x "${SCRIPT_DIR}/install-clutch-skins-bridge.sh" 2>/dev/null || true
 chmod +x "${SCRIPT_DIR}/verify-clutch-skins-bridge.sh" 2>/dev/null || true
 chmod +x "${SCRIPT_DIR}/diagnose-steam-and-skins.sh" 2>/dev/null || true
+chmod +x "${SCRIPT_DIR}/sync-weapons-cfg-from-site.sh" 2>/dev/null || true
+chmod +x "${SCRIPT_DIR}/ensure-clutch-server-branding.sh" 2>/dev/null || true
 
 echo "Copying source..."
 cp -f "${SP_SRC}" "${SM}/scripting/clutch_skins_bridge.sp"

@@ -118,6 +118,12 @@ else
   echo "Skip (no CSGO_SKINS_SYNC_KEY)"
 fi
 
+echo ""
+echo ">>> server branding (host_url / MOTD)"
+bash "${REPO_ROOT}/scripts/ensure-clutch-server-branding.sh" || {
+  echo "WARN: server branding script failed" >&2
+}
+
 if [[ "${SKIP_PLUGIN}" -eq 0 ]]; then
   echo ""
   echo ">>> install clutch_skins_bridge plugin"

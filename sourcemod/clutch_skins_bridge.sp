@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.4"
+#define PLUGIN_VERSION "3.7.5"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -445,6 +445,14 @@ bool ClutchIsManualSkinChatCommand(const char[] msg) {
     return ClutchIsBlockedWsChatToken(token);
 }
 
+void ClutchStripSurroundingQuotes(char[] msg, int maxlen) {
+    int len = strlen(msg);
+    if (len >= 2 && msg[0] == '"' && msg[len - 1] == '"') {
+        msg[len - 1] = '\0';
+        strcopy(msg, maxlen, msg[1]);
+    }
+}
+
 public Action ClutchBlockWsChatForPlayers(int client, const char[] command, int argc) {
     if (client <= 0 || IsFakeClient(client)) {
         return Plugin_Continue;
@@ -453,7 +461,7 @@ public Action ClutchBlockWsChatForPlayers(int client, const char[] command, int 
     char msg[256];
     GetCmdArgString(msg, sizeof(msg));
     TrimString(msg);
-    RemoveQuotes(msg);
+    ClutchStripSurroundingQuotes(msg, sizeof(msg));
 
     if (!ClutchIsManualSkinChatCommand(msg)) {
         return Plugin_Continue;
