@@ -65,6 +65,11 @@ fi
 echo "stickers probe: ${STICKER_PROBE}"
 
 if echo "${PROBE}" | grep -q '"gloves"' && echo "${STICKER_PROBE}" | grep -q '"ok"'; then
+  if echo "${PROBE}" | grep -q '"skippedCs2":0'; then
+    echo "OK: player-sync does not strip web loadouts (skippedCs2=0)."
+  else
+    echo "WARN: skippedCs2 != 0 on empty payload — old api may still filter weapons." >&2
+  fi
   if echo "${HEALTH}" | grep -q 'stickersPlayerSync'; then
     echo "OK: running build matches dist (skins + stickers + health)."
   else
