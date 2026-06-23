@@ -20,7 +20,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.7.1"
+#define PLUGIN_VERSION "3.7.2"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -1155,18 +1155,35 @@ void ApplyAllCachedWeaponsToClient(int client, bool force) {
     CS_UpdateClientModel(client);
 }
 
-void ScheduleForceReapply(int client, bool force) {
+void ScheduleWeaponsAfterGlovesApply(int client, bool force) {
     if (!IsClientInGame(client) || IsFakeClient(client)) {
         return;
     }
 
-    if (force && ClutchClientHasGlovesLoaded(client)) {
-        if (g_cvDebug.BoolValue) {
-            LogMessage(
-                "[Clutch] Skipping knife force-reapply passes (gloves active) for %N",
-                client
-            );
-        }
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteCell(force ? 1 : 0);
+    CreateTimer(FORCE_WEAPONS_AFTER_GLOVES_DELAY, Timer_ApplyCachedWeaponsDelayed, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    bool force = pack.ReadCell() == 1;
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return Plugin_Stop;
+    }
+
+    ApplyAllCachedWeaponsToClient(client, force);
+    ScheduleForceReapply(client, force);
+    return Plugin_Stop;
+}
+
+void ScheduleForceReapply(int client, bool force) {
+    if (!IsClientInGame(client) || IsFakeClient(client)) {
         return;
     }
 
@@ -1342,12 +1359,24 @@ public void T_TeamLoadoutCallback(Database database, DBResultSet results, const 
 
     bool hadRows = ApplyTeamLoadoutFromResults(client, results, force);
     if (!hadRows) {
+        if (altAttempt == 0) {
+            char altSteam[32];
+            strcopy(altSteam, sizeof(altSteam), steamId);
+            if (altSteam[6] == '1') {
+                altSteam[6] = '0';
+            } else if (altSteam[6] == '0') {
+                altSteam[6] = '1';
+            }
+            QueryTeamLoadout(client, altSteam, 1, force);
+            return;
+        }
         QueryKgnsLoadout(client, steamId, altAttempt, force);
         return;
     }
 
     g_bLoggedMissingLoadout[client] = false;
     QueryPlayerGloves(client, steamId, 0);
+    ScheduleWeaponsAfterGlovesApply(client, force);
 }
 
 bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
