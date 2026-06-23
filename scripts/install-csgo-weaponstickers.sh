@@ -141,13 +141,29 @@ has_ptah_extension() {
 install_weaponstickers_z1ntex() {
   echo ""
   echo ">>> Download WeaponStickers v1.3.6 (z1ntex .rar)"
+  local extract_dir="${TMP_DIR}/z1ntex-clean"
+  rm -rf "${extract_dir}"
+  mkdir -p "${extract_dir}"
   if ! curl -fsSL "${Z1NTEX_RAR_URL}" -o "${TMP_DIR}/weaponstickers.rar"; then
     return 1
   fi
-  if ! extract_archive "${TMP_DIR}/weaponstickers.rar" "${TMP_DIR}/z1ntex"; then
+  if command -v 7z >/dev/null 2>&1; then
+    if ! 7z x -o"${extract_dir}" -y "${TMP_DIR}/weaponstickers.rar" >/dev/null; then
+      return 1
+    fi
+  elif command -v unrar >/dev/null 2>&1; then
+    if ! unrar x -o+ "${TMP_DIR}/weaponstickers.rar" "${extract_dir}/" >/dev/null; then
+      return 1
+    fi
+  elif command -v unrar-free >/dev/null 2>&1; then
+    if ! unrar-free x "${TMP_DIR}/weaponstickers.rar" "${extract_dir}/" >/dev/null; then
+      return 1
+    fi
+  else
+    echo "WARN: no unrar/7z — skipping z1ntex rar (quasemago zip fallback will run)"
     return 1
   fi
-  merge_addons_tree "${TMP_DIR}/z1ntex"
+  merge_addons_tree "${extract_dir}"
 }
 
 install_weaponstickers_quasemago() {
