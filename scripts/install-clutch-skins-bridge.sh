@@ -9,6 +9,37 @@ set -euo pipefail
 #   (ou: bash scripts/install-clutch-skins-bridge.sh)
 
 CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
+
+detect_live_csgo_root() {
+  local pid cwd exe dir
+  pid="$(pgrep -n -x srcds_linux 2>/dev/null || pgrep -n -f 'srcds_linux.*csgo' 2>/dev/null || true)"
+  if [[ -z "${pid}" ]]; then
+    return 1
+  fi
+  cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)"
+  if [[ -n "${cwd}" && -d "${cwd}/addons/sourcemod/plugins" ]]; then
+    echo "${cwd}"
+    return 0
+  fi
+  exe="$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)"
+  dir="$(dirname "${exe}")"
+  if [[ -d "${dir}/csgo/addons/sourcemod/plugins" ]]; then
+    echo "${dir}/csgo"
+    return 0
+  fi
+  if [[ -d "${dir}/addons/sourcemod/plugins" ]]; then
+    echo "${dir}"
+    return 0
+  fi
+  return 1
+}
+
+LIVE_ROOT="$(detect_live_csgo_root || true)"
+if [[ -n "${LIVE_ROOT}" && "${LIVE_ROOT}" != "${CSGO_ROOT}" ]]; then
+  echo "srcds is running from ${LIVE_ROOT} (not default ${CSGO_ROOT}) — installing there."
+  CSGO_ROOT="${LIVE_ROOT}"
+fi
+
 SM="${CSGO_ROOT}/addons/sourcemod"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -92,30 +123,6 @@ fi
 # Load after weapons.smx (alphabetical: z_ > weapons)
 rm -f "${SM}/plugins/${LEGACY_SMX}"
 
-detect_live_csgo_root() {
-  local pid cwd exe dir
-  pid="$(pgrep -n -x srcds_linux 2>/dev/null || pgrep -n -f 'srcds_linux.*csgo' 2>/dev/null || true)"
-  if [[ -z "${pid}" ]]; then
-    return 1
-  fi
-  cwd="$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)"
-  if [[ -n "${cwd}" && -d "${cwd}/addons/sourcemod/plugins" ]]; then
-    echo "${cwd}"
-    return 0
-  fi
-  exe="$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)"
-  dir="$(dirname "${exe}")"
-  if [[ -d "${dir}/csgo/addons/sourcemod/plugins" ]]; then
-    echo "${dir}/csgo"
-    return 0
-  fi
-  if [[ -d "${dir}/addons/sourcemod/plugins" ]]; then
-    echo "${dir}"
-    return 0
-  fi
-  return 1
-}
-
 mkdir -p "${CSGO_ROOT}/cfg/sourcemod"
 cp -f "${CFG_SRC}" "${CSGO_ROOT}/cfg/sourcemod/clutch_skins_bridge.cfg"
 if [[ -f "${GLOVES_CFG_SRC}" ]]; then
@@ -194,24 +201,25 @@ if [[ -n "${LIVE_ROOT}" ]]; then
   echo ""
   echo "Running srcds game dir: ${LIVE_ROOT}"
   if [[ "${LIVE_ROOT}" != "${CSGO_ROOT}" ]]; then
-    echo "WARNING: plugin installed to ${CSGO_ROOT} but srcds uses ${LIVE_ROOT}"
-    echo "  Re-run: CSGO_ROOT=${LIVE_ROOT} bash scripts/install-clutch-skins-bridge.sh"
+    echo "ERROR: installed to ${CSGO_ROOT} but srcds uses ${LIVE_ROOT}" >&2
+    echo "  Re-run: CSGO_ROOT=${LIVE_ROOT} bash scripts/install-clutch-skins-bridge.sh" >&2
+    exit 1
   elif [[ -f "${LIVE_SM}/plugins/${PLUGIN_SMX}" ]]; then
     if command -v md5sum >/dev/null 2>&1; then
       echo "Live plugins dir hash:"
-      md5sum "${LIVE_SM}/plugins/${PLUGIN_SMX}"
+      md5sum "${LIVE_SM}/plugins/${GLOVES_SMX}" "${LIVE_SM}/plugins/${PLUGIN_SMX}"
     fi
   fi
 else
   echo "TIP: srcds not running — could not auto-detect live game directory."
 fi
 
-GLOVES_SMX="${SM}/plugins/gloves.smx"
+KGNS_GLOVES_SMX="${SM}/plugins/gloves.smx"
 GLOVES_DISABLED_DIR="${SM}/plugins/disabled"
 mkdir -p "${GLOVES_DISABLED_DIR}"
-if [[ -f "${GLOVES_SMX}" ]]; then
-  mv -f "${GLOVES_SMX}" "${GLOVES_DISABLED_DIR}/gloves.smx"
-  echo "Disabled kgns gloves.smx → plugins/disabled/gloves.smx (avoids double gloves; bridge applies from site DB)."
+if [[ -f "${KGNS_GLOVES_SMX}" ]]; then
+  mv -f "${KGNS_GLOVES_SMX}" "${GLOVES_DISABLED_DIR}/gloves.smx"
+  echo "Disabled kgns gloves.smx → plugins/disabled/gloves.smx (avoids double gloves)."
 elif [[ -f "${GLOVES_DISABLED_DIR}/gloves.smx" ]]; then
   echo "kgns gloves.smx already in plugins/disabled/."
 else
@@ -236,8 +244,9 @@ echo "Recarregar no CS:"
 echo "  ./scripts/reload-clutch-skins-ingame.sh"
 echo ""
 echo "Ou manualmente (dentro de screen -r) — um comando por linha:"
-echo "  sm plugins unload z_clutch_skins_bridge"
+echo "  sm plugins load z_clutch_gloves"
 echo "  sm plugins load z_clutch_skins_bridge"
+echo "  sm plugins info z_clutch_gloves"
 echo "  sm plugins info z_clutch_skins_bridge"
 echo "  clutch_skins_debug 1"
 echo "  sm_reloadclutchskins"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Recarrega plugin v3 (DB-only) no srcds via screen.
+# Recarrega plugins Clutch no srcds via screen.
 #
 # Uso na VPS:
 #   ./scripts/reload-clutch-skins-ingame.sh
@@ -16,7 +16,8 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-EXPECTED_VERSION="$(grep -E '#define PLUGIN_VERSION' "${REPO_ROOT}/sourcemod/clutch_skins_bridge.sp" | sed 's/.*"\(.*\)".*/\1/')"
+EXPECTED_BRIDGE_VERSION="$(grep -E '#define PLUGIN_VERSION' "${REPO_ROOT}/sourcemod/clutch_skins_bridge.sp" | sed 's/.*"\(.*\)".*/\1/')"
+EXPECTED_GLOVES_VERSION="$(grep -E '#define PLUGIN_VERSION' "${REPO_ROOT}/sourcemod/z_clutch_gloves.sp" | sed 's/.*"\(.*\)".*/\1/')"
 
 resolve_screen_session() {
   local preferred="${CLUTCH_CS_SCREEN:-csgo-clutch-#1}"
@@ -54,11 +55,10 @@ if [[ -z "${FULL_SCREEN}" ]]; then
   echo "" >&2
   echo "Or attach manually and run one command per line:" >&2
   echo "  screen -r csgo-clutch-#1" >&2
-  echo "  sm plugins reload z_clutch_gloves" >&2
-  echo "  sm plugins reload z_clutch_skins_bridge" >&2
+  echo "  sm plugins load z_clutch_gloves" >&2
+  echo "  sm plugins load z_clutch_skins_bridge" >&2
+  echo "  sm plugins info z_clutch_gloves" >&2
   echo "  sm plugins info z_clutch_skins_bridge" >&2
-  echo "  clutch_skins_debug 1" >&2
-  echo "  sm_clutch_applyskins" >&2
   exit 1
 fi
 
@@ -71,11 +71,18 @@ send_cmd() {
   sleep 0.4
 }
 
+# reload fails when plugin was never loaded; load picks up new .smx from plugins/
+send_plugin() {
+  local name="$1"
+  send_cmd "sm plugins reload ${name}"
+  send_cmd "sm plugins load ${name}"
+}
+
 send_cmd "sm plugins reload weapons"
 send_cmd "sm plugins info weapons"
-send_cmd "sm plugins reload z_clutch_gloves"
+send_plugin "z_clutch_gloves"
 send_cmd "sm plugins info z_clutch_gloves"
-send_cmd "sm plugins reload z_clutch_skins_bridge"
+send_plugin "z_clutch_skins_bridge"
 send_cmd "sm plugins info z_clutch_skins_bridge"
 send_cmd "clutch_gloves_debug 1"
 send_cmd "clutch_skins_debug 1"
@@ -83,7 +90,11 @@ send_cmd "sm_reloadclutchskins"
 send_cmd "sm_clutch_applyskins"
 
 echo ""
-echo "Done. Expect z_clutch_gloves + z_clutch_skins_bridge Version: ${EXPECTED_VERSION}"
-echo "3.6.0: gloves only in z_clutch_gloves (kgns-exact). Bridge = weapons/knife only."
-echo "If weapons reload failed, change map (sm_map de_dust2) then re-run this script."
-echo "Respawn in-game after apply. New errors: tail addons/sourcemod/logs/errors_*.log"
+echo "Done. Expect z_clutch_gloves Version: ${EXPECTED_GLOVES_VERSION}"
+echo "       z_clutch_skins_bridge Version: ${EXPECTED_BRIDGE_VERSION}"
+echo ""
+echo "If still 'not loaded', run install first:"
+echo "  ./scripts/install-clutch-skins-bridge.sh"
+echo "Then re-run this script or: sm plugins load z_clutch_gloves / z_clutch_skins_bridge"
+echo "If load fails, check: ./scripts/verify-clutch-skins-bridge.sh"
+echo "Respawn in-game after apply."
