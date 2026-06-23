@@ -3,6 +3,8 @@ import { matchManager } from '../services/match-manager';
 import { serverManager } from '../services/server-manager';
 import { rconService } from '../services/rcon';
 import { resolveRconPort } from '../utils/rcon-port';
+import { readMatchLive } from '../services/match-live-db';
+import { notifyMatchLiveFromWebhook } from '../services/match-live-watcher';
 
 const router = Router();
 
@@ -21,6 +23,32 @@ router.get('/', (req: Request, res: Response) => {
     ? matchManager.listMatches(status as any)
     : matchManager.listMatches();
   res.json(matches);
+});
+
+router.get('/:id/live', (req: Request, res: Response) => {
+  const matchId = String(req.params.id);
+  const match = matchManager.getMatch(matchId);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+
+  const live = readMatchLive(matchId);
+
+  res.json({
+    matchId,
+    status: match.status,
+    live: live
+      ? {
+          scoreTeamA: live.scoreTeamA,
+          scoreTeamB: live.scoreTeamB,
+          scoreCt: live.scoreCt,
+          scoreT: live.scoreT,
+          round: live.roundNum,
+          phase: live.phase,
+          winner: live.winner,
+          finishedAt: live.finishedAt,
+          updatedAt: live.updatedAt,
+        }
+      : null,
+  });
 });
 
 router.get('/:id', (req: Request, res: Response) => {
@@ -109,6 +137,15 @@ router.post('/:id/unpause', async (req: Request, res: Response) => {
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }
+});
+
+router.post('/:id/game-event', (req: Request, res: Response) => {
+  const matchId = String(req.params.id);
+  const match = matchManager.getMatch(matchId);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+
+  notifyMatchLiveFromWebhook(matchId);
+  res.json({ ok: true });
 });
 
 router.post('/:id/end', async (req: Request, res: Response) => {

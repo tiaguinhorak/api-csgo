@@ -4,6 +4,7 @@ import { GameServer } from '../models/server';
 import { config } from '../config';
 import { v4 as uuidv4 } from 'uuid';
 import { rconService } from './rcon';
+import { serverManager } from './server-manager';
 import { stateStore } from './state-store';
 import { resolveRconPort } from '../utils/rcon-port';
 
@@ -174,8 +175,27 @@ class MatchManager {
 
     await rconService.changeMap(server.host, rconPort, server.rconPassword, match.selectedMap);
 
+    const teamAPipe = match.teamA.players.map((p) => p.steamId).join('|');
+    const teamBPipe = match.teamB.players.map((p) => p.steamId).join('|');
+
     setTimeout(async () => {
-      try { await rconService.startMatch(server.host, rconPort, server.rconPassword); } catch {}
+      try {
+        await rconService.beginMatchTracker(
+          server.host,
+          rconPort,
+          server.rconPassword,
+          matchId,
+          match.config.maxRounds,
+        );
+        await rconService.setMatchTrackerRoster(
+          server.host,
+          rconPort,
+          server.rconPassword,
+          teamAPipe,
+          teamBPipe,
+        );
+        await rconService.startMatch(server.host, rconPort, server.rconPassword);
+      } catch {}
     }, 15000);
 
     stateStore.persist();
@@ -185,6 +205,21 @@ class MatchManager {
   async endMatch(matchId: string): Promise<Match> {
     const match = this.matches.get(matchId);
     if (!match) throw new Error('Match not found');
+
+    if (match.serverId) {
+      const server = serverManager.getServer(match.serverId);
+      if (server) {
+        const rconPort = resolveRconPort(server);
+        try {
+          await rconService.clearMatchTracker(
+            server.host,
+            rconPort,
+            server.rconPassword,
+          );
+        } catch {}
+      }
+    }
+
     match.status = 'finished';
     stateStore.persist();
     return match;

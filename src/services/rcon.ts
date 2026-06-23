@@ -78,6 +78,40 @@ export class RconService {
     return this.sendCommand(host, port, password, 'mp_unpause_match');
   }
 
+  async clearMatchTracker(host: string, port: number, password: string): Promise<string> {
+    return this.sendCommand(host, port, password, 'clutch_match_clear');
+  }
+
+  async beginMatchTracker(
+    host: string,
+    port: number,
+    password: string,
+    matchId: string,
+    maxRounds: number,
+  ): Promise<string> {
+    return this.sendCommand(
+      host,
+      port,
+      password,
+      `clutch_match_begin ${matchId} ${maxRounds}`,
+    );
+  }
+
+  async setMatchTrackerRoster(
+    host: string,
+    port: number,
+    password: string,
+    teamASteamPipe: string,
+    teamBSteamPipe: string,
+  ): Promise<string> {
+    return this.sendCommand(
+      host,
+      port,
+      password,
+      `clutch_match_roster ${teamASteamPipe} ${teamBSteamPipe}`,
+    );
+  }
+
   async getStatus(host: string, port: number, password: string): Promise<string> {
     return this.sendCommand(host, port, password, 'status');
   }
