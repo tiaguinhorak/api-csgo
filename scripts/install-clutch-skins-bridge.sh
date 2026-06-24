@@ -218,6 +218,12 @@ else
   echo "  \"FollowCSGOServerGuidelines\" \"no\""
 fi
 
+echo ""
+echo ">>> databases.cfg — csgo_weaponstickers (bridge sticker re-apply)"
+# shellcheck source=scripts/lib/ensure-stickers-databases-cfg.sh
+source "${REPO_ROOT}/scripts/lib/ensure-stickers-databases-cfg.sh"
+ensure_stickers_databases_cfg "${SM}" || true
+
 WEAPONS_SP="${SM}/scripting/weapons.sp"
 if [[ -f "${WEAPONS_SP}" ]]; then
   echo ""

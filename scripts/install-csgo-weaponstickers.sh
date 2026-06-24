@@ -475,23 +475,13 @@ fi
 echo ""
 echo ">>> databases.cfg — csgo_weaponstickers SQLite"
 DB_CFG="${SM}/configs/databases.cfg"
-if [[ -f "${DB_CFG}" ]]; then
-  if grep -q '"csgo_weaponstickers"' "${DB_CFG}"; then
-    echo "csgo_weaponstickers entry already in databases.cfg"
-  else
-    cat >> "${DB_CFG}" <<'EOF'
-
-"csgo_weaponstickers"
-{
-	"driver"		"sqlite"
-	"database"		"csgo_weaponstickers"
-}
-EOF
-    echo "Added csgo_weaponstickers block to databases.cfg"
+# shellcheck source=scripts/lib/ensure-stickers-databases-cfg.sh
+source "${REPO_ROOT}/scripts/lib/ensure-stickers-databases-cfg.sh"
+ensure_stickers_databases_cfg "${SM}" || {
+  if [[ ! -f "${DB_CFG}" ]]; then
+    echo "WARN: ${DB_CFG} not found — add csgo_weaponstickers SQLite block manually"
   fi
-else
-  echo "WARN: ${DB_CFG} not found — add csgo_weaponstickers SQLite block manually"
-fi
+}
 
 echo ""
 echo ">>> core.cfg — FollowCSGOServerGuidelines"

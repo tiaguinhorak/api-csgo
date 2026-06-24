@@ -5,6 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 #include <clutch_steam>
+#include <sqlite>
 
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
@@ -23,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.8"
+#define PLUGIN_VERSION "3.8.9"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -41,6 +42,7 @@ ConVar g_cvWeaponsDb;
 ConVar g_cvWeaponsTablePrefix;
 ConVar g_cvStickersDb;
 ConVar g_cvStickersTablePrefix;
+ConVar g_cvStickersDbPath;
 ConVar g_cvRefreshSeconds;
 ConVar g_cvGlovesWorldModel;
 ConVar g_cvDeferLive;
@@ -176,6 +178,12 @@ public void OnPluginStart() {
         "clutch_stickers_table_prefix",
         "",
         "Table prefix for weaponstickers plugin (weaponstickers1)",
+        FCVAR_NOTIFY
+    );
+    g_cvStickersDbPath = CreateConVar(
+        "clutch_stickers_db_path",
+        "",
+        "Direct path to csgo_weaponstickers.sq3 (fallback if databases.cfg missing)",
         FCVAR_NOTIFY
     );
     g_cvRefreshSeconds = CreateConVar(
@@ -465,7 +473,11 @@ void ConnectStickersDatabase() {
 
 public void StickersDatabaseConnected(Database database, const char[] error, any data) {
     if (database == null) {
-        LogError("[Clutch] stickers DB connect failed: %s", error);
+        LogMessage(
+            "[Clutch] stickers DB via databases.cfg failed: %s — trying direct SQLite path",
+            error
+        );
+        ConnectStickersDatabaseDirect();
         return;
     }
 
@@ -473,6 +485,34 @@ public void StickersDatabaseConnected(Database database, const char[] error, any
 
     if (g_cvDebug.BoolValue) {
         LogMessage("[Clutch] Connected to stickers database table %s", g_sStickersTable);
+    }
+}
+
+void ConnectStickersDatabaseDirect() {
+    if (g_hStickersDb != null) {
+        delete g_hStickersDb;
+        g_hStickersDb = null;
+    }
+
+    char path[PLATFORM_MAX_PATH];
+    g_cvStickersDbPath.GetString(path, sizeof(path));
+    if (path[0] == '\0') {
+        BuildPath(Path_SM, path, sizeof(path), "data/sqlite/csgo_weaponstickers.sq3");
+    }
+
+    char openError[256];
+    Database database = SQLite_OpenDatabase(path, DBOpen_ReadWrite, openError, sizeof(openError));
+    if (database == null) {
+        LogError("[Clutch] stickers direct SQLite open failed: %s (%s)", openError, path);
+        return;
+    }
+
+    g_hStickersDb = database;
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Connected to stickers SQLite file %s (table %s)", path, g_sStickersTable);
+    } else {
+        LogMessage("[Clutch] Connected to stickers SQLite file %s", path);
     }
 }
 
@@ -594,11 +634,11 @@ bool ClutchIsLiveMatch() {
         return false;
     }
 
-    if (GameRules_GetProp("m_bWarmupPeriod", Prop_Send)) {
+    if (GameRules_GetProp("m_bWarmupPeriod", view_as<int>(Prop_Send))) {
         return false;
     }
 
-    int rounds = GameRules_GetProp("m_totalRoundsPlayed", Prop_Send);
+    int rounds = GameRules_GetProp("m_totalRoundsPlayed", view_as<int>(Prop_Send));
     if (rounds > 0) {
         return true;
     }

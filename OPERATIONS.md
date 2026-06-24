@@ -235,6 +235,8 @@ bash scripts/install-clutch-skins-bridge.sh
 sm plugins reload z_clutch_skins_bridge
 ```
 
+O instalador do bridge adiciona `csgo_weaponstickers` em `addons/sourcemod/configs/databases.cfg` se faltar. Se ainda falhar, v3.8.9+ abre `data/sqlite/csgo_weaponstickers.sq3` direto.
+
 **Teste in-game:** stickers só em **armas de fogo** (não faca). Equipe AK com stickers, pegue a AK, inspecione com **F**. Com `clutch_skins_debug 1` no console: log `[Clutch] Applied stickers on weapon_ak47`.
 
 Verificar DB (AK = `weaponindex` 7):
