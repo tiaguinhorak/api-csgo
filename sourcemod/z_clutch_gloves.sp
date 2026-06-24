@@ -7,7 +7,7 @@
 #include <sdkhooks>
 #include <clutch_steam>
 
-#define PLUGIN_VERSION "1.4.0"
+#define PLUGIN_VERSION "1.4.1"
 #define GLOVE_THINK_TICK_MOD 8
 
 ConVar g_cvDb;
@@ -380,7 +380,11 @@ public void OnQueryGloves(Database database, DBResultSet results, const char[] e
             g_iPaint[client][CS_TEAM_CT]
         );
     }
-    LogMessage("[ClutchGloves] Cache updated for %N — visual apply on next spawn", client);
+    if (IsPlayerAlive(client)) {
+        GivePlayerGloves(client);
+    } else {
+        LogMessage("[ClutchGloves] Cache updated for %N — visual apply on next spawn", client);
+    }
 }
 
 void LoadGloveRow(int client, DBResultSet results) {

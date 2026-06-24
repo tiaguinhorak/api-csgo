@@ -84,7 +84,8 @@ send_plugin() {
 send_cmd "sm plugins reload weapons" 1.2
 send_cmd "sm plugins info weapons" 0.5
 send_cmd "sm plugins unload z_clutch_skins_bridge" 0.8
-send_plugin "z_clutch_gloves"
+send_cmd "sm plugins unload z_clutch_gloves" 0.5
+send_cmd "sm plugins load z_clutch_gloves" 1.0
 send_cmd "sm plugins info z_clutch_gloves" 0.5
 send_cmd "sm plugins load z_clutch_skins_bridge" 1.0
 send_cmd "sm plugins reload z_clutch_skins_bridge" 1.0
@@ -100,7 +101,8 @@ send_cmd "clutch_skins_debug 1" 0.3
 
 if [[ "${WARMUP_VPS:-0}" == "1" ]]; then
   echo "Warmup: applying skins after plugin reload..."
-  send_cmd "sm_clutch_gloves_refresh" 0.8
+  send_cmd "sm_clutch_gloves_refresh" 1.0
+  send_cmd "sm_clutch_gloves_apply" 0.8
   send_cmd "sm_clutch_applyskins" 2.0
 fi
 

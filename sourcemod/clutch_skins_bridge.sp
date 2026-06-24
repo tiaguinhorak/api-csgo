@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.1"
+#define PLUGIN_VERSION "3.8.2"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -114,6 +114,19 @@ public Plugin myinfo = {
     url = "https://clutchclube.com"
 };
 
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
+#if defined _weapons_included_
+    MarkNativeAsOptional("Weapons_ReloadClientData");
+    MarkNativeAsOptional("Weapons_RefreshWeapon");
+#endif
+#if defined _clutch_gloves_included_
+    MarkNativeAsOptional("ClutchGloves_RefreshClient");
+    MarkNativeAsOptional("ClutchGloves_ApplyClient");
+    MarkNativeAsOptional("ClutchGloves_IsClientUsingGloves");
+#endif
+    return APLRes_Success;
+}
+
 public void OnPluginStart() {
     g_cvDebug = CreateConVar(
         "clutch_skins_debug",
@@ -189,17 +202,13 @@ public void OnPluginStart() {
     PTaH(PTaH_GiveNamedItemPre, Hook, Clutch_GiveNamedItemPre);
     PTaH(PTaH_GiveNamedItemPost, Hook, Clutch_GiveNamedItemPost);
 
-#if defined _weapons_included_
-    MarkNativeAsOptional("Weapons_ReloadClientData");
-    MarkNativeAsOptional("Weapons_RefreshWeapon");
-#endif
-#if defined _clutch_gloves_included_
-    MarkNativeAsOptional("ClutchGloves_RefreshClient");
-    MarkNativeAsOptional("ClutchGloves_ApplyClient");
-    MarkNativeAsOptional("ClutchGloves_IsClientUsingGloves");
-#endif
-
     UpdateRefreshTimer();
+#if defined _clutch_gloves_included_
+    RefreshGlovesNativeFlag();
+#endif
+#if defined _weapons_included_
+    RefreshWeaponsReloadNativeFlag();
+#endif
     CreateTimer(1.0, Timer_RecheckPluginNatives, _, TIMER_FLAG_NO_MAPCHANGE);
     CreateTimer(3.0, Timer_RecheckPluginNatives, _, TIMER_FLAG_NO_MAPCHANGE);
 }
@@ -304,12 +313,13 @@ void ClutchGlovesApplyClientSafe(int client) {
 }
 
 void ClutchGlovesRefreshClientSafe(int client) {
+    RefreshGlovesNativeFlag();
     if (g_bGlovesNativeReady) {
         ClutchGloves_RefreshClient(client);
     } else if (!g_bLoggedGlovesNativeMissing) {
         g_bLoggedGlovesNativeMissing = true;
         LogError(
-            "[Clutch] z_clutch_gloves not ready — run: sm plugins unload z_clutch_skins_bridge; sm plugins load z_clutch_gloves; sm plugins load z_clutch_skins_bridge"
+            "[Clutch] z_clutch_gloves not ready — run: sm plugins unload z_clutch_skins_bridge; sm plugins unload z_clutch_gloves; sm plugins load z_clutch_gloves; sm plugins load z_clutch_skins_bridge"
         );
     }
 }
