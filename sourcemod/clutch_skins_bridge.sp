@@ -23,7 +23,8 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.16"
+#define PLUGIN_VERSION "3.8.17"
+#define CLUTCH_SITE_STICKER_SLOTS 5
 #define STICKER_REAPPLY_PASS_COUNT 3
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
@@ -146,6 +147,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
     MarkNativeAsOptional("ClutchGloves_ApplyClient");
     MarkNativeAsOptional("ClutchGloves_IsClientUsingGloves");
 #endif
+    MarkNativeAsOptional("PTaH_GetItemDefinitionByDefIndex");
     return APLRes_Success;
 }
 
@@ -504,12 +506,15 @@ void ConnectStickersDatabaseDirect() {
         g_hStickersDb = null;
     }
 
-    char dbName[64];
-    g_cvStickersDb.GetString(dbName, sizeof(dbName));
+    char dbPath[PLATFORM_MAX_PATH];
+    g_cvStickersDbPath.GetString(dbPath, sizeof(dbPath));
+    if (dbPath[0] == '\0') {
+        BuildPath(Path_SM, dbPath, sizeof(dbPath), "data/sqlite/csgo_weaponstickers.sq3");
+    }
 
     KeyValues kv = new KeyValues("driver");
     kv.SetString("driver", "sqlite");
-    kv.SetString("database", dbName);
+    kv.SetString("database", dbPath);
 
     char openError[256];
     Database database = SQL_ConnectCustom(kv, openError, sizeof(openError), true);
@@ -517,9 +522,9 @@ void ConnectStickersDatabaseDirect() {
 
     if (database == null) {
         LogError(
-            "[Clutch] stickers SQL_ConnectCustom failed: %s (db=%s)",
+            "[Clutch] stickers SQL_ConnectCustom failed: %s (path=%s)",
             openError,
-            dbName
+            dbPath
         );
         return;
     }
@@ -529,11 +534,11 @@ void ConnectStickersDatabaseDirect() {
     if (g_cvDebug.BoolValue) {
         LogMessage(
             "[Clutch] Connected to stickers SQLite via SQL_ConnectCustom (%s, table %s)",
-            dbName,
+            dbPath,
             g_sStickersTable
         );
     } else {
-        LogMessage("[Clutch] Connected to stickers SQLite via SQL_ConnectCustom (%s)", dbName);
+        LogMessage("[Clutch] Connected to stickers SQLite via SQL_ConnectCustom (%s)", dbPath);
     }
 
     EnsureClutchStickersTable();
@@ -1641,8 +1646,11 @@ void SetClutchWeaponProps(
         return;
     }
 
-    SetEntProp(weapon, Prop_Send, "m_iItemIDLow", -1);
-    SetEntProp(weapon, Prop_Send, "m_iItemIDHigh", g_iItemIdHigh++);
+    bool freshItem = GetEntProp(weapon, Prop_Send, "m_iItemIDHigh") < 16384;
+    if (freshItem) {
+        SetEntProp(weapon, Prop_Send, "m_iItemIDLow", -1);
+        SetEntProp(weapon, Prop_Send, "m_iItemIDHigh", g_iItemIdHigh++);
+    }
     SetEntProp(weapon, Prop_Send, "m_nFallbackPaintKit", paintkit);
 
     float appliedWear = wear;
@@ -1859,6 +1867,33 @@ bool ClutchEnsureEconItemInitialized(int client, int entity) {
     return true;
 }
 
+int ClutchSupportedStickerSlotsForIndex(int idx) {
+    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS) {
+        return CLUTCH_SITE_STICKER_SLOTS;
+    }
+
+    int defIndex = g_ClutchWeaponDefIndex[idx];
+    if (defIndex <= 0) {
+        return CLUTCH_SITE_STICKER_SLOTS;
+    }
+
+    CEconItemDefinition itemDef = PTaH_GetItemDefinitionByDefIndex(defIndex);
+    if (itemDef == view_as<CEconItemDefinition>(0)) {
+        return CLUTCH_SITE_STICKER_SLOTS;
+    }
+
+    int supported = itemDef.GetNumSupportedStickerSlots();
+    if (supported <= 0) {
+        return CLUTCH_SITE_STICKER_SLOTS;
+    }
+
+    if (supported > CLUTCH_STICKER_SLOTS) {
+        supported = CLUTCH_STICKER_SLOTS;
+    }
+
+    return supported;
+}
+
 void ClutchWriteStickerSlotAttributes(CAttributeList attrList, int slot, int stickerId, float wear) {
     if (stickerId <= 0) {
         return;
@@ -1874,14 +1909,14 @@ void ClutchWriteStickerSlotAttributes(CAttributeList attrList, int slot, int sti
     attrList.SetOrAddAttributeValue(idAttr, stickerId);
     attrList.SetOrAddAttributeValue(idAttr + 1, wear);
     attrList.SetOrAddAttributeValue(idAttr + 2, 1.0);
-    attrList.SetOrAddAttributeValue(idAttr + 3, 0.0);
 }
 
 void ClutchApplyStickerAttrsToEntity(int client, int entity, int idx, int teamSlot) {
     CEconItemView itemView = PTaH_GetEconItemViewFromEconEntity(entity);
     CAttributeList attrList = itemView.NetworkedDynamicAttributesForDemos;
+    int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);
 
-    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+    for (int s = 0; s < maxSlots && s < CLUTCH_SITE_STICKER_SLOTS; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
         if (stickerId == 0) {
             continue;
@@ -1976,12 +2011,28 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx) {
         if (g_cvDebug.BoolValue) {
             char classname[64];
             GetEntityClassname(weapon, classname, sizeof(classname));
+            int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);
             LogMessage(
-                "[Clutch] Applied stickers on %s (idx %d) for %N",
+                "[Clutch] Applied stickers on %s (idx %d, engineMaxSlots %d) for %N",
                 classname,
                 idx,
+                maxSlots,
                 client
             );
+            CEconItemView verifyView = PTaH_GetEconItemViewFromEconEntity(weapon);
+            for (int s = 0; s < CLUTCH_SITE_STICKER_SLOTS; s++) {
+                int cached = g_iStickerSlots[client][ClutchStickerTeamSlot(GetClientTeam(client))][idx][s];
+                int applied = verifyView.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0);
+                if (cached != 0 || applied != 0) {
+                    LogMessage(
+                        "[Clutch] sticker slot %d cached=%d applied=%d for %N",
+                        s,
+                        cached,
+                        applied,
+                        client
+                    );
+                }
+            }
         }
     }
 }

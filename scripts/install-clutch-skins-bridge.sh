@@ -190,6 +190,11 @@ if [[ -f "${CFG_DEPLOY}" ]]; then
   else
     printf '\nclutch_skins_gloves_world_model "0"\n' >> "${CFG_DEPLOY}"
   fi
+  if grep -q 'clutch_stickers_db_path' "${CFG_DEPLOY}"; then
+    sed -i 's|^clutch_stickers_db_path.*|clutch_stickers_db_path "addons/sourcemod/data/sqlite/csgo_weaponstickers.sq3"|g' "${CFG_DEPLOY}"
+  else
+    printf '\nclutch_stickers_db_path "addons/sourcemod/data/sqlite/csgo_weaponstickers.sq3"\n' >> "${CFG_DEPLOY}"
+  fi
 fi
 
 DATA_FILE="${SM}/data/clutch_skins.txt"
@@ -229,6 +234,10 @@ echo ">>> SQLite — clutch_weaponstickers table"
 # shellcheck source=scripts/lib/ensure-clutch-stickers-sqlite.sh
 source "${REPO_ROOT}/scripts/lib/ensure-clutch-stickers-sqlite.sh"
 ensure_clutch_stickers_sqlite "${SM}" || true
+
+echo ""
+echo ">>> Disable csgo_weaponstickers auto-apply"
+bash "${REPO_ROOT}/scripts/disable-weaponstickers-autoapply.sh"
 
 WEAPONS_SP="${SM}/scripting/weapons.sp"
 if [[ -f "${WEAPONS_SP}" ]]; then
