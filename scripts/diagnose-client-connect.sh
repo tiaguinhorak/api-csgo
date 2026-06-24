@@ -59,7 +59,12 @@ if [[ -f "${CSGO_ROOT}/addons/sourcemod/plugins/clutch_platform_gate.smx" ]]; th
   echo "clutch_platform_gate installed — unregistered Steam gets kicked"
   echo "Test: sm_cvar clutch_platform_gate_enabled 0  (server console)"
 else
-  echo "(gate plugin not found)"
+  echo "(clutch_platform_gate.smx not in plugins/)"
+fi
+if [[ -f "${CSGO_ROOT}/addons/sourcemod/plugins/nolobbyreservation.smx" ]]; then
+  echo "nolobbyreservation: OK (required for connect — fixes lobby id ffffffffffffffff)"
+else
+  echo "MISSING: nolobbyreservation.smx — run: bash scripts/install-nolobby-reservation.sh"
 fi
 echo ""
 
