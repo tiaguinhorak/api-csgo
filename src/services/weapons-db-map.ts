@@ -306,6 +306,26 @@ export function isGlovesWeaponId(weaponId: string): boolean {
 
 }
 
+/** kgns weapons row has one knife index — prefer T-side melee so spawn model matches TR loadout. */
+export function resolveKgnsKnifeIndex(weapons: SyncWeaponPayload[]): number | null {
+  let tIdx: number | null = null;
+  let ctIdx: number | null = null;
+  let anyIdx: number | null = null;
+
+  for (const w of weapons) {
+    if (!isMeleeWeaponId(w.weaponId) || !w.paintkit || w.paintkit <= 0) continue;
+    const idx = WEAPON_ID_TO_KNIFE_INDEX[w.weaponId];
+    if (idx === undefined) continue;
+    if (w.team === 'T') tIdx = idx;
+    else if (w.team === 'CT') ctIdx = idx;
+    else anyIdx = idx;
+  }
+
+  if (tIdx !== null) return tIdx;
+  if (ctIdx !== null) return ctIdx;
+  return anyIdx;
+}
+
 /** Buy-menu team locks — shared weapons (Deagle, AWP, etc.) still use kgns columns. */
 const T_ONLY_WEAPON_IDS = new Set([
   'weapon_glock',
@@ -458,10 +478,6 @@ export function buildPlayerLoadoutSql(
 
 
 
-  let knifeIndex: number | null = null;
-
-
-
   for (const w of weapons) {
 
     if (isGlovesWeaponId(w.weaponId)) continue;
@@ -472,7 +488,7 @@ export function buildPlayerLoadoutSql(
     // and re-skins the live weapon/knife. If we cleared the kgns row for knives and
     // shared weapons, kgns hands out a vanilla item (knife=0) and overwrites the
     // bridge's fallback paint — so write every equipped weapon to the kgns row too.
-    // Last synced side wins for kgns; the bridge refines per-side from clutch_team_loadout.
+    // Bridge refines per-side from clutch_team_loadout; knife index uses T side first.
 
 
 
@@ -505,25 +521,11 @@ export function buildPlayerLoadoutSql(
     updates.push(`${column}_seed=${seed}`);
 
     updates.push(`${column}_tag='${tag}'`);
-
-
-
-    if (isMeleeWeaponId(w.weaponId)) {
-
-      const idx = WEAPON_ID_TO_KNIFE_INDEX[w.weaponId];
-
-      if (idx !== undefined) knifeIndex = idx;
-
-    }
-
   }
 
-
-
+  const knifeIndex = resolveKgnsKnifeIndex(weapons);
   if (knifeIndex !== null) {
-
     updates.push(`knife=${knifeIndex}`);
-
   }
 
 

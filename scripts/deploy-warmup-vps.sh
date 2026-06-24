@@ -94,6 +94,13 @@ echo ""
 echo ">>> npm run build"
 npm run build
 
+if ! command -v pm2 >/dev/null 2>&1; then
+  echo ""
+  echo ">>> installing pm2 (local npm — site push needs api-csgo on warmup)"
+  npm install pm2 --no-save --no-audit --no-fund
+  export PATH="${REPO_ROOT}/node_modules/.bin:${PATH}"
+fi
+
 if ! grep -q 'gloves: result.gloves' dist/routes/csgo-skins-push.js; then
   echo "ERROR: build sem gloves sync — verifique erros de compilação" >&2
   exit 1
@@ -158,14 +165,18 @@ else
 fi
 
 echo ""
-echo ">>> sync weapons_english.cfg do catálogo do site"
+echo ">>> sync weapons_english.cfg (warmup — node, no HTTP)"
 if [[ -n "${CSGO_SKINS_SYNC_KEY:-}" ]]; then
-  bash "${REPO_ROOT}/scripts/sync-weapons-cfg-from-site.sh" || {
+  bash "${REPO_ROOT}/scripts/sync-weapons-cfg-warmup.sh" || {
     echo "WARN: sync weapons cfg falhou" >&2
   }
 else
   echo "Skip (sem CSGO_SKINS_SYNC_KEY)"
 fi
+
+echo ""
+echo ">>> warmup bridge cfg (defer_live=0)"
+bash "${REPO_ROOT}/scripts/ensure-warmup-bridge-cfg.sh" || true
 
 echo ""
 echo ">>> branding servidor (motd.txt)"
@@ -175,7 +186,13 @@ bash "${REPO_ROOT}/scripts/ensure-clutch-server-branding.sh" || {
 
 if [[ "${SKIP_PLUGIN}" -eq 0 ]]; then
   echo ""
-  echo ">>> plugins SourceMod — warmup (sem match tracker)"
+  echo ">>> plugins SourceMod — skins bridge + disable kgns gloves"
+  bash "${REPO_ROOT}/scripts/install-clutch-skins-bridge.sh" || {
+    echo "WARN: install-clutch-skins-bridge falhou" >&2
+  }
+
+  echo ""
+  echo ">>> plugins SourceMod — warmup extras (sem match tracker)"
   bash "${REPO_ROOT}/scripts/install-warmup-plugins.sh" || {
     echo "WARN: install-warmup-plugins falhou" >&2
   }

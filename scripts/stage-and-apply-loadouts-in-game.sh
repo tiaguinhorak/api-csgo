@@ -73,20 +73,10 @@ send_rcon_cmd() {
 
 FULL_SCREEN="$(resolve_screen_session || true)"
 
-stage_cmd="sm_clutch_loadout_pending"
-if [[ -n "${STEAM_ID}" ]]; then
-  stage_cmd="sm_clutch_loadout_pending ${STEAM_ID}"
-fi
-
-applied=0
-
-if send_rcon_cmd "${stage_cmd}"; then
-  applied=1
+if send_rcon_cmd "sm plugins reload weapons"; then
+  :
 elif [[ -n "${FULL_SCREEN}" ]]; then
-  send_screen_cmd "${FULL_SCREEN}" "${stage_cmd}" 0.8
-  applied=1
-else
-  echo "WARN: could not stage loadout (no RCON / screen)" >&2
+  send_screen_cmd "${FULL_SCREEN}" "sm plugins reload weapons" 1.2
 fi
 
 if send_rcon_cmd "sm_clutch_gloves_refresh"; then
@@ -107,14 +97,10 @@ if send_rcon_cmd "sm_clutch_applyskins"; then
 fi
 
 if [[ -n "${FULL_SCREEN}" ]]; then
-  send_screen_cmd "${FULL_SCREEN}" "sm_clutch_applyskins" 2.0
+  send_screen_cmd "${FULL_SCREEN}" "sm_clutch_applyskins" 2.5
   echo "In-game apply OK (screen ${FULL_SCREEN})."
   exit 0
 fi
 
-if [[ "${applied}" -eq 1 ]]; then
-  echo "WARN: staged loadout but applyskins failed — CS offline?" >&2
-  exit 1
-fi
-
+echo "WARN: applyskins failed — CS offline?" >&2
 exit 1
