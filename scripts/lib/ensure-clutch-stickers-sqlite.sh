@@ -66,4 +66,15 @@ SQL
   echo "SQLite sticker tables OK: ${db}"
   sqlite3 "${db}" ".tables" | tr '\n' ' '
   echo ""
+
+  local twin_db="${sm_root}/addons/sourcemod/data/sqlite/csgo_weaponstickers.sq3"
+  if [[ -f "${twin_db}" && "${twin_db}" != "${db}" ]]; then
+    local twin_rows real_rows
+    twin_rows="$(sqlite3 "${twin_db}" "SELECT COUNT(*) FROM clutch_weaponstickers;" 2>/dev/null || echo 0)"
+    real_rows="$(sqlite3 "${db}" "SELECT COUNT(*) FROM clutch_weaponstickers;" 2>/dev/null || echo 0)"
+    if [[ "${twin_rows}" -eq 0 && "${real_rows}" -gt 0 ]]; then
+      echo "Removing empty twin stickers DB (wrong SM sqlite path): ${twin_db}"
+      rm -f "${twin_db}"
+    fi
+  fi
 }

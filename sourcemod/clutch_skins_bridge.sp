@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.19"
+#define PLUGIN_VERSION "3.8.20"
 #define CLUTCH_SITE_STICKER_SLOTS 5
 #define STICKER_REAPPLY_PASS_COUNT 3
 #define GLOVE_THINK_TICK_MOD 8
@@ -315,6 +315,11 @@ public void OnConfigsExecuted() {
     Format(g_sStickersTable, sizeof(g_sStickersTable), "%sclutch_weaponstickers", stickersPrefix);
     Format(g_sLegacyStickersTable, sizeof(g_sLegacyStickersTable), "%sweaponstickers1", stickersPrefix);
     UpdateRefreshTimer();
+
+    // databases.cfg may not be parsed at OnPluginStart — retry sticker DB after configs load.
+    if (g_hStickersDb == null) {
+        ConnectStickersDatabase();
+    }
 }
 
 void UpdateRefreshTimer() {
@@ -527,12 +532,24 @@ void ClutchNormalizeRelativeStickersPath(char[] relative, int maxlen) {
     }
 }
 
+bool ClutchPathIsAbsolute(const char[] path) {
+    if (path[0] == '\0') {
+        return false;
+    }
+    if (path[0] == '/' || path[0] == '\\') {
+        return true;
+    }
+    if (strlen(path) > 2 && path[1] == ':') {
+        return true;
+    }
+    return false;
+}
+
 void ClutchResolveStickersDbPath(char[] dbPath, int maxlen) {
     char configured[PLATFORM_MAX_PATH];
     g_cvStickersDbPath.GetString(configured, sizeof(configured));
 
-    if (configured[0] != '\0'
-        && (configured[0] == '/' || (strlen(configured) > 2 && configured[1] == ':'))) {
+    if (configured[0] != '\0' && ClutchPathIsAbsolute(configured)) {
         strcopy(dbPath, maxlen, configured);
         ReplaceString(dbPath, maxlen, "\\", "/");
         return;
@@ -546,18 +563,43 @@ void ClutchResolveStickersDbPath(char[] dbPath, int maxlen) {
         ClutchNormalizeRelativeStickersPath(relative, sizeof(relative));
     }
 
-    // BuildPath alone can return a game-relative path; SQL_ConnectCustom sqlite resolves
-    // relative paths from addons/sourcemod/, which doubles addons/sourcemod/ and opens an empty twin DB.
-    char smRoot[PLATFORM_MAX_PATH];
-    BuildPath(Path_SM, smRoot, sizeof(smRoot), "");
-    ReplaceString(smRoot, sizeof(smRoot), "\\", "/");
-    int rootLen = strlen(smRoot);
-    if (rootLen > 0 && smRoot[rootLen - 1] != '/') {
-        Format(smRoot, sizeof(smRoot), "%s/", smRoot);
+    char gameRoot[PLATFORM_MAX_PATH];
+    BuildPath(Path_Game, gameRoot, sizeof(gameRoot), "");
+    ReplaceString(gameRoot, sizeof(gameRoot), "\\", "/");
+
+    if (ClutchPathIsAbsolute(gameRoot)) {
+        int rootLen = strlen(gameRoot);
+        if (rootLen > 0 && gameRoot[rootLen - 1] != '/') {
+            Format(gameRoot, sizeof(gameRoot), "%s/", gameRoot);
+        }
+        Format(dbPath, maxlen, "%saddons/sourcemod/%s", gameRoot, relative);
+    } else if (strncmp(relative, "data/", 5) == 0) {
+        Format(dbPath, maxlen, "addons/sourcemod/%s", relative);
+    } else {
+        strcopy(dbPath, maxlen, relative);
     }
 
-    Format(dbPath, maxlen, "%s%s", smRoot, relative);
     ReplaceString(dbPath, maxlen, "\\", "/");
+}
+
+void ClutchResolveStickersDbConnectTarget(const char[] resolvedPath, char[] connectTarget, int maxlen) {
+    char configured[PLATFORM_MAX_PATH];
+    g_cvStickersDbPath.GetString(configured, sizeof(configured));
+
+    if (configured[0] != '\0' && ClutchPathIsAbsolute(configured)) {
+        strcopy(connectTarget, maxlen, configured);
+        ReplaceString(connectTarget, maxlen, "\\", "/");
+        return;
+    }
+
+    if (ClutchPathIsAbsolute(resolvedPath)) {
+        strcopy(connectTarget, maxlen, resolvedPath);
+        return;
+    }
+
+    // SourceMod sqlite driver opens addons/sourcemod/data/sqlite/{name}.sq3 — never pass
+    // game-relative addons/sourcemod/... paths (they resolve to a wrong twin file).
+    strcopy(connectTarget, maxlen, "csgo_weaponstickers");
 }
 
 void ClutchExtractSteamAccountId(const char[] steamId, char[] accountId, int maxlen) {
@@ -611,18 +653,46 @@ void ConnectStickersDatabaseDirect() {
     ClutchResolveStickersDbPath(dbPath, sizeof(dbPath));
     strcopy(g_sResolvedStickersDbPath, sizeof(g_sResolvedStickersDbPath), dbPath);
 
+    char connectTarget[PLATFORM_MAX_PATH];
+    ClutchResolveStickersDbConnectTarget(dbPath, connectTarget, sizeof(connectTarget));
+
     KeyValues kv = new KeyValues("driver");
     kv.SetString("driver", "sqlite");
-    kv.SetString("database", dbPath);
 
     char openError[256];
-    Database database = SQL_ConnectCustom(kv, openError, sizeof(openError), true);
+    Database database = null;
+
+    kv.SetString("database", connectTarget);
+    database = SQL_ConnectCustom(kv, openError, sizeof(openError), true);
+
+    if (database == null && !StrEqual(connectTarget, "csgo_weaponstickers", false)) {
+        LogMessage(
+            "[Clutch] stickers SQL_ConnectCustom failed for %s: %s — retrying csgo_weaponstickers",
+            connectTarget,
+            openError
+        );
+        kv.SetString("database", "csgo_weaponstickers");
+        database = SQL_ConnectCustom(kv, openError, sizeof(openError), true);
+        if (database != null) {
+            strcopy(connectTarget, sizeof(connectTarget), "csgo_weaponstickers");
+        }
+    }
+
+    if (database == null && ClutchPathIsAbsolute(dbPath)) {
+        kv.SetString("database", dbPath);
+        database = SQL_ConnectCustom(kv, openError, sizeof(openError), true);
+        if (database != null) {
+            strcopy(connectTarget, sizeof(connectTarget), dbPath);
+        }
+    }
+
     delete kv;
 
     if (database == null) {
         LogError(
-            "[Clutch] stickers SQL_ConnectCustom failed: %s (path=%s)",
+            "[Clutch] stickers SQL_ConnectCustom failed: %s (target=%s file=%s)",
             openError,
+            connectTarget,
             dbPath
         );
         return;
@@ -630,7 +700,12 @@ void ConnectStickersDatabaseDirect() {
 
     g_hStickersDb = database;
 
-    LogMessage("[Clutch] stickers DB absolute path: %s (table %s)", dbPath, g_sStickersTable);
+    LogMessage(
+        "[Clutch] stickers DB connected via %s (expected file %s, table %s)",
+        connectTarget,
+        dbPath,
+        g_sStickersTable
+    );
 
     EnsureClutchStickersTable();
     EnsureLegacyStickersTable();
