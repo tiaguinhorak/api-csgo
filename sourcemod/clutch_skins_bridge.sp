@@ -5,7 +5,6 @@
 #include <sdktools>
 #include <cstrike>
 #include <clutch_steam>
-#include <sqlite>
 
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
@@ -24,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.9"
+#define PLUGIN_VERSION "3.8.10"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -494,25 +493,36 @@ void ConnectStickersDatabaseDirect() {
         g_hStickersDb = null;
     }
 
-    char path[PLATFORM_MAX_PATH];
-    g_cvStickersDbPath.GetString(path, sizeof(path));
-    if (path[0] == '\0') {
-        BuildPath(Path_SM, path, sizeof(path), "data/sqlite/csgo_weaponstickers.sq3");
-    }
+    char dbName[64];
+    g_cvStickersDb.GetString(dbName, sizeof(dbName));
+
+    KeyValues kv = new KeyValues("driver");
+    kv.SetString("driver", "sqlite");
+    kv.SetString("database", dbName);
 
     char openError[256];
-    Database database = SQLite_OpenDatabase(path, DBOpen_ReadWrite, openError, sizeof(openError));
+    Database database = SQL_ConnectCustom(kv, openError, sizeof(openError), true);
+    delete kv;
+
     if (database == null) {
-        LogError("[Clutch] stickers direct SQLite open failed: %s (%s)", openError, path);
+        LogError(
+            "[Clutch] stickers SQL_ConnectCustom failed: %s (db=%s)",
+            openError,
+            dbName
+        );
         return;
     }
 
     g_hStickersDb = database;
 
     if (g_cvDebug.BoolValue) {
-        LogMessage("[Clutch] Connected to stickers SQLite file %s (table %s)", path, g_sStickersTable);
+        LogMessage(
+            "[Clutch] Connected to stickers SQLite via SQL_ConnectCustom (%s, table %s)",
+            dbName,
+            g_sStickersTable
+        );
     } else {
-        LogMessage("[Clutch] Connected to stickers SQLite file %s", path);
+        LogMessage("[Clutch] Connected to stickers SQLite via SQL_ConnectCustom (%s)", dbName);
     }
 }
 
