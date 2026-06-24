@@ -37,6 +37,30 @@ fi
 LIST_JSON="$(curl -sf "http://127.0.0.1:${API_PORT}/api/servers" \
   -H "x-api-key: ${AUTH_KEY}" 2>/dev/null || true)"
 
+# Remove stale 127.0.0.1 / LAN entries when CSGO_PUBLIC_HOST is set (duplicate confuses site).
+if [[ -n "${LIST_JSON}" && "${HOST}" != "127.0.0.1" && ! "${HOST}" =~ ^192\.168\. ]]; then
+  STALE_IDS="$(echo "${LIST_JSON}" | node -e "
+const port = Number(process.argv[1]);
+const keep = process.argv[2];
+let list = [];
+try { list = JSON.parse(require('fs').readFileSync(0, 'utf8')); } catch { process.exit(0); }
+if (!Array.isArray(list)) list = [list];
+for (const s of list) {
+  if (!s || s.port !== port || s.host === keep) continue;
+  if (s.host === '127.0.0.1' || s.host.startsWith('192.168.') || s.host.startsWith('10.')) {
+    console.log(s.id);
+  }
+}
+" "${PORT_GAME}" "${HOST}" 2>/dev/null || true)"
+  while IFS= read -r stale_id; do
+    [[ -z "${stale_id}" ]] && continue
+    if curl -sf -X DELETE "http://127.0.0.1:${API_PORT}/api/servers/${stale_id}" \
+      -H "x-api-key: ${AUTH_KEY}" >/dev/null; then
+      echo "Removed stale registry entry ${stale_id} (private host, port ${PORT_GAME})"
+    fi
+  done <<< "${STALE_IDS}"
+fi
+
 if echo "${LIST_JSON}" | grep -q "\"host\":\"${HOST}\"" && \
    echo "${LIST_JSON}" | grep -q "\"port\":${PORT_GAME}"; then
   echo "Server already in api-csgo (${HOST}:${PORT_GAME})"

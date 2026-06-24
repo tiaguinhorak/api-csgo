@@ -106,11 +106,11 @@ echo "BIND_HOST=${BIND_API}"
 if ss -tln 2>/dev/null | grep -qE ":${API_PORT}\\s"; then
   ss -tln | grep -E ":${API_PORT}\\s" || true
 else
-  echo "WARN: nothing listening on TCP ${API_PORT} (pm2 api-csgo?)"
+  echo "WARN: nothing listening on TCP ${API_PORT} (api-csgo?)"
 fi
 if [[ "${BIND_API}" == "127.0.0.1" ]]; then
   echo "FAIL: BIND_HOST=127.0.0.1 — site cannot push skins from Hostinger"
-  echo "  Fix: BIND_HOST=0.0.0.0 && pm2 restart api-csgo --update-env"
+  echo "  Fix: BIND_HOST=0.0.0.0 && npm run pm2:restart"
 fi
 
 echo ""

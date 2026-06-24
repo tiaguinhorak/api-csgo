@@ -14,10 +14,26 @@ PORT="${CSGO_RCON_PORT:-27015}"
 
 echo "Opening game port ${PORT} (UDP + TCP) for all interfaces"
 
+run_ufw() {
+  if sudo -n ufw "$@" 2>/dev/null; then
+    return 0
+  fi
+  if ufw "$@" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 if command -v ufw >/dev/null 2>&1; then
-  sudo ufw allow "${PORT}/udp" comment 'clutch csgo game'
-  sudo ufw allow "${PORT}/tcp" comment 'clutch csgo rcon'
-  sudo ufw status numbered | grep "${PORT}" || true
+  if run_ufw allow "${PORT}/udp" comment 'clutch csgo game' && \
+     run_ufw allow "${PORT}/tcp" comment 'clutch csgo rcon'; then
+    run_ufw status numbered 2>/dev/null | grep "${PORT}" || true
+    exit 0
+  fi
+  echo "Could not run ufw (no sudo). As root, run:"
+  echo "  sudo ufw allow ${PORT}/udp comment 'clutch csgo game'"
+  echo "  sudo ufw allow ${PORT}/tcp comment 'clutch csgo rcon'"
+  echo "  sudo ufw status"
   exit 0
 fi
 

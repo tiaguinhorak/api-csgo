@@ -19,8 +19,13 @@ PUBLIC="${WARMUP_API_PUBLIC:-0}"
 if [[ "${PUBLIC}" == "1" ]]; then
   echo "Opening TCP ${PORT} for ALL (site on Hostinger / internet)"
   if command -v ufw >/dev/null 2>&1; then
-    sudo ufw allow "${PORT}/tcp" comment 'clutch api-csgo public'
-    sudo ufw status numbered | grep "${PORT}" || true
+    if sudo -n ufw allow "${PORT}/tcp" comment 'clutch api-csgo public' 2>/dev/null || \
+       ufw allow "${PORT}/tcp" comment 'clutch api-csgo public' 2>/dev/null; then
+      sudo -n ufw status numbered 2>/dev/null | grep "${PORT}" || ufw status numbered 2>/dev/null | grep "${PORT}" || true
+      exit 0
+    fi
+    echo "Could not run ufw. As root:"
+    echo "  sudo ufw allow ${PORT}/tcp comment 'clutch api-csgo public'"
     exit 0
   fi
   echo "ufw not found — open TCP ${PORT} in cloud firewall"
