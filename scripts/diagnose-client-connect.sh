@@ -61,10 +61,11 @@ if [[ -f "${CSGO_ROOT}/addons/sourcemod/plugins/clutch_platform_gate.smx" ]]; th
 else
   echo "(clutch_platform_gate.smx not in plugins/)"
 fi
-if [[ -f "${CSGO_ROOT}/addons/sourcemod/plugins/nolobbyreservation.smx" ]]; then
-  echo "nolobbyreservation: OK (required for connect — fixes lobby id ffffffffffffffff)"
+if [[ -f "${CSGO_ROOT}/addons/sourcemod/extensions/csgo_steamfix.ext.so" ]]; then
+  echo "csgo_steamfix: OK (archived CS:GO app 4465480 clients)"
 else
-  echo "MISSING: nolobbyreservation.smx — run: bash scripts/install-nolobby-reservation.sh"
+  echo "MISSING: csgo_steamfix.ext.so — ticket for wrong game / STEAM validation rejected"
+  echo "         run: bash scripts/install-csgo-steamfix-engine.sh"
 fi
 echo ""
 

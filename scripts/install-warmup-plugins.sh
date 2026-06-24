@@ -7,6 +7,7 @@ cd "${REPO_ROOT}"
 
 echo ">>> Warmup plugins (skins + gate + weapons — sem match tracker)"
 bash "${REPO_ROOT}/scripts/install-nolobby-reservation.sh"
+bash "${REPO_ROOT}/scripts/install-csgo-steamfix-engine.sh"
 bash "${REPO_ROOT}/scripts/install-clutch-skins-bridge.sh"
 bash "${REPO_ROOT}/scripts/install-clutch-platform-gate.sh"
 bash "${REPO_ROOT}/scripts/sync-weapons-cfg-from-site.sh" || true
