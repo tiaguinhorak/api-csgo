@@ -53,6 +53,7 @@ export function buildClutchStickerLoadoutSql(
     if (!entry.weaponIndex || entry.weaponIndex <= 0) continue;
     const team = entry.team === "CT" ? "CT" : "T";
     const { s0, s1, s2, s3, s4, s5, w0, w1, w2, w3, w4, w5 } = slotValues(entry);
+    const now = Math.floor(Date.now() / 1000);
 
     if (!s0 && !s1 && !s2 && !s3 && !s4 && !s5) {
       statements.push(
@@ -62,11 +63,12 @@ export function buildClutchStickerLoadoutSql(
     }
 
     statements.push(
-      `INSERT INTO ${table} (steamid, weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5)
-       VALUES ('${escapedSteam}', ${entry.weaponIndex}, '${team}', ${s0}, ${s1}, ${s2}, ${s3}, ${s4}, ${s5}, ${w0}, ${w1}, ${w2}, ${w3}, ${w4}, ${w5})
+      `INSERT INTO ${table} (steamid, weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5, last_seen)
+       VALUES ('${escapedSteam}', ${entry.weaponIndex}, '${team}', ${s0}, ${s1}, ${s2}, ${s3}, ${s4}, ${s5}, ${w0}, ${w1}, ${w2}, ${w3}, ${w4}, ${w5}, ${now})
        ON CONFLICT(steamid, weaponindex, team) DO UPDATE SET
          slot0=excluded.slot0, slot1=excluded.slot1, slot2=excluded.slot2, slot3=excluded.slot3, slot4=excluded.slot4, slot5=excluded.slot5,
-         wear0=excluded.wear0, wear1=excluded.wear1, wear2=excluded.wear2, wear3=excluded.wear3, wear4=excluded.wear4, wear5=excluded.wear5`,
+         wear0=excluded.wear0, wear1=excluded.wear1, wear2=excluded.wear2, wear3=excluded.wear3, wear4=excluded.wear4, wear5=excluded.wear5,
+         last_seen=excluded.last_seen`,
     );
   }
 
@@ -87,6 +89,7 @@ export function buildStickerLoadoutSql(
     if (!entry.weaponIndex || entry.weaponIndex <= 0) continue;
 
     const { s0, s1, s2, s3, s4, s5, w0, w1, w2, w3, w4, w5 } = slotValues(entry);
+    const now = Math.floor(Date.now() / 1000);
 
     if (!s0 && !s1 && !s2 && !s3 && !s4 && !s5) {
       statements.push(
@@ -96,11 +99,12 @@ export function buildStickerLoadoutSql(
     }
 
     statements.push(
-      `INSERT INTO ${table} (steamid, weaponindex, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5)
-       VALUES ('${escapedSteam}', ${entry.weaponIndex}, ${s0}, ${s1}, ${s2}, ${s3}, ${s4}, ${s5}, ${w0}, ${w1}, ${w2}, ${w3}, ${w4}, ${w5})
+      `INSERT INTO ${table} (steamid, weaponindex, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5, last_seen)
+       VALUES ('${escapedSteam}', ${entry.weaponIndex}, ${s0}, ${s1}, ${s2}, ${s3}, ${s4}, ${s5}, ${w0}, ${w1}, ${w2}, ${w3}, ${w4}, ${w5}, ${now})
        ON CONFLICT(steamid, weaponindex) DO UPDATE SET
          slot0=excluded.slot0, slot1=excluded.slot1, slot2=excluded.slot2, slot3=excluded.slot3, slot4=excluded.slot4, slot5=excluded.slot5,
-         wear0=excluded.wear0, wear1=excluded.wear1, wear2=excluded.wear2, wear3=excluded.wear3, wear4=excluded.wear4, wear5=excluded.wear5`,
+         wear0=excluded.wear0, wear1=excluded.wear1, wear2=excluded.wear2, wear3=excluded.wear3, wear4=excluded.wear4, wear5=excluded.wear5,
+         last_seen=excluded.last_seen`,
     );
   }
 

@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.21"
+#define PLUGIN_VERSION "3.8.22"
 #define CLUTCH_SITE_STICKER_SLOTS 5
 #define STICKER_REAPPLY_PASS_COUNT 3
 #define GLOVE_THINK_TICK_MOD 8
@@ -2087,6 +2087,7 @@ void ClutchWriteStickerSlotAttributes(CAttributeList attrList, int slot, int sti
     attrList.SetOrAddAttributeValue(idAttr, stickerId);
     attrList.SetOrAddAttributeValue(idAttr + 1, wear);
     attrList.SetOrAddAttributeValue(idAttr + 2, 1.0);
+    attrList.SetOrAddAttributeValue(idAttr + 3, 0.0);
 }
 
 void ClutchApplyStickerAttrsToEntity(int client, int entity, int idx, int teamSlot) {
@@ -3018,39 +3019,19 @@ void QueryPlayerStickers(int client, const char[] steamId, int altAttempt) {
     char escaped[64];
     g_hStickersDb.Escape(steamId, escaped, sizeof(escaped));
 
-    char accountId[16];
-    ClutchExtractSteamAccountId(steamId, accountId, sizeof(accountId));
-    char escapedAccount[32];
-    if (accountId[0] != '\0') {
-        g_hStickersDb.Escape(accountId, escapedAccount, sizeof(escapedAccount));
-    } else {
-        escapedAccount[0] = '\0';
-    }
-
     DataPack pack = new DataPack();
     pack.WriteCell(GetClientUserId(client));
     pack.WriteString(steamId);
     pack.WriteCell(altAttempt);
 
     char query[512];
-    if (escapedAccount[0] != '\0') {
-        Format(
-            query,
-            sizeof(query),
-            "SELECT weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5 FROM %s WHERE steamid='%s' OR steamid LIKE '%%:%s'",
-            g_sStickersTable,
-            escaped,
-            escapedAccount
-        );
-    } else {
-        Format(
-            query,
-            sizeof(query),
-            "SELECT weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5 FROM %s WHERE steamid='%s'",
-            g_sStickersTable,
-            escaped
-        );
-    }
+    Format(
+        query,
+        sizeof(query),
+        "SELECT weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5 FROM %s WHERE steamid='%s' ORDER BY last_seen DESC",
+        g_sStickersTable,
+        escaped
+    );
     g_hStickersDb.Query(T_StickersCallback, query, pack);
 }
 
@@ -3099,6 +3080,26 @@ void ClutchCacheStickerRowForTeam(
             g_fStickerWears[client][teamSlot][idx][s] = 0.0;
         }
     }
+}
+
+int ClutchCountStickerSlotsInRow(DBResultSet results, int slotColumnStart) {
+    int count = 0;
+    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+        if (results.FetchInt(slotColumnStart + s) != 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+int ClutchCountCachedStickerSlots(int client, int teamSlot, int idx) {
+    int count = 0;
+    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+        if (g_iStickerSlots[client][teamSlot][idx][s] != 0) {
+            count++;
+        }
+    }
+    return count;
 }
 
 void ScheduleStickersQueryRetry(int client, const char[] steamId, int altAttempt, float delay) {
@@ -3158,6 +3159,25 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         char teamLabel[4];
         results.FetchString(1, teamLabel, sizeof(teamLabel));
         int teamSlot = StrEqual(teamLabel, "CT", false) ? 1 : 0;
+        int idx = ClutchIndexFromDefIndex(defIndex);
+        if (idx >= 0) {
+            int existingCount = ClutchCountCachedStickerSlots(client, teamSlot, idx);
+            int newCount = ClutchCountStickerSlotsInRow(results, 2);
+            if (existingCount > newCount) {
+                if (g_cvDebug.BoolValue) {
+                    LogMessage(
+                        "[Clutch] Skipping stale sticker row %s defindex %d (%s) — cached %d slots, row has %d",
+                        teamLabel,
+                        defIndex,
+                        g_ClutchWeaponKeys[idx],
+                        existingCount,
+                        newCount
+                    );
+                }
+                continue;
+            }
+        }
+
         ClutchCacheStickerRowForTeam(client, defIndex, teamSlot, results, 2, 8);
 
         if (g_cvDebug.BoolValue) {
