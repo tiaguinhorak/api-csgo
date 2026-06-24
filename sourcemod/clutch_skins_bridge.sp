@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.20"
+#define PLUGIN_VERSION "3.8.21"
 #define CLUTCH_SITE_STICKER_SLOTS 5
 #define STICKER_REAPPLY_PASS_COUNT 3
 #define GLOVE_THINK_TICK_MOD 8
@@ -563,22 +563,9 @@ void ClutchResolveStickersDbPath(char[] dbPath, int maxlen) {
         ClutchNormalizeRelativeStickersPath(relative, sizeof(relative));
     }
 
-    char gameRoot[PLATFORM_MAX_PATH];
-    BuildPath(Path_Game, gameRoot, sizeof(gameRoot), "");
-    ReplaceString(gameRoot, sizeof(gameRoot), "\\", "/");
-
-    if (ClutchPathIsAbsolute(gameRoot)) {
-        int rootLen = strlen(gameRoot);
-        if (rootLen > 0 && gameRoot[rootLen - 1] != '/') {
-            Format(gameRoot, sizeof(gameRoot), "%s/", gameRoot);
-        }
-        Format(dbPath, maxlen, "%saddons/sourcemod/%s", gameRoot, relative);
-    } else if (strncmp(relative, "data/", 5) == 0) {
-        Format(dbPath, maxlen, "addons/sourcemod/%s", relative);
-    } else {
-        strcopy(dbPath, maxlen, relative);
-    }
-
+    // Path_Game is not in SM 1.11 files.inc — use Path_SM for display/logging only.
+    // Actual DB open uses csgo_weaponstickers driver name (see ClutchResolveStickersDbConnectTarget).
+    BuildPath(Path_SM, dbPath, maxlen, relative);
     ReplaceString(dbPath, maxlen, "\\", "/");
 }
 
