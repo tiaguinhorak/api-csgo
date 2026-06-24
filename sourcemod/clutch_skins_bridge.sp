@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.22"
+#define PLUGIN_VERSION "3.8.23"
 #define CLUTCH_SITE_STICKER_SLOTS 5
 #define STICKER_REAPPLY_PASS_COUNT 3
 #define GLOVE_THINK_TICK_MOD 8

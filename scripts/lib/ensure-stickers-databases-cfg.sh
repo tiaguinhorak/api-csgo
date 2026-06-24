@@ -11,9 +11,14 @@ ensure_stickers_databases_cfg() {
     return 1
   fi
 
-  if grep -q '"csgo_weaponstickers"' "${db_cfg}"; then
+  if grep -qE '^"csgo_weaponstickers"' "${db_cfg}"; then
     echo "csgo_weaponstickers entry already in databases.cfg"
     return 0
+  fi
+
+  # Remove stale comment-only or broken partial matches
+  if grep -q 'csgo_weaponstickers' "${db_cfg}"; then
+    echo "WARN: databases.cfg mentions csgo_weaponstickers but block header missing — re-adding block" >&2
   fi
 
   cat >> "${db_cfg}" <<'EOF'
