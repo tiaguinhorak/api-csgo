@@ -31,6 +31,62 @@ fi
 
 cp -f "${REPO_ROOT}/sourcemod/include/weapons.inc" "${SCRIPTING}/include/weapons.inc"
 
+patch_weapons_admin_only_cmds() {
+  if grep -q 'CLUTCH_WS_ADMIN_ONLY' "${WEAPONS_SP}"; then
+    echo "weapons.sp already patched for Clutch admin-only !ws"
+    return 0
+  fi
+
+  echo "Patching weapons.sp — !ws / !knife admin-only (flag b); players use web inventory..."
+  awk '
+    /RegConsoleCmd\("buyammo1", CommandWeaponSkins\)/ {
+      print "\t// CLUTCH_WS_ADMIN_ONLY"
+      print "\tRegAdminCmd(\"buyammo1\", CommandWeaponSkins, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    /RegConsoleCmd\("sm_ws", CommandWeaponSkins\)/ {
+      print "\tRegAdminCmd(\"sm_ws\", CommandWeaponSkins, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    /RegConsoleCmd\("buyammo2", CommandKnife\)/ {
+      print "\tRegAdminCmd(\"buyammo2\", CommandKnife, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    /RegConsoleCmd\("sm_knife", CommandKnife\)/ {
+      print "\tRegAdminCmd(\"sm_knife\", CommandKnife, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    /RegConsoleCmd\("sm_kf", CommandKnife\)/ {
+      print "\tRegAdminCmd(\"sm_kf\", CommandKnife, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    /RegConsoleCmd\("sm_nametag", CommandNameTag\)/ {
+      print "\tRegAdminCmd(\"sm_nametag\", CommandNameTag, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    /RegConsoleCmd\("sm_wslang", CommandWSLang\)/ {
+      print "\tRegAdminCmd(\"sm_wslang\", CommandWSLang, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    /RegConsoleCmd\("sm_seed", CommandSeedMenu\)/ {
+      print "\tRegAdminCmd(\"sm_seed\", CommandSeedMenu, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    /RegConsoleCmd\("sm_skin", CommandWeaponSkins\)/ {
+      print "\tRegAdminCmd(\"sm_skin\", CommandWeaponSkins, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    /RegConsoleCmd\("sm_skins", CommandWeaponSkins\)/ {
+      print "\tRegAdminCmd(\"sm_skins\", CommandWeaponSkins, ADMFLAG_GENERIC, \"Admin only — players equip via web\");"
+      next
+    }
+    { print }
+  ' "${WEAPONS_SP}" > "${WEAPONS_SP}.patched"
+  mv -f "${WEAPONS_SP}.patched" "${WEAPONS_SP}"
+}
+
+patch_weapons_admin_only_cmds
+
 if ! grep -q 'CreateNative("Weapons_ReloadClientData"' "${WEAPONS_SP}"; then
   echo "Patching weapons.sp AskPluginLoad2 (ReloadClientData + RefreshWeapon natives)..."
   awk '
@@ -112,6 +168,7 @@ fi
 echo "AskPluginLoad2 natives in weapons.sp:"
 grep 'CreateNative("Weapons_' "${WEAPONS_SP}" || true
 
-echo "Done. weapons.smx updated with Weapons_ReloadClientData + Weapons_RefreshWeapon."
+echo "Done. weapons.smx updated with Weapons_ReloadClientData + Weapons_RefreshWeapon + admin-only !ws."
 echo "In screen: sm plugins reload weapons"
+echo "Then: sm plugins reload z_clutch_skins_bridge"
 echo "Bridge should log no missing native warnings after reload."

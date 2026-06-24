@@ -23,10 +23,11 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.7"
+#define PLUGIN_VERSION "3.8.8"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
+#define CLUTCH_STICKER_SLOTS 6
 #define CLUTCH_KNIFE_CLASS_LEN 64
 #define ENTITY_APPLY_COOLDOWN 1.5
 #define WEAPON_REGIVE_COOLDOWN 10.0
@@ -38,12 +39,16 @@
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
 ConVar g_cvWeaponsTablePrefix;
+ConVar g_cvStickersDb;
+ConVar g_cvStickersTablePrefix;
 ConVar g_cvRefreshSeconds;
 ConVar g_cvGlovesWorldModel;
 ConVar g_cvDeferLive;
 ConVar g_cvOncePerMatch;
 
 Database g_hWeaponsDb = null;
+Database g_hStickersDb = null;
+char g_sStickersTable[32];
 char g_sTablePrefix[16];
 bool g_bLoggedMissingLoadout[MAXPLAYERS + 1];
 float g_fLastApplyTime[MAXPLAYERS + 1];
@@ -70,6 +75,7 @@ int g_CachedTrak[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 int g_CachedTrakCount[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 char g_CachedTag[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][64];
 int g_iAppliedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
+int g_iStickerSlots[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][CLUTCH_STICKER_SLOTS];
 char g_CachedKnifeClass[MAXPLAYERS + 1][CLUTCH_KNIFE_CLASS_LEN];
 float g_fLastEntityApply[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 float g_fLastWeaponRegive[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
@@ -94,6 +100,14 @@ char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_knife_gypsy_jackknife", "weapon_knife_stiletto", "weapon_knife_widowmaker",
     "weapon_mp5sd", "weapon_knife_css", "weapon_knife_cord", "weapon_knife_canis",
     "weapon_knife_outdoor", "weapon_knife_skeleton"
+};
+
+/** CS item definition index — matches site weapon-defindex (weaponstickers1.weaponindex). */
+int g_ClutchWeaponDefIndex[CLUTCH_WEAPON_SLOTS] = {
+    9, 7, 16, 60, 1, 61, 32, 4, 2, 36, 63, 3, 30, 64, 35, 25,
+    27, 29, 14, 28, 34, 17, 33, 24, 19, 26, 10, 13, 40, 8, 39, 38,
+    11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 23,
+    0, 0, 0, 0, 0
 };
 
 char g_ClutchDbColumns[CLUTCH_WEAPON_SLOTS][32] = {
@@ -152,6 +166,18 @@ public void OnPluginStart() {
         "Table prefix for kgns weapons (same as sm_weapons_table_prefix)",
         FCVAR_NOTIFY
     );
+    g_cvStickersDb = CreateConVar(
+        "clutch_stickers_db",
+        "csgo_weaponstickers",
+        "Database connection for CSGO_WeaponStickers (databases.cfg)",
+        FCVAR_NOTIFY
+    );
+    g_cvStickersTablePrefix = CreateConVar(
+        "clutch_stickers_table_prefix",
+        "",
+        "Table prefix for weaponstickers plugin (weaponstickers1)",
+        FCVAR_NOTIFY
+    );
     g_cvRefreshSeconds = CreateConVar(
         "clutch_skins_refresh",
         "0.0",
@@ -203,8 +229,12 @@ public void OnPluginStart() {
 
     AddCommandListener(ClutchBlockWsChatForPlayers, "say");
     AddCommandListener(ClutchBlockWsChatForPlayers, "say_team");
+    AddCommandListener(ClutchBlockWsChatForPlayers, "say2");
+
+    ClutchRegisterWsCommandBlocks();
 
     ConnectWeaponsDatabase();
+    ConnectStickersDatabase();
 
     HookEvent("player_spawn", OnPlayerSpawn, EventHookMode_Post);
     HookEvent("round_start", Event_RoundStart, EventHookMode_Post);
@@ -264,6 +294,9 @@ public void OnLibraryRemoved(const char[] name) {
 
 public void OnConfigsExecuted() {
     g_cvWeaponsTablePrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
+    char stickersPrefix[16];
+    g_cvStickersTablePrefix.GetString(stickersPrefix, sizeof(stickersPrefix));
+    Format(g_sStickersTable, sizeof(g_sStickersTable), "%sweaponstickers1", stickersPrefix);
     UpdateRefreshTimer();
 }
 
@@ -380,6 +413,10 @@ public void OnPluginEnd() {
         delete g_hWeaponsDb;
         g_hWeaponsDb = null;
     }
+    if (g_hStickersDb != null) {
+        delete g_hStickersDb;
+        g_hStickersDb = null;
+    }
 }
 
 void ConnectWeaponsDatabase() {
@@ -408,6 +445,34 @@ public void WeaponsDatabaseConnected(Database database, const char[] error, any 
 
     if (g_cvDebug.BoolValue) {
         LogMessage("[Clutch] Connected to weapons database (v%s)", PLUGIN_VERSION);
+    }
+}
+
+void ConnectStickersDatabase() {
+    if (g_hStickersDb != null) {
+        delete g_hStickersDb;
+        g_hStickersDb = null;
+    }
+
+    char dbName[64];
+    g_cvStickersDb.GetString(dbName, sizeof(dbName));
+    char stickersPrefix[16];
+    g_cvStickersTablePrefix.GetString(stickersPrefix, sizeof(stickersPrefix));
+    Format(g_sStickersTable, sizeof(g_sStickersTable), "%sweaponstickers1", stickersPrefix);
+
+    Database.Connect(StickersDatabaseConnected, dbName);
+}
+
+public void StickersDatabaseConnected(Database database, const char[] error, any data) {
+    if (database == null) {
+        LogError("[Clutch] stickers DB connect failed: %s", error);
+        return;
+    }
+
+    g_hStickersDb = database;
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Connected to stickers database table %s", g_sStickersTable);
     }
 }
 
@@ -489,7 +554,39 @@ public Action Command_ApplySkins(int client, int args) {
 }
 
 bool ClutchClientIsSkinAdmin(int client) {
-    return CheckCommandAccess(client, "sm_clutch_applyskins", ADMFLAG_GENERIC, true);
+    return (GetUserFlagBits(client) & ADMFLAG_GENERIC) != 0;
+}
+
+void ClutchRegisterWsCommandBlocks() {
+    static const char WS_CONSOLE_CMDS[][] = {
+        "buyammo1",
+        "buyammo2",
+        "sm_ws",
+        "sm_skin",
+        "sm_skins",
+        "sm_knife",
+        "sm_kf",
+        "sm_wslang",
+        "sm_seed",
+        "sm_nametag",
+    };
+
+    for (int i = 0; i < sizeof(WS_CONSOLE_CMDS); i++) {
+        AddCommandListener(ClutchBlockWsConsoleForPlayers, WS_CONSOLE_CMDS[i]);
+    }
+}
+
+public Action ClutchBlockWsConsoleForPlayers(int client, const char[] command, int argc) {
+    if (client <= 0 || IsFakeClient(client)) {
+        return Plugin_Continue;
+    }
+
+    if (ClutchClientIsSkinAdmin(client)) {
+        return Plugin_Continue;
+    }
+
+    PrintToChat(client, " [Clutch] Equipe skins pelo inventario no site.");
+    return Plugin_Handled;
 }
 
 bool ClutchIsLiveMatch() {
@@ -588,6 +685,7 @@ bool ClutchIsBlockedWsChatToken(const char[] token) {
         || StrEqual(token, "skin", false)
         || StrEqual(token, "skins", false)
         || StrEqual(token, "knife", false)
+        || StrEqual(token, "kf", false)
         || StrEqual(token, "gloves", false)
         || StrEqual(token, "wslang", false)
         || StrEqual(token, "seed", false)
@@ -637,7 +735,7 @@ public Action ClutchBlockWsChatForPlayers(int client, const char[] command, int 
         return Plugin_Continue;
     }
 
-    if (CheckCommandAccess(client, "sm_ws", ADMFLAG_GENERIC, true)) {
+    if (ClutchClientIsSkinAdmin(client)) {
         return Plugin_Continue;
     }
 
@@ -728,6 +826,7 @@ public void OnClientDisconnect(int client) {
         g_fLastEntityApply[client][i] = 0.0;
         g_CachedTag[client][i][0] = '\0';
     }
+    ClutchClearStickerCache(client);
 }
 
 public void OnClientPutInServer(int client) {
@@ -1479,6 +1578,10 @@ void SetClutchWeaponProps(
     ClutchNetworkUpdateWeaponSkin(weapon);
     if (!isKnife) {
         ClutchMirrorSkinToViewModels(client, weapon);
+        int stickerIdx = ClutchIndexFromWeaponEntity(client, weapon);
+        if (stickerIdx >= 0) {
+            ClutchApplyStickersForWeapon(client, weapon, stickerIdx);
+        }
     }
     if (isKnife && ClutchClientHasGlovesLoaded(client)) {
         return;
@@ -1550,6 +1653,158 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
         }
 
         ClutchCopyWeaponSkinProps(weapon, predicted);
+    }
+}
+
+int ClutchIndexFromDefIndex(int defIndex) {
+    if (defIndex <= 0) {
+        return -1;
+    }
+
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        if (g_ClutchWeaponDefIndex[i] == defIndex) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int ClutchIndexFromWeaponEntity(int client, int weapon) {
+    if (weapon <= 0 || !IsValidEntity(weapon)) {
+        return -1;
+    }
+
+    char classname[64];
+    GetEntityClassname(weapon, classname, sizeof(classname));
+    return GetClutchIndexForClassname(client, classname);
+}
+
+void ClutchClearStickerCache(int client) {
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+            g_iStickerSlots[client][i][s] = 0;
+        }
+    }
+}
+
+bool ClutchWeaponHasStickerCache(int client, int idx) {
+    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS) {
+        return false;
+    }
+
+    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+        if (g_iStickerSlots[client][idx][s] != 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
+    if (
+        client <= 0
+        || entity <= 0
+        || idx < 0
+        || idx >= CLUTCH_WEAPON_SLOTS
+        || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])
+        || !IsPaintableWeaponEntity(entity)
+        || !ClutchWeaponHasStickerCache(client, idx)
+    ) {
+        return false;
+    }
+
+    CEconItemView itemView = PTaH_GetEconItemViewFromEconEntity(entity);
+    CAttributeList attrList = itemView.NetworkedDynamicAttributesForDemos;
+    bool updated = false;
+
+    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+        int stickerId = g_iStickerSlots[client][idx][s];
+        if (stickerId != 0) {
+            attrList.SetOrAddAttributeValue(113 + s * 4, stickerId);
+            updated = true;
+        }
+    }
+
+    return updated;
+}
+
+void ClutchMirrorStickersToViewModels(int client, int weapon, int idx) {
+    if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
+        return;
+    }
+
+    if (HasEntProp(client, Prop_Data, "m_hViewModel")) {
+        for (int slot = 0; slot <= 1; slot++) {
+            int viewModel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", slot);
+            if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
+                ClutchApplyStickersToEntity(client, viewModel, idx);
+            }
+        }
+    }
+
+    int predicted = -1;
+    while ((predicted = FindEntityByClassname(predicted, "predicted_viewmodel")) != -1) {
+        if (!IsValidEntity(predicted)) {
+            continue;
+        }
+
+        int owner = GetEntPropEnt(predicted, Prop_Send, "m_hOwner");
+        if (owner != client) {
+            continue;
+        }
+
+        if (HasEntProp(predicted, Prop_Send, "m_hWeapon")) {
+            int linkedWeapon = GetEntPropEnt(predicted, Prop_Send, "m_hWeapon");
+            if (linkedWeapon != weapon) {
+                continue;
+            }
+        }
+
+        if (!IsPaintableWeaponEntity(predicted)) {
+            continue;
+        }
+
+        ClutchApplyStickersToEntity(client, predicted, idx);
+    }
+}
+
+void ClutchApplyStickersForWeapon(int client, int weapon, int idx) {
+    bool updated = ClutchApplyStickersToEntity(client, weapon, idx);
+    if (updated) {
+        ClutchMirrorStickersToViewModels(client, weapon, idx);
+        PTaH_ForceFullUpdate(client);
+
+        if (g_cvDebug.BoolValue) {
+            char classname[64];
+            GetEntityClassname(weapon, classname, sizeof(classname));
+            LogMessage(
+                "[Clutch] Applied stickers on %s (idx %d) for %N",
+                classname,
+                idx,
+                client
+            );
+        }
+    }
+}
+
+void ClutchReapplyStickersOnPlayerWeapons(int client) {
+    if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
+        return;
+    }
+
+    int size = GetEntPropArraySize(client, Prop_Send, "m_hMyWeapons");
+    for (int i = 0; i < size; i++) {
+        int weapon = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
+        if (weapon == -1 || !IsValidEntity(weapon)) {
+            continue;
+        }
+
+        int idx = ClutchIndexFromWeaponEntity(client, weapon);
+        if (idx >= 0 && ClutchWeaponHasStickerCache(client, idx)) {
+            ClutchApplyStickersForWeapon(client, weapon, idx);
+        }
     }
 }
 
@@ -2277,6 +2532,93 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
 
 void QueryPlayerLoadout(int client, const char[] steamId, int altAttempt, bool force = false) {
     QueryTeamLoadout(client, steamId, altAttempt, force);
+}
+
+void QueryPlayerStickers(int client, const char[] steamId, int altAttempt) {
+    if (g_hStickersDb == null) {
+        ConnectStickersDatabase();
+        return;
+    }
+
+    char escaped[64];
+    g_hStickersDb.Escape(steamId, escaped, sizeof(escaped));
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteString(steamId);
+    pack.WriteCell(altAttempt);
+
+    char query[384];
+    Format(
+        query,
+        sizeof(query),
+        "SELECT weaponindex, slot0, slot1, slot2, slot3, slot4, slot5 FROM %s WHERE steamid='%s'",
+        g_sStickersTable,
+        escaped
+    );
+    g_hStickersDb.Query(T_StickersCallback, query, pack);
+}
+
+public void T_StickersCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    char steamId[32];
+    pack.ReadString(steamId, sizeof(steamId));
+    int altAttempt = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return;
+    }
+
+    if (results == null) {
+        LogError("[Clutch] stickers DB query failed: %s", error);
+        return;
+    }
+
+    bool anyRow = false;
+    while (results.FetchRow()) {
+        anyRow = true;
+        int defIndex = results.FetchInt(0);
+        int idx = ClutchIndexFromDefIndex(defIndex);
+        if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+            continue;
+        }
+
+        for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+            g_iStickerSlots[client][idx][s] = results.FetchInt(1 + s);
+        }
+
+        if (g_cvDebug.BoolValue) {
+            LogMessage(
+                "[Clutch] Cached stickers defindex %d (%s) slots %d,%d,%d for %N",
+                defIndex,
+                g_ClutchWeaponKeys[idx],
+                g_iStickerSlots[client][idx][0],
+                g_iStickerSlots[client][idx][1],
+                g_iStickerSlots[client][idx][2],
+                client
+            );
+        }
+    }
+
+    if (!anyRow) {
+        if (altAttempt == 0) {
+            if (steamId[6] == '1') {
+                steamId[6] = '0';
+            } else if (steamId[6] == '0') {
+                steamId[6] = '1';
+            }
+            QueryPlayerStickers(client, steamId, 1);
+            return;
+        }
+
+        ClutchClearStickerCache(client);
+        return;
+    }
+
+    ClutchReapplyStickersOnPlayerWeapons(client);
 }
 
 public void T_ApplyFromDbCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
@@ -3025,6 +3367,7 @@ void ApplyClientSkins(int client, bool force) {
     }
 
     QueryPlayerLoadout(client, steamId, 0, force);
+    QueryPlayerStickers(client, steamId, 0);
 }
 
 #if defined _clutch_gloves_included_

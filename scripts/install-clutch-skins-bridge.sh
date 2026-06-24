@@ -143,10 +143,21 @@ if [[ -f "${GLOVES_CFG_SRC}" ]]; then
 fi
 
 ADMIN_OVERRIDES="${SM}/configs/admin_overrides.cfg"
+CLUTCH_OVERRIDES_DEPLOY="${SM}/configs/admin_overrides_clutch.cfg"
 if [[ -f "${OVERRIDES_SRC}" ]]; then
+  cp -f "${OVERRIDES_SRC}" "${CLUTCH_OVERRIDES_DEPLOY}"
   MARKER="clutch_inventory_only_ws_admin"
   if [[ -f "${ADMIN_OVERRIDES}" ]] && grep -q "${MARKER}" "${ADMIN_OVERRIDES}"; then
-    echo "admin_overrides.cfg already has Clutch !ws restrictions (${MARKER})"
+    if grep -q '"buyammo1"' "${ADMIN_OVERRIDES}"; then
+      echo "admin_overrides.cfg already has Clutch !ws restrictions (${MARKER})"
+    else
+      echo "Refreshing Clutch !ws overrides (adding buyammo1/buyammo2)..."
+      {
+        echo ""
+        echo "// ${MARKER} — updated — players use web inventory; admins keep !ws"
+        cat "${OVERRIDES_SRC}"
+      } >> "${ADMIN_OVERRIDES}"
+    fi
   else
     {
       echo ""

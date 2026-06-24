@@ -228,7 +228,21 @@ DB lido pelo plugin: `/home/csgo/server/csgo/addons/sourcemod/data/sqlite/csgo_w
 
 Stickers aplicam no **spawn** (cfg `sm_weaponstickers_updateviewmodel 1`).
 
----
+**Com `z_clutch_skins_bridge` (v3.8.8+):** o bridge reaplica stickers depois da skin custom (paintkit), porque o plugin de stickers roda no `GiveNamedItem` e a skin do bridge sobrescreve os atributos. Após `git pull`, reinstale o bridge:
+
+```bash
+bash scripts/install-clutch-skins-bridge.sh
+sm plugins reload z_clutch_skins_bridge
+```
+
+**Teste in-game:** stickers só em **armas de fogo** (não faca). Equipe AK com stickers, pegue a AK, inspecione com **F**. Com `clutch_skins_debug 1` no console: log `[Clutch] Applied stickers on weapon_ak47`.
+
+Verificar DB (AK = `weaponindex` 7):
+
+```bash
+sqlite3 /home/csgo/server/csgo/addons/sourcemod/data/sqlite/csgo_weaponstickers.sq3 \
+  "SELECT steamid, weaponindex, slot0, slot1, slot2 FROM weaponstickers1 WHERE weaponindex=7;"
+```
 
 ## 6. Console do servidor CS (screen)
 
