@@ -212,6 +212,11 @@ if [[ "${SKIP_PLUGIN}" -eq 0 ]]; then
 fi
 
 echo ""
+echo "=== Warmup API LAN (site push) ==="
+bash "${REPO_ROOT}/scripts/open-warmup-api-firewall.sh" || true
+bash "${REPO_ROOT}/scripts/verify-warmup-api-lan.sh" || true
+
+echo ""
 echo "=== Health check ==="
 sleep 1
 curl -sf "http://127.0.0.1:${PORT:-3001}/health" && echo "" || \

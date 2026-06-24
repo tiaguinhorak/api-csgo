@@ -31,6 +31,12 @@ set_kv_if_missing "CLUTCH_CS_SCREEN" "csgo-warmup-#1"
 set_kv_if_missing "CSGO_RCON_LOOPBACK" "1"
 set_kv_if_missing "CSGO_SERVER_HOST" "127.0.0.1"
 set_kv_if_missing "CSGO_RCON_PORT" "27015"
+set_kv_if_missing "BIND_HOST" "0.0.0.0"
+
+if grep -qE '^BIND_HOST=127' "${ENV_FILE}"; then
+  sed -i 's/^BIND_HOST=.*/BIND_HOST=0.0.0.0/' "${ENV_FILE}"
+  echo "Fixed BIND_HOST=0.0.0.0 (required for site LAN push)"
+fi
 
 bash "${REPO_ROOT}/scripts/ensure-clutch-site-env.sh"
 
@@ -52,3 +58,6 @@ echo "OK: warmup api .env checked ($(grep -c '^' "${ENV_FILE}") lines)"
 
 bash "${REPO_ROOT}/scripts/pm2-local.sh" >/dev/null
 echo "OK: pm2 available ($(command -v pm2))"
+
+echo ""
+bash "${REPO_ROOT}/scripts/verify-warmup-api-lan.sh" || true
