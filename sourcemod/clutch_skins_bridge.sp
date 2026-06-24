@@ -23,7 +23,8 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.15"
+#define PLUGIN_VERSION "3.8.16"
+#define STICKER_REAPPLY_PASS_COUNT 3
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -87,6 +88,7 @@ int g_iReapplyGen[MAXPLAYERS + 1];
 bool g_bAllowWeaponRegive[MAXPLAYERS + 1];
 bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35, 1.0, 2.0};
+float g_fStickerReapplyDelays[STICKER_REAPPLY_PASS_COUNT] = {0.15, 0.45, 0.9};
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -982,16 +984,47 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     if (client <= 0 || IsFakeClient(client)) {
         return;
     }
-    if (g_cvOncePerMatch.BoolValue && g_bMatchLoadoutSynced[client]) {
-        return;
-    }
     int userid = GetClientUserId(client);
 #if defined _clutch_gloves_included_
     if (ClutchUseExternalGlovesPlugin()) {
         ClutchGlovesRefreshClientSafe(client);
     }
 #endif
+    if (g_cvOncePerMatch.BoolValue && g_bMatchLoadoutSynced[client]) {
+        // Skins once-per-match, but weapons respawn fresh — reload stickers from DB.
+        CreateTimer(0.5, Timer_RefreshStickersOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
+        return;
+    }
     CreateTimer(0.4, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_RefreshStickersOnSpawn(Handle timer, any userid) {
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client)) {
+        return Plugin_Stop;
+    }
+
+    char steamId[32];
+    if (ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
+        QueryPlayerStickers(client, steamId, 0);
+    }
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(userid);
+    CreateTimer(0.6, Timer_DelayedStickerReapply, pack, TIMER_FLAG_NO_MAPCHANGE);
+    return Plugin_Stop;
+}
+
+public Action Timer_DelayedStickerReapply(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && IsPlayerAlive(client)) {
+        ClutchReapplyStickersOnPlayerWeapons(client);
+    }
+    return Plugin_Stop;
 }
 
 public Action Timer_ApplySkinsOnSpawn(Handle timer, any userid) {
@@ -1666,6 +1699,7 @@ void SetClutchWeaponProps(
         int stickerIdx = ClutchIndexFromWeaponEntity(client, weapon);
         if (stickerIdx >= 0) {
             ClutchApplyStickersForWeapon(client, weapon, stickerIdx);
+            ClutchScheduleStickerReapplyPasses(client, weapon, stickerIdx);
         }
     }
     if (isKnife && ClutchClientHasGlovesLoaded(client)) {
@@ -1825,6 +1859,42 @@ bool ClutchEnsureEconItemInitialized(int client, int entity) {
     return true;
 }
 
+void ClutchWriteStickerSlotAttributes(CAttributeList attrList, int slot, int stickerId, float wear) {
+    if (stickerId <= 0) {
+        return;
+    }
+
+    int idAttr = 113 + slot * 4;
+    if (wear < 0.0) {
+        wear = 0.0;
+    } else if (wear > 1.0) {
+        wear = 1.0;
+    }
+
+    attrList.SetOrAddAttributeValue(idAttr, stickerId);
+    attrList.SetOrAddAttributeValue(idAttr + 1, wear);
+    attrList.SetOrAddAttributeValue(idAttr + 2, 1.0);
+    attrList.SetOrAddAttributeValue(idAttr + 3, 0.0);
+}
+
+void ClutchApplyStickerAttrsToEntity(int client, int entity, int idx, int teamSlot) {
+    CEconItemView itemView = PTaH_GetEconItemViewFromEconEntity(entity);
+    CAttributeList attrList = itemView.NetworkedDynamicAttributesForDemos;
+
+    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+        int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
+        if (stickerId == 0) {
+            continue;
+        }
+        ClutchWriteStickerSlotAttributes(
+            attrList,
+            s,
+            stickerId,
+            g_fStickerWears[client][teamSlot][idx][s]
+        );
+    }
+}
+
 bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
     if (
         client <= 0
@@ -1841,29 +1911,17 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
     ClutchEnsureEconItemInitialized(client, entity);
 
     int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
-    CEconItemView itemView = PTaH_GetEconItemViewFromEconEntity(entity);
-    CAttributeList attrList = itemView.NetworkedDynamicAttributesForDemos;
     bool updated = false;
 
     for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
-        int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
-        if (stickerId == 0) {
-            continue;
+        if (g_iStickerSlots[client][teamSlot][idx][s] != 0) {
+            updated = true;
+            break;
         }
+    }
 
-        int idAttr = 113 + s * 4;
-        float wear = g_fStickerWears[client][teamSlot][idx][s];
-        if (wear < 0.0) {
-            wear = 0.0;
-        } else if (wear > 1.0) {
-            wear = 1.0;
-        }
-
-        // Match CSGO_WeaponStickers: id + wear + scale (slots 3+ need explicit scale).
-        attrList.SetOrAddAttributeValue(idAttr, stickerId);
-        attrList.SetOrAddAttributeValue(idAttr + 1, wear);
-        attrList.SetOrAddAttributeValue(idAttr + 2, 1.0);
-        updated = true;
+    if (updated) {
+        ClutchApplyStickerAttrsToEntity(client, entity, idx, teamSlot);
     }
 
     return updated;
@@ -1926,6 +1984,42 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx) {
             );
         }
     }
+}
+
+void ClutchScheduleStickerReapplyPasses(int client, int weapon, int idx) {
+    if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
+        return;
+    }
+
+    int userid = GetClientUserId(client);
+    for (int i = 0; i < STICKER_REAPPLY_PASS_COUNT; i++) {
+        DataPack pack = new DataPack();
+        pack.WriteCell(userid);
+        pack.WriteCell(EntIndexToEntRef(weapon));
+        pack.WriteCell(idx);
+        CreateTimer(g_fStickerReapplyDelays[i], Timer_StickerReapplyPass, pack, TIMER_FLAG_NO_MAPCHANGE);
+    }
+}
+
+public Action Timer_StickerReapplyPass(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int weaponRef = pack.ReadCell();
+    int idx = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    int weapon = EntRefToEntIndex(weaponRef);
+    if (client <= 0 || !IsClientInGame(client) || weapon == -1 || !IsValidEntity(weapon)) {
+        return Plugin_Stop;
+    }
+
+    if (!ClutchWeaponHasStickerCache(client, idx)) {
+        return Plugin_Stop;
+    }
+
+    ClutchApplyStickersForWeapon(client, weapon, idx);
+    return Plugin_Stop;
 }
 
 void ClutchReapplyStickersOnPlayerWeapons(int client) {
@@ -2249,6 +2343,7 @@ void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = fa
         ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force, allowRegive);
     }
 
+    ClutchReapplyStickersOnPlayerWeapons(client);
     ClutchBridgeUpdateClientModel(client);
 }
 

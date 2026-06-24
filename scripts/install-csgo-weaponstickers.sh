@@ -503,11 +503,11 @@ mkdir -p "${CSGO_ROOT}/cfg/sourcemod"
 STICKERS_CFG="${CSGO_ROOT}/cfg/sourcemod/csgo_weaponstickers.cfg"
 if [[ ! -f "${STICKERS_CFG}" ]]; then
   cat > "${STICKERS_CFG}" <<'EOF'
-// Clutch — stickers from site DB (no !stickers needed)
-sm_weaponstickers_enabled "1"
+// Clutch — stickers from site DB via z_clutch_skins_bridge (NOT csgo_weaponstickers cache)
+sm_weaponstickers_enabled "0"
 sm_weaponstickers_flag ""
-sm_weaponstickers_overrideview "1"
-sm_weaponstickers_updateviewmodel "1"
+sm_weaponstickers_overrideview "0"
+sm_weaponstickers_updateviewmodel "0"
 sm_weaponstickers_reusetime "0"
 sm_weaponstickers_inactive_days "0"
 EOF
@@ -515,9 +515,9 @@ EOF
 else
   for key in sm_weaponstickers_enabled sm_weaponstickers_overrideview sm_weaponstickers_updateviewmodel sm_weaponstickers_reusetime; do
     case "${key}" in
-      sm_weaponstickers_enabled) val="1" ;;
-      sm_weaponstickers_overrideview) val="1" ;;
-      sm_weaponstickers_updateviewmodel) val="1" ;;
+      sm_weaponstickers_enabled) val="0" ;;
+      sm_weaponstickers_overrideview) val="0" ;;
+      sm_weaponstickers_updateviewmodel) val="0" ;;
       sm_weaponstickers_reusetime) val="0" ;;
     esac
     if grep -q "^${key}" "${STICKERS_CFG}"; then
