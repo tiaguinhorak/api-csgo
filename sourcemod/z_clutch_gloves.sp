@@ -7,7 +7,7 @@
 #include <sdkhooks>
 #include <clutch_steam>
 
-#define PLUGIN_VERSION "1.4.1"
+#define PLUGIN_VERSION "1.4.2"
 #define GLOVE_THINK_TICK_MOD 8
 
 ConVar g_cvDb;
@@ -555,6 +555,9 @@ void GivePlayerGloves(int client) {
         DisableGloveThink(client);
         return;
     }
+
+    EnforceGloveBody(client);
+    FixCustomArms(client);
 
     int ent = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
     if (ent != -1 && IsValidEntity(ent)) {

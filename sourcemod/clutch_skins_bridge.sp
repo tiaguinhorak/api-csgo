@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.5"
+#define PLUGIN_VERSION "3.8.6"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -33,7 +33,7 @@
 #define REAPPLY_PASS_COUNT 3
 #define SPAWN_APPLY_AFTER_GLOVES_DELAY 1.25
 #define SPAWN_GLOVE_DB_REFRESH_DELAY 0.75
-#define FORCE_WEAPONS_AFTER_GLOVES_DELAY 2.5
+#define FORCE_WEAPONS_AFTER_GLOVES_DELAY 1.0
 
 ConVar g_cvDebug;
 ConVar g_cvWeaponsDb;
@@ -637,7 +637,7 @@ void ClutchBeginForcedSync(int client) {
     g_bAllowWeaponRegive[client] = true;
 #if defined _clutch_gloves_included_
     ClutchGlovesRefreshClientSafe(client);
-    CreateTimer(1.0, Timer_ApplyGlovesAfterRefresh, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(0.25, Timer_ApplyGlovesAfterRefresh, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 #endif
 
     DataPack pack = new DataPack();
@@ -708,7 +708,6 @@ public void OnClientPutInServer(int client) {
 #if defined _clutch_gloves_included_
     ClutchGlovesRefreshClientSafe(client);
 #endif
-    ScheduleApplyClientSkins(client);
 }
 
 public void OnClientAuthorized(int client, const char[] authString) {
@@ -718,7 +717,10 @@ public void OnClientAuthorized(int client, const char[] authString) {
 #if defined _clutch_gloves_included_
     ClutchGlovesRefreshClientSafe(client);
 #endif
-    ScheduleApplyClientSkins(client);
+    g_fLastApplyTime[client] = 0.0;
+    int userid = GetClientUserId(client);
+    CreateTimer(0.35, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(1.0, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action OnWeaponEquip(int client, int weapon) {
@@ -766,7 +768,28 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
         return;
     }
     int userid = GetClientUserId(client);
-    CreateTimer(SPAWN_APPLY_AFTER_GLOVES_DELAY, Timer_ApplySkinsDelayed, userid, TIMER_FLAG_NO_MAPCHANGE);
+#if defined _clutch_gloves_included_
+    if (ClutchUseExternalGlovesPlugin()) {
+        ClutchGlovesRefreshClientSafe(client);
+    }
+#endif
+    CreateTimer(0.2, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(0.65, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(1.35, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ApplySkinsOnSpawn(Handle timer, any userid) {
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client)) {
+        return Plugin_Stop;
+    }
+#if defined _clutch_gloves_included_
+    if (ClutchUseExternalGlovesPlugin() && IsPlayerAlive(client)) {
+        ClutchGlovesApplyClientSafe(client);
+    }
+#endif
+    ApplyClientSkins(client, true);
+    return Plugin_Stop;
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
@@ -775,12 +798,17 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 
 public Action Timer_RoundStartApply(Handle timer) {
     for (int client = 1; client <= MaxClients; client++) {
-        if (!IsClientInGame(client) || IsFakeClient(client)) {
+        if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
             continue;
         }
-        if (ClutchClientIsSkinAdmin(client)) {
-            ApplyClientSkins(client, true);
+        if (
+            g_cvDeferLive.BoolValue
+            && ClutchIsLiveMatch()
+            && !ClutchClientIsSkinAdmin(client)
+        ) {
+            continue;
         }
+        ApplyClientSkins(client, true);
     }
     return Plugin_Stop;
 }
@@ -2255,6 +2283,9 @@ void QueryPlayerGloves(int client, const char[] steamId, int altAttempt) {
 #if defined _clutch_gloves_included_
     if (ClutchUseExternalGlovesPlugin()) {
         ClutchGlovesRefreshClientSafe(client);
+        if (IsPlayerAlive(client)) {
+            CreateTimer(0.25, Timer_ApplyGlovesAfterRefresh, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+        }
         return;
     }
 #endif
@@ -2407,7 +2438,7 @@ public void OnGlovePreThink(int client) {
 
 void ClutchEnforceGloveState(int client) {
 #if defined _clutch_gloves_included_
-    if (g_bGlovesNativeReady) {
+    if (ClutchUseExternalGlovesPlugin()) {
         return;
     }
 #endif
@@ -2423,11 +2454,7 @@ void ClutchEnforceGloveState(int client) {
     // PTaH / knife plugins re-set m_szArmsModel after gloves — that draws default glove mesh under the skin.
     ClutchFixCustomArms(client);
     ClutchScrubStrayWearables(client, wearable);
-
-    // kgns: m_nBody=1 only when world model is enabled.
-    if (g_cvGlovesWorldModel.BoolValue) {
-        SetEntProp(client, Prop_Send, "m_nBody", 1);
-    }
+    SetEntProp(client, Prop_Send, "m_nBody", 1);
     ClutchNetworkUpdate(wearable);
 }
 

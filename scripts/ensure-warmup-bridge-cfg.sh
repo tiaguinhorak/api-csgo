@@ -20,4 +20,7 @@ if grep -q 'clutch_skins_debug' "${CFG}"; then
   sed -i 's|^clutch_skins_debug.*|clutch_skins_debug "1"|g' "${CFG}"
 fi
 
+# CS console treats # as a command — remove invalid lines from old cfgs.
+sed -i '/^#/d' "${CFG}" 2>/dev/null || true
+
 echo "OK: warmup bridge cfg — defer_live=0 (instant apply on warmup)"
