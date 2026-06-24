@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Deploy completo Clutch na VPS — um único comando.
+# Deploy completo Clutch — um comando para qualquer tipo de servidor.
 #
-# Uso (usuário csgo):
-#   cd ~/api-csgo && ./deploy.sh
+# Uso:
+#   cd ~/api-csgo && ./install.sh     # primeira vez
+#   cd ~/api-csgo && ./deploy.sh     # atualizar
 #
-# Faz tudo: git pull → build api-csgo → pm2 → sync allowlist → plugins CS → reload in-game.
-#
-# Opções: --skip-pull | --skip-ingame | --skip-plugin | --help
+# Configure apenas .env (SERVER_PROFILE, keys, RCON, screen name).
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "${ROOT}/scripts/deploy-vps.sh" "$@"
+exec bash "${ROOT}/scripts/deploy-unified.sh" "$@"
