@@ -77,41 +77,41 @@ send_plugin() {
     echo ">>> skip ${name}.smx (not installed)"
     return 0
   fi
-  send_cmd "sm plugins reload ${name}" 0.3
-  send_cmd "sm plugins load ${name}" 0.5
+  send_cmd "sm plugins reload ${name}" 0.5
 }
 
-send_cmd "sm plugins reload weapons"
-send_cmd "sm plugins info weapons"
-send_cmd "sm plugins unload z_clutch_skins_bridge" 0.6
+# weapons.smx must reload BEFORE bridge so patched natives register first
+send_cmd "sm plugins reload weapons" 1.2
+send_cmd "sm plugins info weapons" 0.5
+send_cmd "sm plugins unload z_clutch_skins_bridge" 0.8
 send_plugin "z_clutch_gloves"
-send_cmd "sm plugins info z_clutch_gloves"
-send_cmd "sm plugins load z_clutch_skins_bridge" 0.8
-send_cmd "sm plugins reload z_clutch_skins_bridge" 0.8
-send_cmd "sm plugins info z_clutch_skins_bridge"
+send_cmd "sm plugins info z_clutch_gloves" 0.5
+send_cmd "sm plugins load z_clutch_skins_bridge" 1.0
+send_cmd "sm plugins reload z_clutch_skins_bridge" 1.0
+send_cmd "sm plugins info z_clutch_skins_bridge" 0.5
 send_plugin "clutch_platform_gate"
-send_cmd "sm plugins info clutch_platform_gate"
 
 if [[ "${WARMUP_VPS:-0}" != "1" ]] && plugin_file_exists "clutch_match_tracker"; then
   send_plugin "clutch_match_tracker"
 fi
 
-if plugin_file_exists "eItems"; then
-  send_plugin "eItems"
-fi
-if plugin_file_exists "csgo_weaponstickers"; then
-  send_plugin "csgo_weaponstickers"
-fi
+send_cmd "clutch_gloves_debug 1" 0.3
+send_cmd "clutch_skins_debug 1" 0.3
 
-send_cmd "clutch_gloves_debug 1"
-send_cmd "clutch_skins_debug 1"
+if [[ "${WARMUP_VPS:-0}" == "1" ]]; then
+  echo "Warmup: applying skins after plugin reload..."
+  send_cmd "sm_clutch_gloves_refresh" 0.8
+  send_cmd "sm_clutch_applyskins" 2.0
+fi
 
 echo ""
 echo "Plugins reloaded. Connect in-game FIRST (Steam auth must be ready, not auth-pending)."
-echo "Then in server console:"
-echo "  sm_clutch_gloves_refresh"
-echo "  sm_clutch_applyskins"
-echo "  mp_restartgame 1"
+if [[ "${WARMUP_VPS:-0}" != "1" ]]; then
+  echo "Then in server console:"
+  echo "  sm_clutch_gloves_refresh"
+  echo "  sm_clutch_applyskins"
+  echo "  mp_restartgame 1"
+fi
 echo ""
 echo "Expect z_clutch_gloves Version: ${EXPECTED_GLOVES_VERSION}"
 echo "       z_clutch_skins_bridge Version: ${EXPECTED_BRIDGE_VERSION}"

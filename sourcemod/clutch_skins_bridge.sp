@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.0"
+#define PLUGIN_VERSION "3.8.1"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -201,6 +201,7 @@ public void OnPluginStart() {
 
     UpdateRefreshTimer();
     CreateTimer(1.0, Timer_RecheckPluginNatives, _, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(3.0, Timer_RecheckPluginNatives, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_RecheckPluginNatives(Handle timer) {
@@ -1442,6 +1443,47 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
     }
 }
 
+bool ClutchGiveCachedWeapon(int client, int idx) {
+    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+        return false;
+    }
+
+    int paintkit = g_CachedPaintkit[client][idx];
+    if (paintkit <= 0 || !IsClientInGame(client) || IsFakeClient(client)) {
+        return false;
+    }
+
+    char weaponClass[32];
+    strcopy(weaponClass, sizeof(weaponClass), g_ClutchWeaponKeys[idx]);
+
+    if (FindPlayerWeapon(client, weaponClass) != -1) {
+        return false;
+    }
+
+    int weapon = GivePlayerItem(client, weaponClass);
+    if (weapon == -1) {
+        return false;
+    }
+
+    SetClutchWeaponProps(
+        client,
+        weapon,
+        paintkit,
+        g_CachedWear[client][idx],
+        g_CachedSeed[client][idx],
+        g_CachedTrak[client][idx],
+        g_CachedTrakCount[client][idx],
+        g_CachedTag[client][idx],
+        false
+    );
+    g_iAppliedPaintkit[client][idx] = paintkit;
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Gave %s paintkit %d for %N", weaponClass, paintkit, client);
+    }
+    return true;
+}
+
 bool ClutchRefreshWeaponSlot(int client, int idx) {
     if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
         return false;
@@ -1493,7 +1535,7 @@ bool ClutchRefreshWeaponSlot(int client, int idx) {
     }
 
     if (!found) {
-        return false;
+        return ClutchGiveCachedWeapon(client, idx);
     }
 
     int newWeapon = GivePlayerItem(client, weaponClass);
@@ -1578,22 +1620,52 @@ void ClutchNetworkUpdateWeaponSkin(int entity) {
 
 #if defined _weapons_included_
 void RefreshWeaponsReloadNativeFlag() {
-    g_bWeaponsReloadNative = LibraryExists("weapons")
-        && GetFeatureStatus(FeatureType_Native, "Weapons_ReloadClientData") == FeatureStatus_Available;
-    g_bWeaponsRefreshNative = LibraryExists("weapons")
-        && GetFeatureStatus(FeatureType_Native, "Weapons_RefreshWeapon") == FeatureStatus_Available;
+    g_bWeaponsReloadNative = false;
+    g_bWeaponsRefreshNative = false;
 
-    if (LibraryExists("weapons") && !g_bWeaponsReloadNative && !g_bLoggedMissingReloadNative) {
+    if (!LibraryExists("weapons")) {
+        return;
+    }
+
+    g_bWeaponsReloadNative =
+        GetFeatureStatus(FeatureType_Native, "Weapons_ReloadClientData") == FeatureStatus_Available;
+    g_bWeaponsRefreshNative =
+        GetFeatureStatus(FeatureType_Native, "Weapons_RefreshWeapon") == FeatureStatus_Available;
+
+    if (!g_bWeaponsReloadNative) {
+        int nativeIdx = GetNativeByName("Weapons_ReloadClientData");
+        if (nativeIdx != INVALID_NATIVE && GetNativeStatus(nativeIdx) == Native_Available) {
+            g_bWeaponsReloadNative = true;
+        }
+    }
+    if (!g_bWeaponsRefreshNative) {
+        int nativeIdx = GetNativeByName("Weapons_RefreshWeapon");
+        if (nativeIdx != INVALID_NATIVE && GetNativeStatus(nativeIdx) == Native_Available) {
+            g_bWeaponsRefreshNative = true;
+        }
+    }
+
+    if (g_bWeaponsReloadNative) {
+        g_bLoggedMissingReloadNative = false;
+    }
+    if (g_bWeaponsRefreshNative) {
+        g_bLoggedMissingRefreshNative = false;
+    }
+
+    if (!g_bWeaponsReloadNative && !g_bLoggedMissingReloadNative) {
         g_bLoggedMissingReloadNative = true;
         LogMessage(
             "[Clutch] weapons.smx has no Weapons_ReloadClientData native — paint may stay stale. Run: bash scripts/patch-weapons-reload-native.sh"
         );
     }
-    if (LibraryExists("weapons") && !g_bWeaponsRefreshNative && !g_bLoggedMissingRefreshNative) {
+    if (!g_bWeaponsRefreshNative && !g_bLoggedMissingRefreshNative) {
         g_bLoggedMissingRefreshNative = true;
         LogMessage(
             "[Clutch] weapons.smx has no Weapons_RefreshWeapon native — re-run: bash scripts/patch-weapons-reload-native.sh"
         );
+    }
+    if (g_bWeaponsReloadNative && g_bWeaponsRefreshNative && g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] weapons.smx reload/refresh natives ready");
     }
 }
 
@@ -1626,6 +1698,9 @@ void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = fa
 
         int weapon = FindPlayerWeapon(client, weaponKey);
         if (weapon == -1) {
+            if (force && allowRegive) {
+                ClutchGiveCachedWeapon(client, i);
+            }
             continue;
         }
 
@@ -1662,14 +1737,15 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
+    bool allowRegive = force;
 #if defined _weapons_included_
     if (!skipWeaponsReload) {
         RefreshWeaponsReloadNativeFlag();
         TryReloadWeaponsPluginData(client);
     }
 #endif
-    ApplyAllCachedWeaponsToClient(client, force, false);
-    ScheduleForceReapply(client, force, false);
+    ApplyAllCachedWeaponsToClient(client, force, allowRegive);
+    ScheduleForceReapply(client, force, allowRegive);
     return Plugin_Stop;
 }
 
@@ -1903,13 +1979,13 @@ public void T_TeamLoadoutCallback(Database database, DBResultSet results, const 
             g_bLoggedMissingLoadout[client] = true;
         }
         QueryPlayerGloves(client, steamId, 0);
-        ScheduleWeaponsAfterGlovesApply(client, force, true);
+        ScheduleWeaponsAfterGlovesApply(client, force, !force);
         return;
     }
 
     g_bLoggedMissingLoadout[client] = false;
     QueryPlayerGloves(client, steamId, 0);
-    ScheduleWeaponsAfterGlovesApply(client, force, true);
+    ScheduleWeaponsAfterGlovesApply(client, force, !force);
 }
 
 bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
@@ -1974,7 +2050,9 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
 
         int weapon = FindPlayerWeapon(client, weaponId);
         if (weapon != -1) {
-            ApplyCachedSkinToEntity(client, weapon, idx, false, true, false);
+            ApplyCachedSkinToEntity(client, weapon, idx, false, true, force);
+        } else if (force) {
+            ClutchGiveCachedWeapon(client, idx);
         } else if (g_cvDebug.BoolValue) {
             LogMessage(
                 "[Clutch] Cached %s paintkit %d for %N (pick up weapon to apply)",
