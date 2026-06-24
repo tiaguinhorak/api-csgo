@@ -53,8 +53,21 @@ fi
 echo ""
 
 echo "--- 4) Local RCON test (${HOST}:${PORT}) ---"
+TCP_OK=false
+if command -v nc >/dev/null 2>&1; then
+  if nc -z -w3 "${HOST}" "${PORT}" 2>/dev/null; then
+    TCP_OK=true
+    echo "TCP connect OK (nc ${HOST}:${PORT})"
+  else
+    echo "FAIL: nc cannot open TCP ${HOST}:${PORT}"
+  fi
+else
+  echo "(install nc for TCP check: apt install netcat-openbsd)"
+fi
+
 if command -v node >/dev/null 2>&1 && [[ -f "${REPO_ROOT}/node_modules/srcds-rcon/package.json" ]]; then
-  node -e "
+  echo "RCON auth (srcds-rcon, 3s timeout — CS:GO legacy may need longer after boot):"
+  if node -e "
 const createRcon = require('srcds-rcon');
 const host = process.argv[1];
 const port = process.argv[2];
@@ -64,15 +77,16 @@ r.connect()
   .then(() => r.command('status'))
   .then((out) => { console.log('OK:', (out || '').split('\n').slice(0,2).join(' | ')); return r.disconnect(); })
   .catch((e) => { console.log('FAIL:', e.message || e); process.exit(1); });
-" "${HOST}" "${PORT}" "${RCON}" 2>/dev/null || echo "Skip node test (run: cd api-csgo && npm install)"
-elif command -v nc >/dev/null 2>&1; then
-  if nc -z -w2 "${HOST}" "${PORT}" 2>/dev/null; then
-    echo "TCP connect OK (nc) — use node/srcds-rcon for auth test"
+" "${HOST}" "${PORT}" "${RCON}" 2>/dev/null; then
+    : # OK printed
   else
-    echo "FAIL: nc cannot open TCP ${HOST}:${PORT}"
+    if [[ "${TCP_OK}" == true ]]; then
+      echo "WARN: TCP OK but srcds-rcon auth timed out (library uses 3s)."
+      echo "      Wait ~30s after start-csgo-screen.sh, or test from admin panel on your PC."
+    fi
   fi
-else
-  echo "Install nc or run from api-csgo with node_modules for full test"
+elif [[ "${TCP_OK}" != true ]]; then
+  echo "Skip RCON auth test (npm install in api-csgo for srcds-rcon)"
 fi
 echo ""
 
