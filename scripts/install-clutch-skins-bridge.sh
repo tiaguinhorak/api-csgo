@@ -191,9 +191,9 @@ if [[ -f "${CFG_DEPLOY}" ]]; then
     printf '\nclutch_skins_gloves_world_model "0"\n' >> "${CFG_DEPLOY}"
   fi
   if grep -q 'clutch_stickers_db_path' "${CFG_DEPLOY}"; then
-    sed -i 's|^clutch_stickers_db_path.*|clutch_stickers_db_path "addons/sourcemod/data/sqlite/csgo_weaponstickers.sq3"|g' "${CFG_DEPLOY}"
+    sed -i 's|^clutch_stickers_db_path.*|clutch_stickers_db_path "data/sqlite/csgo_weaponstickers.sq3"|g' "${CFG_DEPLOY}"
   else
-    printf '\nclutch_stickers_db_path "addons/sourcemod/data/sqlite/csgo_weaponstickers.sq3"\n' >> "${CFG_DEPLOY}"
+    printf '\nclutch_stickers_db_path "data/sqlite/csgo_weaponstickers.sq3"\n' >> "${CFG_DEPLOY}"
   fi
 fi
 

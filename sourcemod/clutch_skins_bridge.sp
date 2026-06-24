@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.17"
+#define PLUGIN_VERSION "3.8.18"
 #define CLUTCH_SITE_STICKER_SLOTS 5
 #define STICKER_REAPPLY_PASS_COUNT 3
 #define GLOVE_THINK_TICK_MOD 8
@@ -53,6 +53,7 @@ Database g_hWeaponsDb = null;
 Database g_hStickersDb = null;
 char g_sStickersTable[32];
 char g_sLegacyStickersTable[32];
+char g_sResolvedStickersDbPath[PLATFORM_MAX_PATH];
 char g_sTablePrefix[16];
 bool g_bLoggedMissingLoadout[MAXPLAYERS + 1];
 float g_fLastApplyTime[MAXPLAYERS + 1];
@@ -148,6 +149,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
     MarkNativeAsOptional("ClutchGloves_IsClientUsingGloves");
 #endif
     MarkNativeAsOptional("PTaH_GetItemDefinitionByDefIndex");
+    MarkNativeAsOptional("CEconItemView.AttributeList.get");
     return APLRes_Success;
 }
 
@@ -500,6 +502,25 @@ public void StickersDatabaseConnected(Database database, const char[] error, any
     EnsureClutchStickersTable();
 }
 
+void ClutchResolveStickersDbPath(char[] dbPath, int maxlen) {
+    g_cvStickersDbPath.GetString(dbPath, maxlen);
+
+    if (dbPath[0] == '\0') {
+        BuildPath(Path_SM, dbPath, maxlen, "data/sqlite/csgo_weaponstickers.sq3");
+        return;
+    }
+
+    if (dbPath[0] == '/' || (strlen(dbPath) > 2 && dbPath[1] == ':')) {
+        return;
+    }
+
+    char relative[PLATFORM_MAX_PATH];
+    strcopy(relative, sizeof(relative), dbPath);
+    ReplaceString(relative, sizeof(relative), "addons/sourcemod/", "");
+    ReplaceString(relative, sizeof(relative), "addons\\sourcemod\\", "");
+    BuildPath(Path_SM, dbPath, maxlen, relative);
+}
+
 void ConnectStickersDatabaseDirect() {
     if (g_hStickersDb != null) {
         delete g_hStickersDb;
@@ -507,10 +528,8 @@ void ConnectStickersDatabaseDirect() {
     }
 
     char dbPath[PLATFORM_MAX_PATH];
-    g_cvStickersDbPath.GetString(dbPath, sizeof(dbPath));
-    if (dbPath[0] == '\0') {
-        BuildPath(Path_SM, dbPath, sizeof(dbPath), "data/sqlite/csgo_weaponstickers.sq3");
-    }
+    ClutchResolveStickersDbPath(dbPath, sizeof(dbPath));
+    strcopy(g_sResolvedStickersDbPath, sizeof(g_sResolvedStickersDbPath), dbPath);
 
     KeyValues kv = new KeyValues("driver");
     kv.SetString("driver", "sqlite");
@@ -531,17 +550,10 @@ void ConnectStickersDatabaseDirect() {
 
     g_hStickersDb = database;
 
-    if (g_cvDebug.BoolValue) {
-        LogMessage(
-            "[Clutch] Connected to stickers SQLite via SQL_ConnectCustom (%s, table %s)",
-            dbPath,
-            g_sStickersTable
-        );
-    } else {
-        LogMessage("[Clutch] Connected to stickers SQLite via SQL_ConnectCustom (%s)", dbPath);
-    }
+    LogMessage("[Clutch] stickers DB path: %s (table %s)", dbPath, g_sStickersTable);
 
     EnsureClutchStickersTable();
+    EnsureLegacyStickersTable();
 }
 
 void EnsureClutchStickersTable() {
@@ -566,6 +578,29 @@ public void T_EnsureClutchStickersTableCallback(Database database, DBResultSet r
     }
     g_bStickersTableReady = true;
     LogMessage("[Clutch] %s table ready", g_sStickersTable);
+}
+
+void EnsureLegacyStickersTable() {
+    if (g_hStickersDb == null) {
+        return;
+    }
+
+    char query[768];
+    Format(
+        query,
+        sizeof(query),
+        "CREATE TABLE IF NOT EXISTS %s (id INTEGER PRIMARY KEY AUTOINCREMENT, steamid varchar(64) NOT NULL, weaponindex int NOT NULL DEFAULT 0, slot0 int NOT NULL DEFAULT 0, slot1 int NOT NULL DEFAULT 0, slot2 int NOT NULL DEFAULT 0, slot3 int NOT NULL DEFAULT 0, slot4 int NOT NULL DEFAULT 0, slot5 int NOT NULL DEFAULT 0, wear0 real NOT NULL DEFAULT 0, wear1 real NOT NULL DEFAULT 0, wear2 real NOT NULL DEFAULT 0, wear3 real NOT NULL DEFAULT 0, wear4 real NOT NULL DEFAULT 0, wear5 real NOT NULL DEFAULT 0, rotation0 real NOT NULL DEFAULT 0, rotation1 real NOT NULL DEFAULT 0, rotation2 real NOT NULL DEFAULT 0, rotation3 real NOT NULL DEFAULT 0, rotation4 real NOT NULL DEFAULT 0, rotation5 real NOT NULL DEFAULT 0, last_seen int NOT NULL DEFAULT 0, UNIQUE(steamid, weaponindex))",
+        g_sLegacyStickersTable
+    );
+    g_hStickersDb.Query(T_EnsureLegacyStickersTableCallback, query, _, DBPrio_High);
+}
+
+public void T_EnsureLegacyStickersTableCallback(Database database, DBResultSet results, const char[] error, any data) {
+    if (results == null) {
+        LogError("[Clutch] %s table create failed: %s", g_sLegacyStickersTable, error);
+        return;
+    }
+    LogMessage("[Clutch] %s table ready", g_sLegacyStickersTable);
 }
 
 void EnsureGlovesTable() {
@@ -1913,20 +1948,27 @@ void ClutchWriteStickerSlotAttributes(CAttributeList attrList, int slot, int sti
 
 void ClutchApplyStickerAttrsToEntity(int client, int entity, int idx, int teamSlot) {
     CEconItemView itemView = PTaH_GetEconItemViewFromEconEntity(entity);
-    CAttributeList attrList = itemView.NetworkedDynamicAttributesForDemos;
-    int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);
+    CAttributeList demoAttrs = itemView.NetworkedDynamicAttributesForDemos;
+    CAttributeList staticAttrs = itemView.AttributeList;
+    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
 
-    for (int s = 0; s < maxSlots && s < CLUTCH_SITE_STICKER_SLOTS; s++) {
+    if (g_cvDebug.BoolValue && engineMax < CLUTCH_SITE_STICKER_SLOTS) {
+        LogMessage(
+            "[Clutch] engine reports %d sticker slots for %s — applying all %d site slots",
+            engineMax,
+            g_ClutchWeaponKeys[idx],
+            CLUTCH_SITE_STICKER_SLOTS
+        );
+    }
+
+    for (int s = 0; s < CLUTCH_SITE_STICKER_SLOTS; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
         if (stickerId == 0) {
             continue;
         }
-        ClutchWriteStickerSlotAttributes(
-            attrList,
-            s,
-            stickerId,
-            g_fStickerWears[client][teamSlot][idx][s]
-        );
+        float wear = g_fStickerWears[client][teamSlot][idx][s];
+        ClutchWriteStickerSlotAttributes(demoAttrs, s, stickerId, wear);
+        ClutchWriteStickerSlotAttributes(staticAttrs, s, stickerId, wear);
     }
 }
 
@@ -2938,16 +2980,17 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         LogError("[Clutch] stickers DB query failed: %s", error);
         if (StrContains(error, "no such table", false) != -1) {
             EnsureClutchStickersTable();
-            QueryLegacyPlayerStickers(client, steamId, altAttempt);
+            ScheduleStickersQueryRetry(client, steamId, altAttempt, 0.5);
         }
         return;
     }
 
-    ClutchClearStickerCache(client);
-
     bool anyRow = false;
     while (results.FetchRow()) {
-        anyRow = true;
+        if (!anyRow) {
+            ClutchClearStickerCache(client);
+            anyRow = true;
+        }
         int defIndex = results.FetchInt(0);
         char teamLabel[4];
         results.FetchString(1, teamLabel, sizeof(teamLabel));
@@ -2984,7 +3027,12 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
             return;
         }
 
-        QueryLegacyPlayerStickers(client, steamId, 0);
+        LogError(
+            "[Clutch] no %s rows for steam %s (db=%s) — save stickers on site / check STICKERS_DB_PATH",
+            g_sStickersTable,
+            steamId,
+            g_sResolvedStickersDbPath
+        );
         return;
     }
 
@@ -3006,7 +3054,6 @@ public void T_LegacyStickersCallback(Database database, DBResultSet results, con
 
     if (results == null) {
         LogError("[Clutch] legacy stickers DB query failed: %s", error);
-        ClutchClearStickerCache(client);
         return;
     }
 
@@ -3059,7 +3106,6 @@ public void T_LegacyStickersCallback(Database database, DBResultSet results, con
             return;
         }
 
-        ClutchClearStickerCache(client);
         return;
     }
 

@@ -64,6 +64,11 @@ else
 fi
 
 echo ""
+echo ">>> Bridge must read SAME file as api-csgo STICKERS_DB_PATH"
+echo "    Expected: \${SM}/data/sqlite/csgo_weaponstickers.sq3"
+echo "    cfg: clutch_stickers_db_path \"data/sqlite/csgo_weaponstickers.sq3\" (NOT addons/sourcemod/data/...)"
+
+echo ""
 echo "Fix wrong path: set STICKERS_DB_PATH=${STICKERS_DB} in api-csgo .env, npm run build, pm2 restart, save stickers on site."
 echo "Disable csgo_weaponstickers auto-apply: sm_weaponstickers_enabled 0 in cfg/sourcemod/csgo_weaponstickers.cfg"
 echo "Quick migrate TR from legacy: bash scripts/migrate-legacy-stickers-to-clutch.sh ${STEAM_FRAGMENT}"
