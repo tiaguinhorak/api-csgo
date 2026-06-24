@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.14"
+#define PLUGIN_VERSION "3.8.15"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -79,6 +79,7 @@ int g_CachedTrakCount[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 char g_CachedTag[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][64];
 int g_iAppliedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 int g_iStickerSlots[MAXPLAYERS + 1][2][CLUTCH_WEAPON_SLOTS][CLUTCH_STICKER_SLOTS];
+float g_fStickerWears[MAXPLAYERS + 1][2][CLUTCH_WEAPON_SLOTS][CLUTCH_STICKER_SLOTS];
 char g_CachedKnifeClass[MAXPLAYERS + 1][CLUTCH_KNIFE_CLASS_LEN];
 float g_fLastEntityApply[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 float g_fLastWeaponRegive[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
@@ -1773,6 +1774,7 @@ void ClutchClearStickerCache(int client) {
         for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
             for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
                 g_iStickerSlots[client][t][i][s] = 0;
+                g_fStickerWears[client][t][i][s] = 0.0;
             }
         }
     }
@@ -1794,6 +1796,35 @@ bool ClutchWeaponHasStickerCache(int client, int idx) {
     return false;
 }
 
+bool ClutchEnsureEconItemInitialized(int client, int entity) {
+    if (client <= 0 || entity <= 0 || !IsValidEntity(entity)) {
+        return false;
+    }
+
+    if (!HasEntProp(entity, Prop_Send, "m_iItemIDHigh")) {
+        return false;
+    }
+
+    if (GetEntProp(entity, Prop_Send, "m_iItemIDHigh") >= 16384) {
+        return true;
+    }
+
+    SetEntProp(entity, Prop_Send, "m_iItemIDLow", -1);
+    SetEntProp(entity, Prop_Send, "m_iItemIDHigh", g_iItemIdHigh++);
+    SetEntProp(entity, Prop_Send, "m_iAccountID", GetSteamAccountID(client));
+    if (HasEntProp(entity, Prop_Send, "m_hOwnerEntity")) {
+        SetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity", client);
+    }
+    if (HasEntProp(entity, Prop_Send, "m_hPrevOwner")) {
+        SetEntPropEnt(entity, Prop_Send, "m_hPrevOwner", -1);
+    }
+    if (HasEntProp(entity, Prop_Send, "m_bInitialized")) {
+        SetEntProp(entity, Prop_Send, "m_bInitialized", 1);
+    }
+
+    return true;
+}
+
 bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
     if (
         client <= 0
@@ -1807,6 +1838,8 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
         return false;
     }
 
+    ClutchEnsureEconItemInitialized(client, entity);
+
     int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
     CEconItemView itemView = PTaH_GetEconItemViewFromEconEntity(entity);
     CAttributeList attrList = itemView.NetworkedDynamicAttributesForDemos;
@@ -1814,10 +1847,23 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
 
     for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
-        if (stickerId != 0) {
-            attrList.SetOrAddAttributeValue(113 + s * 4, stickerId);
-            updated = true;
+        if (stickerId == 0) {
+            continue;
         }
+
+        int idAttr = 113 + s * 4;
+        float wear = g_fStickerWears[client][teamSlot][idx][s];
+        if (wear < 0.0) {
+            wear = 0.0;
+        } else if (wear > 1.0) {
+            wear = 1.0;
+        }
+
+        // Match CSGO_WeaponStickers: id + wear + scale (slots 3+ need explicit scale).
+        attrList.SetOrAddAttributeValue(idAttr, stickerId);
+        attrList.SetOrAddAttributeValue(idAttr + 1, wear);
+        attrList.SetOrAddAttributeValue(idAttr + 2, 1.0);
+        updated = true;
     }
 
     return updated;
@@ -2650,7 +2696,7 @@ void QueryPlayerStickers(int client, const char[] steamId, int altAttempt) {
     Format(
         query,
         sizeof(query),
-        "SELECT weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5 FROM %s WHERE steamid='%s'",
+        "SELECT weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5 FROM %s WHERE steamid='%s'",
         g_sStickersTable,
         escaped
     );
@@ -2674,14 +2720,21 @@ void QueryLegacyPlayerStickers(int client, const char[] steamId, int altAttempt)
     Format(
         query,
         sizeof(query),
-        "SELECT weaponindex, slot0, slot1, slot2, slot3, slot4, slot5 FROM %s WHERE steamid='%s'",
+        "SELECT weaponindex, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5 FROM %s WHERE steamid='%s'",
         g_sLegacyStickersTable,
         escaped
     );
     g_hStickersDb.Query(T_LegacyStickersCallback, query, pack);
 }
 
-void ClutchCacheStickerRowForTeam(int client, int defIndex, int teamSlot, DBResultSet results, int slotColumnStart) {
+void ClutchCacheStickerRowForTeam(
+    int client,
+    int defIndex,
+    int teamSlot,
+    DBResultSet results,
+    int slotColumnStart,
+    int wearColumnStart
+) {
     int idx = ClutchIndexFromDefIndex(defIndex);
     if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
         return;
@@ -2689,6 +2742,11 @@ void ClutchCacheStickerRowForTeam(int client, int defIndex, int teamSlot, DBResu
 
     for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
         g_iStickerSlots[client][teamSlot][idx][s] = results.FetchInt(slotColumnStart + s);
+        if (wearColumnStart >= 0) {
+            g_fStickerWears[client][teamSlot][idx][s] = results.FetchFloat(wearColumnStart + s);
+        } else {
+            g_fStickerWears[client][teamSlot][idx][s] = 0.0;
+        }
     }
 }
 
@@ -2748,19 +2806,21 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         char teamLabel[4];
         results.FetchString(1, teamLabel, sizeof(teamLabel));
         int teamSlot = StrEqual(teamLabel, "CT", false) ? 1 : 0;
-        ClutchCacheStickerRowForTeam(client, defIndex, teamSlot, results, 2);
+        ClutchCacheStickerRowForTeam(client, defIndex, teamSlot, results, 2, 8);
 
         if (g_cvDebug.BoolValue) {
             int idx = ClutchIndexFromDefIndex(defIndex);
             if (idx >= 0) {
                 LogMessage(
-                    "[Clutch] Cached stickers %s defindex %d (%s) slots %d,%d,%d for %N",
+                    "[Clutch] Cached stickers %s defindex %d (%s) slots %d,%d,%d,%d,%d for %N",
                     teamLabel,
                     defIndex,
                     g_ClutchWeaponKeys[idx],
                     g_iStickerSlots[client][teamSlot][idx][0],
                     g_iStickerSlots[client][teamSlot][idx][1],
                     g_iStickerSlots[client][teamSlot][idx][2],
+                    g_iStickerSlots[client][teamSlot][idx][3],
+                    g_iStickerSlots[client][teamSlot][idx][4],
                     client
                 );
             }
@@ -2809,8 +2869,10 @@ public void T_LegacyStickersCallback(Database database, DBResultSet results, con
         anyRow = true;
         int defIndex = results.FetchInt(0);
         int slots[CLUTCH_STICKER_SLOTS];
+        float wears[CLUTCH_STICKER_SLOTS];
         for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
             slots[s] = results.FetchInt(1 + s);
+            wears[s] = results.FetchFloat(1 + CLUTCH_STICKER_SLOTS + s);
         }
 
         int idx = ClutchIndexFromDefIndex(defIndex);
@@ -2821,17 +2883,20 @@ public void T_LegacyStickersCallback(Database database, DBResultSet results, con
         for (int teamSlot = 0; teamSlot < 1; teamSlot++) {
             for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
                 g_iStickerSlots[client][teamSlot][idx][s] = slots[s];
+                g_fStickerWears[client][teamSlot][idx][s] = wears[s];
             }
         }
 
         if (g_cvDebug.BoolValue) {
             LogMessage(
-                "[Clutch] Cached legacy stickers defindex %d (%s) slots %d,%d,%d for %N (TR only)",
+                "[Clutch] Cached legacy stickers defindex %d (%s) slots %d,%d,%d,%d,%d for %N (TR only)",
                 defIndex,
                 g_ClutchWeaponKeys[idx],
                 slots[0],
                 slots[1],
                 slots[2],
+                slots[3],
+                slots[4],
                 client
             );
         }
