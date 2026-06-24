@@ -43,7 +43,11 @@ if [[ "${CLUTCH_IS_RANKED}" -eq 1 ]]; then
 else
   set_kv_if_missing "WARMUP_VPS" "1"
   set_kv_if_missing "CLUTCH_CS_SCREEN" "csgo-warmup-#1"
+  set_kv_if_missing "CSGO_BIND_IP" "0.0.0.0"
   set_kv_if_missing "BIND_HOST" "0.0.0.0"
+  if ! grep -qE '^CSGO_PUBLIC_HOST=' "${ENV_FILE}"; then
+    echo "WARN: add CSGO_PUBLIC_HOST=<public IP> so players outside LAN can connect"
+  fi
   if grep -qE '^BIND_HOST=127' "${ENV_FILE}"; then
     sed -i 's/^BIND_HOST=.*/BIND_HOST=0.0.0.0/' "${ENV_FILE}"
     echo "Fixed BIND_HOST=0.0.0.0 (site LAN push)"
