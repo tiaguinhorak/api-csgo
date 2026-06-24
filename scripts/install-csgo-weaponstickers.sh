@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Install CSGO_WeaponStickers + eItems on the CS:GO VPS (Linux).
+# Plugin: https://forums.alliedmods.net/showthread.php?t=327078
+# (packaged via z1ntex/quasemago releases — see Z1NTEX_RAR_URL below)
 #
 # Uso:
 #   cd ~/api-csgo && git pull

@@ -182,6 +182,54 @@ curl -s http://127.0.0.1:3001/health
 
 ---
 
+## 5b. Stickers no jogo (CSGO_WeaponStickers)
+
+Plugin AlliedMods: [CSGO Weapon Stickers](https://forums.alliedmods.net/showthread.php?t=327078). O repo já instala o fork **z1ntex v1.3.6** + **eItems** + **sm-ripext** + **PTaH**.
+
+**Na VPS (como `csgo`):**
+
+```bash
+cd ~/api-csgo && git pull
+sudo apt install -y p7zip-full   # extrair .rar do release z1ntex
+bash scripts/install-csgo-weaponstickers.sh
+# se .smx quebrado: WEAPONSTICKERS_FORCE=1 bash scripts/install-csgo-weaponstickers.sh
+```
+
+**Reiniciar srcds** (extensions `rip.ext` só carregam no boot):
+
+```bash
+screen -r csgo-clutch-#1
+# Ctrl+C no srcds, subir de novo — ou changelevel
+```
+
+**Console do servidor:**
+
+```text
+sm exts list
+sm plugins load eItems
+sm plugins load csgo_weaponstickers
+sm plugins list | grep -iE 'eitems|weaponstickers'
+```
+
+**Sync site → SQLite do plugin** (api-csgo `.env`):
+
+- `CLUTCH_SITE_URL` = URL pública do Next (dev: ngrok em `TUNNEL_URL`)
+- `CSGO_SKINS_SYNC_KEY` = **igual** ao `site/.env`
+
+```bash
+cd ~/api-csgo
+bash scripts/ensure-clutch-site-env.sh
+curl -s -X POST http://127.0.0.1:3001/api/csgo/stickers/sync-from-site \
+  -H "x-skins-sync-key: $CSGO_SKINS_SYNC_KEY"
+pm2 restart api-csgo --update-env
+```
+
+DB lido pelo plugin: `/home/csgo/server/csgo/addons/sourcemod/data/sqlite/csgo_weaponstickers.sq3`
+
+Stickers aplicam no **spawn** (cfg `sm_weaponstickers_updateviewmodel 1`).
+
+---
+
 ## 6. Console do servidor CS (screen)
 
 ```bash
