@@ -82,7 +82,7 @@ echo ""
 echo ">>> kgns weapons row (knife index + bayonet paint)"
 if [[ -f "${DB_PATH}" ]]; then
   sqlite3 "${DB_PATH}" \
-    "SELECT steamid, knife, bayonet, deagle, ak47 FROM weapons WHERE steamid LIKE '%203852188%' OR steamid LIKE '%407704376%' LIMIT 4;"
+    "SELECT steamid, knife, bayonet, knife_butterfly, deagle, ak47 FROM weapons WHERE steamid LIKE '%203852188%' OR steamid LIKE '%407704376%' LIMIT 4;"
 fi
 
 echo ""

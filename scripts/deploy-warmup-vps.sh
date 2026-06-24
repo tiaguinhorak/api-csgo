@@ -87,6 +87,10 @@ if [[ ! -f package.json ]]; then
 fi
 
 echo ""
+echo ">>> warmup .env (api-csgo + site sync)"
+bash "${REPO_ROOT}/scripts/ensure-warmup-api-env.sh"
+
+echo ""
 echo ">>> npm install"
 npm install --no-audit --no-fund
 

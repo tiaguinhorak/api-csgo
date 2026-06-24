@@ -42,12 +42,23 @@ export function requireApiAuth(req: Request, res: Response, next: NextFunction):
 }
 
 export function assertProductionApiKey(): void {
-  const apiKey = config.apiKey?.trim();
-  if (
-    process.env.NODE_ENV === 'production' &&
-    (!apiKey || apiKey === 'default-key-change-me')
-  ) {
-    console.error('[api-csgo] Set API_KEY or CSGO_API_KEY in production.');
-    process.exit(1);
+  if (process.env.NODE_ENV !== 'production') {
+    return;
   }
+
+  const apiKey = config.apiKey?.trim();
+  const syncKey = process.env.CSGO_SKINS_SYNC_KEY?.trim();
+
+  if (syncKey) {
+    return;
+  }
+
+  if (apiKey && apiKey !== 'default-key-change-me') {
+    return;
+  }
+
+  console.error(
+    '[api-csgo] Set API_KEY, CSGO_API_KEY, or CSGO_SKINS_SYNC_KEY in production.',
+  );
+  process.exit(1);
 }
