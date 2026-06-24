@@ -17,8 +17,14 @@ PORT="${PORT:-3000}"
 API_URL="${CLUTCH_API_URL:-http://127.0.0.1:${PORT}}"
 
 if [[ "${WARMUP_VPS:-}" == "1" || "${CSGO_SERVER_POOL:-}" == "warmup" ]]; then
-  echo "Warmup VPS mode — direct SQLite sync (no local api-csgo)"
-  exec bash "${REPO_ROOT}/scripts/sync-team-loadouts-warmup.sh"
+  WARMUP_API="${CLUTCH_API_URL:-http://127.0.0.1:${PORT:-3001}}"
+  if curl -sf "${WARMUP_API}/health" >/dev/null 2>&1; then
+    echo "Warmup VPS — api-csgo running at ${WARMUP_API} (curl player-sync, same as ranked)"
+    API_URL="${WARMUP_API}"
+  else
+    echo "Warmup VPS mode — direct SQLite sync (api-csgo not running on ${WARMUP_API})"
+    exec bash "${REPO_ROOT}/scripts/sync-team-loadouts-warmup.sh"
+  fi
 fi
 
 echo "=== Team loadout sync ==="

@@ -39,7 +39,7 @@ async function listScreenSessionIds(): Promise<string[]> {
       if (configured && line.includes(`.${configured}`)) {
         ids.push(id);
       }
-      if (/csgo-clutch/i.test(line)) {
+      if (/csgo-(clutch|warmup)/i.test(line)) {
         ids.push(id);
       }
     }

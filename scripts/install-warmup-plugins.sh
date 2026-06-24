@@ -17,8 +17,9 @@ bash "${REPO_ROOT}/scripts/sync-steam-allowlist.sh" || true
 bash "${REPO_ROOT}/scripts/ensure-clutch-server-branding.sh" || true
 
 echo ""
-echo "Skins no warmup = mesma fonte que ranked: site (Postgres) → SQLite local."
-echo "  bash scripts/sync-team-loadouts-warmup.sh   # após equipar no site"
+echo "Skins no warmup = mesma fonte que ranked: site equip → CSGO_WARMUP_API_URL player-sync."
+echo "  bash scripts/deploy-warmup-vps.sh          # deploy completo (recomendado)"
+echo "  bash scripts/sync-team-loadouts-warmup.sh  # fallback sem pm2"
 echo "  bash scripts/reload-clutch-skins-ingame.sh"
 
 echo ""

@@ -93,4 +93,9 @@ if [[ -f "${DB_PATH}" ]]; then
 fi
 
 echo ""
-echo "In-game: cd ~/api-csgo && bash scripts/reload-clutch-skins-ingame.sh"
+echo ">>> stage + apply in-game (same as ranked player-sync)"
+if bash "${REPO_ROOT}/scripts/stage-and-apply-loadouts-in-game.sh"; then
+  echo "In-game apply OK."
+else
+  echo "WARN: in-game apply failed — CS offline? Run: bash scripts/reload-clutch-skins-ingame.sh"
+fi
