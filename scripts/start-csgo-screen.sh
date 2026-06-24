@@ -26,6 +26,7 @@ MAP="${CSGO_START_MAP:-de_dust2}"
 MAXPLAYERS="${CSGO_MAXPLAYERS:-10}"
 GAME_TYPE="${CSGO_GAME_TYPE:-0}"
 GAME_MODE="${CSGO_GAME_MODE:-1}"
+BIND_IP="${CSGO_BIND_IP:-0.0.0.0}"
 BOOT_LOG="${SERVER_ROOT}/csgo/clutch-srcds-boot.log"
 
 if [[ ! -x "${SERVER_ROOT}/srcds_run" ]]; then
@@ -48,7 +49,7 @@ bash "${REPO_ROOT}/scripts/ensure-csgo-steam-appid.sh" || true
 mkdir -p "${SERVER_ROOT}/csgo"
 echo "===== boot $(date -Is) =====" >> "${BOOT_LOG}"
 
-RUNLINE="cd '${SERVER_ROOT}' && ./srcds_run -tickrate 128 -game csgo -console -usercon -port ${PORT} +game_type ${GAME_TYPE} +game_mode ${GAME_MODE} +map ${MAP} +rcon_password '${RCON}' -maxplayers ${MAXPLAYERS}"
+RUNLINE="cd '${SERVER_ROOT}' && ./srcds_run -tickrate 128 -game csgo -console -usercon -ip ${BIND_IP} -port ${PORT} +game_type ${GAME_TYPE} +game_mode ${GAME_MODE} +map ${MAP} +rcon_password '${RCON}' -maxplayers ${MAXPLAYERS}"
 if [[ -n "${GSLT}" ]]; then
   RUNLINE+=" +sv_setsteamaccount '${GSLT}'"
 else
