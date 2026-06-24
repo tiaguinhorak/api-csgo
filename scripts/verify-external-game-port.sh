@@ -24,6 +24,7 @@ echo "=== Clutch — external connect (router / CGNAT) ==="
 echo ""
 
 LAN_IPS="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true)"
+LAN_IPV4="$(echo "${LAN_IPS}" | grep -E '^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)' | head -1)"
 DETECTED="$(detect_ipv4)"
 
 echo "Game port: UDP/TCP ${GAME_PORT}"
@@ -50,7 +51,7 @@ if [[ "${NEEDS_FORWARD}" -eq 1 ]]; then
   echo "No roteador/modem, crie PORT FORWARD:"
   echo "  Protocolo: UDP (e opcional TCP para RCON)"
   echo "  Porta externa: ${GAME_PORT}"
-  echo "  IP interno destino: $(echo "${LAN_IPS}" | awk '{print $1}')"
+  echo "  IP interno destino: ${LAN_IPV4:-$(echo "${LAN_IPS}" | head -1)}"
   echo "  Porta interna: ${GAME_PORT}"
   echo ""
   echo "Teste de FORA da sua Wi‑Fi (4G no celular): connect ${PUBLIC:-${DETECTED}}:${GAME_PORT}"
