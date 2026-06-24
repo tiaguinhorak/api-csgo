@@ -82,6 +82,23 @@ router.post('/:id/rcon', async (req: Request, res: Response) => {
   }
 });
 
+router.patch('/:id', (req: Request, res: Response) => {
+  try {
+    const { name, pool } = req.body || {};
+    const patch: { name?: string; pool?: 'ranked' | 'warmup' | 'public' } = {};
+    if (typeof name === 'string') patch.name = name;
+    if (pool === 'ranked' || pool === 'warmup' || pool === 'public') patch.pool = pool;
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+    const server = serverManager.updateServer(String(req.params.id), patch);
+    res.json(sanitizeGameServer(server));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Bad request';
+    res.status(400).json({ error: message });
+  }
+});
+
 router.delete('/:id', (req: Request, res: Response) => {
   serverManager.removeServer(String(req.params.id));
   res.status(204).send();

@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.6"
+#define PLUGIN_VERSION "3.8.7"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -41,6 +41,7 @@ ConVar g_cvWeaponsTablePrefix;
 ConVar g_cvRefreshSeconds;
 ConVar g_cvGlovesWorldModel;
 ConVar g_cvDeferLive;
+ConVar g_cvOncePerMatch;
 
 Database g_hWeaponsDb = null;
 char g_sTablePrefix[16];
@@ -74,6 +75,7 @@ float g_fLastEntityApply[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 float g_fLastWeaponRegive[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 int g_iReapplyGen[MAXPLAYERS + 1];
 bool g_bAllowWeaponRegive[MAXPLAYERS + 1];
+bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35, 1.0, 2.0};
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
@@ -174,6 +176,16 @@ public void OnPluginStart() {
         "clutch_skins_defer_live",
         "1",
         "1 = web loadout changes apply after match (admins each round). 0 = apply immediately",
+        FCVAR_NOTIFY,
+        true,
+        0.0,
+        true,
+        1.0
+    );
+    g_cvOncePerMatch = CreateConVar(
+        "clutch_skins_once_per_match",
+        "1",
+        "1 = full loadout sync once per match (no re-apply on death/respawn). sm_clutch_applyskins always forces.",
         FCVAR_NOTIFY,
         true,
         0.0,
@@ -633,7 +645,24 @@ public Action ClutchBlockWsChatForPlayers(int client, const char[] command, int 
     return Plugin_Handled;
 }
 
+void ClutchResetMatchLoadoutFlags() {
+    for (int i = 1; i <= MaxClients; i++) {
+        g_bMatchLoadoutSynced[i] = false;
+    }
+}
+
+bool ClutchRoutineFullApplyBlocked(int client, bool force) {
+    if (!g_cvOncePerMatch.BoolValue) {
+        return false;
+    }
+    if (g_bAllowWeaponRegive[client]) {
+        return false;
+    }
+    return force && g_bMatchLoadoutSynced[client];
+}
+
 void ClutchBeginForcedSync(int client) {
+    g_bMatchLoadoutSynced[client] = false;
     g_bAllowWeaponRegive[client] = true;
 #if defined _clutch_gloves_included_
     ClutchGlovesRefreshClientSafe(client);
@@ -682,6 +711,7 @@ public void OnClientDisconnect(int client) {
     g_iGloveApplyGen[client] = 0;
     g_bForceGloveApply[client] = false;
     g_bAllowWeaponRegive[client] = false;
+    g_bMatchLoadoutSynced[client] = false;
     g_iReapplyGen[client] = 0;
     g_CachedKnifeClass[client][0] = '\0';
     ClutchDisableGloveThink(client);
@@ -718,9 +748,10 @@ public void OnClientAuthorized(int client, const char[] authString) {
     ClutchGlovesRefreshClientSafe(client);
 #endif
     g_fLastApplyTime[client] = 0.0;
-    int userid = GetClientUserId(client);
-    CreateTimer(0.35, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
-    CreateTimer(1.0, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
+    if (g_bMatchLoadoutSynced[client]) {
+        return;
+    }
+    CreateTimer(0.4, Timer_ApplySkinsOnSpawn, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action OnWeaponEquip(int client, int weapon) {
@@ -767,15 +798,16 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     if (client <= 0 || IsFakeClient(client)) {
         return;
     }
+    if (g_cvOncePerMatch.BoolValue && g_bMatchLoadoutSynced[client]) {
+        return;
+    }
     int userid = GetClientUserId(client);
 #if defined _clutch_gloves_included_
     if (ClutchUseExternalGlovesPlugin()) {
         ClutchGlovesRefreshClientSafe(client);
     }
 #endif
-    CreateTimer(0.2, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
-    CreateTimer(0.65, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
-    CreateTimer(1.35, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(0.4, Timer_ApplySkinsOnSpawn, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_ApplySkinsOnSpawn(Handle timer, any userid) {
@@ -801,6 +833,9 @@ public Action Timer_RoundStartApply(Handle timer) {
         if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
             continue;
         }
+        if (g_cvOncePerMatch.BoolValue && g_bMatchLoadoutSynced[client]) {
+            continue;
+        }
         if (
             g_cvDeferLive.BoolValue
             && ClutchIsLiveMatch()
@@ -814,6 +849,7 @@ public Action Timer_RoundStartApply(Handle timer) {
 }
 
 public void Event_MatchOver(Event event, const char[] name, bool dontBroadcast) {
+    ClutchResetMatchLoadoutFlags();
     for (int client = 1; client <= MaxClients; client++) {
         if (!IsClientInGame(client) || IsFakeClient(client)) {
             continue;
@@ -843,7 +879,9 @@ public Action Timer_ApplyAfterTeamChange(Handle timer, DataPack pack) {
 
     int client = GetClientOfUserId(userid);
     if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
-        ApplyClientSkins(client, true);
+        if (!g_cvOncePerMatch.BoolValue || !g_bMatchLoadoutSynced[client]) {
+            ApplyClientSkins(client, true);
+        }
     }
     return Plugin_Stop;
 }
@@ -1882,6 +1920,9 @@ void ScheduleForceReapply(int client, bool force, bool allowRegive = false) {
     int gen = g_iReapplyGen[client];
     int userid = GetClientUserId(client);
     for (int i = 0; i < REAPPLY_PASS_COUNT; i++) {
+        if (g_cvOncePerMatch.BoolValue && !allowRegive && i > 0) {
+            break;
+        }
         DataPack pack = new DataPack();
         pack.WriteCell(userid);
         pack.WriteCell(force ? 1 : 0);
@@ -2950,6 +2991,10 @@ void ApplyClientSkins(int client, bool force) {
         return;
     }
 
+    if (ClutchRoutineFullApplyBlocked(client, force)) {
+        return;
+    }
+
     if (
         !force
         && g_bPendingWebLoadout[client]
@@ -2964,6 +3009,15 @@ void ApplyClientSkins(int client, bool force) {
         return;
     }
     g_fLastApplyTime[client] = now;
+
+    if (
+        force
+        && !g_bAllowWeaponRegive[client]
+        && g_cvOncePerMatch.BoolValue
+        && IsPlayerAlive(client)
+    ) {
+        g_bMatchLoadoutSynced[client] = true;
+    }
 
     char steamId[32];
     if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {

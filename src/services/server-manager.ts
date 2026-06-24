@@ -201,6 +201,24 @@ class ServerManager {
     this.servers.delete(id);
     stateStore.persist();
   }
+
+  updateServer(
+    id: string,
+    patch: { name?: string; pool?: GameServer['pool'] },
+  ): GameServer {
+    const server = this.servers.get(id);
+    if (!server) throw new Error('Server not found');
+    if (patch.name !== undefined) {
+      const trimmed = patch.name.trim();
+      if (!trimmed) throw new Error('Name is required');
+      server.name = trimmed;
+    }
+    if (patch.pool !== undefined) {
+      server.pool = patch.pool;
+    }
+    stateStore.persist();
+    return server;
+  }
 }
 
 export const serverManager = new ServerManager();

@@ -7,7 +7,7 @@
 #include <sdkhooks>
 #include <clutch_steam>
 
-#define PLUGIN_VERSION "1.4.2"
+#define PLUGIN_VERSION "1.4.3"
 #define GLOVE_THINK_TICK_MOD 8
 
 ConVar g_cvDb;
@@ -26,6 +26,7 @@ int g_iGroup[MAXPLAYERS + 1][4];
 int g_iPaint[MAXPLAYERS + 1][4];
 float g_fWear[MAXPLAYERS + 1][4];
 bool g_bThinkHooked[MAXPLAYERS + 1];
+bool g_bMatchGlovesApplied[MAXPLAYERS + 1];
 
 public Plugin myinfo = {
     name = "Clutch Gloves",
@@ -88,6 +89,7 @@ public void OnPluginStart() {
     AutoExecConfig(true, "clutch_gloves");
 
     HookEvent("player_spawn", Event_PlayerSpawn, EventHookMode_Pre);
+    HookEvent("cs_win_panel_match", Event_MatchOver, EventHookMode_Post);
     RegAdminCmd("sm_clutch_gloves_refresh", Command_Refresh, ADMFLAG_ROOT, "Re-read gloves DB into cache (visual apply on spawn)");
     RegAdminCmd("sm_clutch_gloves_apply", Command_Apply, ADMFLAG_ROOT, "Apply gloves from cache (no DB)");
     RegAdminCmd("sm_clutch_gloves_status", Command_Status, ADMFLAG_ROOT, "Dump glove cache / wearable state");
@@ -128,6 +130,7 @@ public void OnConfigsExecuted() {
 
 public void OnClientDisconnect(int client) {
     DisableGloveThink(client);
+    g_bMatchGlovesApplied[client] = false;
     for (int team = 0; team < 4; team++) {
         g_iGroup[client][team] = 0;
         g_iPaint[client][team] = 0;
@@ -199,29 +202,23 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
     if (client <= 0 || IsFakeClient(client)) {
         return;
     }
+    if (g_bMatchGlovesApplied[client]) {
+        return;
+    }
 
     GivePlayerGloves(client);
-
-    DataPack pack = new DataPack();
-    pack.WriteCell(GetClientUserId(client));
-    CreateTimer(0.5, Timer_RetryAfterTeam, pack, TIMER_FLAG_NO_MAPCHANGE);
 }
 
-public Action Timer_RetryAfterTeam(Handle timer, DataPack pack) {
-    pack.Reset();
-    int userid = pack.ReadCell();
-    delete pack;
-
-    int client = GetClientOfUserId(userid);
-    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
-        GivePlayerGloves(client);
+public void Event_MatchOver(Event event, const char[] name, bool dontBroadcast) {
+    for (int i = 1; i <= MaxClients; i++) {
+        g_bMatchGlovesApplied[i] = false;
     }
-    return Plugin_Stop;
 }
 
 public Action Command_Refresh(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
+            g_bMatchGlovesApplied[i] = false;
             RefreshClientFromDatabase(i, 0);
         }
     }
@@ -274,6 +271,7 @@ public Action Command_Status(int client, int args) {
 public Action Command_Apply(int client, int args) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
+            g_bMatchGlovesApplied[i] = false;
             GivePlayerGloves(i);
         }
     }
@@ -380,9 +378,9 @@ public void OnQueryGloves(Database database, DBResultSet results, const char[] e
             g_iPaint[client][CS_TEAM_CT]
         );
     }
-    if (IsPlayerAlive(client)) {
+    if (IsPlayerAlive(client) && !g_bMatchGlovesApplied[client]) {
         GivePlayerGloves(client);
-    } else {
+    } else if (!IsPlayerAlive(client)) {
         LogMessage("[ClutchGloves] Cache updated for %N — visual apply on next spawn", client);
     }
 }
@@ -556,7 +554,6 @@ void GivePlayerGloves(int client) {
         return;
     }
 
-    EnforceGloveBody(client);
     FixCustomArms(client);
 
     int ent = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
@@ -569,9 +566,12 @@ void GivePlayerGloves(int client) {
             EnforceGloveBody(client);
             NetworkUpdate(ent);
             EnableGloveThink(client);
+            g_bMatchGlovesApplied[client] = true;
             return;
         }
     }
+
+    EnforceGloveBody(client);
 
     DestroyPlayerWearables(client);
 
@@ -627,4 +627,6 @@ void GivePlayerGloves(int client) {
         Call_PushCell(paint);
         Call_Finish();
     }
+
+    g_bMatchGlovesApplied[client] = true;
 }

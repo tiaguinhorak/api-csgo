@@ -23,4 +23,10 @@ fi
 # CS console treats # as a command — remove invalid lines from old cfgs.
 sed -i '/^#/d' "${CFG}" 2>/dev/null || true
 
-echo "OK: warmup bridge cfg — defer_live=0 (instant apply on warmup)"
+echo "OK: warmup bridge cfg — defer_live=0, once_per_match=1 (instant first spawn, no respawn re-apply)"
+
+if grep -q 'clutch_skins_once_per_match' "${CFG}"; then
+  sed -i 's|^clutch_skins_once_per_match.*|clutch_skins_once_per_match "1"|g' "${CFG}"
+else
+  printf '\nclutch_skins_once_per_match "1"\n' >> "${CFG}"
+fi
