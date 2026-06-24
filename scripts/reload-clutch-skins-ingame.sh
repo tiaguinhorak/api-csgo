@@ -61,6 +61,14 @@ if [[ -z "${FULL_SCREEN}" ]]; then
   exit 1
 fi
 
+# Warmup: always re-sync DB from the site before reload so kgns weapons/gloves
+# tables hold the latest loadout (otherwise kgns serves stale/vanilla items).
+if [[ "${WARMUP_VPS:-0}" == "1" && -f "${REPO_ROOT}/scripts/sync-team-loadouts-warmup.sh" ]]; then
+  echo ">>> Warmup: syncing loadouts from site before reload..."
+  bash "${REPO_ROOT}/scripts/sync-team-loadouts-warmup.sh" || \
+    echo "WARN: sync-team-loadouts-warmup.sh failed — kgns table may be stale." >&2
+fi
+
 echo "Using screen session: ${FULL_SCREEN}"
 
 send_cmd() {

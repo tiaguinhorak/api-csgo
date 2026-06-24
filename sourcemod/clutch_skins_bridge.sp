@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.3"
+#define PLUGIN_VERSION "3.8.4"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -1655,10 +1655,11 @@ void RefreshWeaponsReloadNativeFlag() {
             "[Clutch] weapons.smx has no Weapons_ReloadClientData native — paint may stay stale. Run: bash scripts/patch-weapons-reload-native.sh"
         );
     }
-    if (!g_bWeaponsRefreshNative && !g_bLoggedMissingRefreshNative) {
+    if (!g_bWeaponsRefreshNative && !g_bLoggedMissingRefreshNative && g_cvDebug.BoolValue) {
+        // Non-critical: bridge re-gives weapons itself when this native is absent.
         g_bLoggedMissingRefreshNative = true;
         LogMessage(
-            "[Clutch] weapons.smx has no Weapons_RefreshWeapon native — re-run: bash scripts/patch-weapons-reload-native.sh"
+            "[Clutch] weapons.smx has no Weapons_RefreshWeapon native (optional) — bridge will re-give weapons directly."
         );
     }
     if (g_bWeaponsReloadNative && g_bWeaponsRefreshNative && g_cvDebug.BoolValue) {
