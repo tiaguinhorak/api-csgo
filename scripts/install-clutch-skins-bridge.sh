@@ -224,6 +224,12 @@ echo ">>> databases.cfg — csgo_weaponstickers (bridge sticker re-apply)"
 source "${REPO_ROOT}/scripts/lib/ensure-stickers-databases-cfg.sh"
 ensure_stickers_databases_cfg "${SM}" || true
 
+echo ""
+echo ">>> SQLite — clutch_weaponstickers table"
+# shellcheck source=scripts/lib/ensure-clutch-stickers-sqlite.sh
+source "${REPO_ROOT}/scripts/lib/ensure-clutch-stickers-sqlite.sh"
+ensure_clutch_stickers_sqlite "${SM}" || true
+
 WEAPONS_SP="${SM}/scripting/weapons.sp"
 if [[ -f "${WEAPONS_SP}" ]]; then
   echo ""

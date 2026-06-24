@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.11"
+#define PLUGIN_VERSION "3.8.13"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -50,12 +50,14 @@ ConVar g_cvOncePerMatch;
 Database g_hWeaponsDb = null;
 Database g_hStickersDb = null;
 char g_sStickersTable[32];
+char g_sLegacyStickersTable[32];
 char g_sTablePrefix[16];
 bool g_bLoggedMissingLoadout[MAXPLAYERS + 1];
 float g_fLastApplyTime[MAXPLAYERS + 1];
 int g_iLastKnifePaint[MAXPLAYERS + 1];
 int g_iItemIdHigh = 16384;
 bool g_bGlovesTableReady = false;
+bool g_bStickersTableReady = false;
 bool g_bGlovesPending[MAXPLAYERS + 1];
 int g_iGloveQueryGen[MAXPLAYERS + 1];
 int g_iGloveApplyGen[MAXPLAYERS + 1];
@@ -304,6 +306,7 @@ public void OnConfigsExecuted() {
     char stickersPrefix[16];
     g_cvStickersTablePrefix.GetString(stickersPrefix, sizeof(stickersPrefix));
     Format(g_sStickersTable, sizeof(g_sStickersTable), "%sclutch_weaponstickers", stickersPrefix);
+    Format(g_sLegacyStickersTable, sizeof(g_sLegacyStickersTable), "%sweaponstickers1", stickersPrefix);
     UpdateRefreshTimer();
 }
 
@@ -461,11 +464,14 @@ void ConnectStickersDatabase() {
         g_hStickersDb = null;
     }
 
+    g_bStickersTableReady = false;
+
     char dbName[64];
     g_cvStickersDb.GetString(dbName, sizeof(dbName));
     char stickersPrefix[16];
     g_cvStickersTablePrefix.GetString(stickersPrefix, sizeof(stickersPrefix));
     Format(g_sStickersTable, sizeof(g_sStickersTable), "%sclutch_weaponstickers", stickersPrefix);
+    Format(g_sLegacyStickersTable, sizeof(g_sLegacyStickersTable), "%sweaponstickers1", stickersPrefix);
 
     Database.Connect(StickersDatabaseConnected, dbName);
 }
@@ -485,6 +491,8 @@ public void StickersDatabaseConnected(Database database, const char[] error, any
     if (g_cvDebug.BoolValue) {
         LogMessage("[Clutch] Connected to stickers database table %s", g_sStickersTable);
     }
+
+    EnsureClutchStickersTable();
 }
 
 void ConnectStickersDatabaseDirect() {
@@ -524,6 +532,32 @@ void ConnectStickersDatabaseDirect() {
     } else {
         LogMessage("[Clutch] Connected to stickers SQLite via SQL_ConnectCustom (%s)", dbName);
     }
+
+    EnsureClutchStickersTable();
+}
+
+void EnsureClutchStickersTable() {
+    if (g_hStickersDb == null) {
+        return;
+    }
+
+    char query[768];
+    Format(
+        query,
+        sizeof(query),
+        "CREATE TABLE IF NOT EXISTS %s (id INTEGER PRIMARY KEY AUTOINCREMENT, steamid varchar(64) NOT NULL, weaponindex int NOT NULL DEFAULT 0, team varchar(2) NOT NULL DEFAULT 'CT', slot0 int NOT NULL DEFAULT 0, slot1 int NOT NULL DEFAULT 0, slot2 int NOT NULL DEFAULT 0, slot3 int NOT NULL DEFAULT 0, slot4 int NOT NULL DEFAULT 0, slot5 int NOT NULL DEFAULT 0, wear0 real NOT NULL DEFAULT 0, wear1 real NOT NULL DEFAULT 0, wear2 real NOT NULL DEFAULT 0, wear3 real NOT NULL DEFAULT 0, wear4 real NOT NULL DEFAULT 0, wear5 real NOT NULL DEFAULT 0, last_seen int NOT NULL DEFAULT 0, UNIQUE(steamid, weaponindex, team))",
+        g_sStickersTable
+    );
+    g_hStickersDb.Query(T_EnsureClutchStickersTableCallback, query, _, DBPrio_High);
+}
+
+public void T_EnsureClutchStickersTableCallback(Database database, DBResultSet results, const char[] error, any data) {
+    if (results == null) {
+        LogError("[Clutch] %s table create failed: %s", g_sStickersTable, error);
+        return;
+    }
+    g_bStickersTableReady = true;
+    LogMessage("[Clutch] %s table ready", g_sStickersTable);
 }
 
 void EnsureGlovesTable() {
@@ -2596,7 +2630,12 @@ void QueryPlayerLoadout(int client, const char[] steamId, int altAttempt, bool f
 void QueryPlayerStickers(int client, const char[] steamId, int altAttempt) {
     if (g_hStickersDb == null) {
         ConnectStickersDatabase();
+        ScheduleStickersQueryRetry(client, steamId, altAttempt, 0.5);
         return;
+    }
+
+    if (!g_bStickersTableReady) {
+        EnsureClutchStickersTable();
     }
 
     char escaped[64];
@@ -2618,6 +2657,66 @@ void QueryPlayerStickers(int client, const char[] steamId, int altAttempt) {
     g_hStickersDb.Query(T_StickersCallback, query, pack);
 }
 
+void QueryLegacyPlayerStickers(int client, const char[] steamId, int altAttempt) {
+    if (g_hStickersDb == null) {
+        return;
+    }
+
+    char escaped[64];
+    g_hStickersDb.Escape(steamId, escaped, sizeof(escaped));
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteString(steamId);
+    pack.WriteCell(altAttempt);
+
+    char query[384];
+    Format(
+        query,
+        sizeof(query),
+        "SELECT weaponindex, slot0, slot1, slot2, slot3, slot4, slot5 FROM %s WHERE steamid='%s'",
+        g_sLegacyStickersTable,
+        escaped
+    );
+    g_hStickersDb.Query(T_LegacyStickersCallback, query, pack);
+}
+
+void ClutchCacheStickerRowForTeam(int client, int defIndex, int teamSlot, DBResultSet results, int slotColumnStart) {
+    int idx = ClutchIndexFromDefIndex(defIndex);
+    if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+        return;
+    }
+
+    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+        g_iStickerSlots[client][teamSlot][idx][s] = results.FetchInt(slotColumnStart + s);
+    }
+}
+
+void ScheduleStickersQueryRetry(int client, const char[] steamId, int altAttempt, float delay) {
+    DataPack retry = new DataPack();
+    retry.WriteCell(GetClientUserId(client));
+    retry.WriteString(steamId);
+    retry.WriteCell(altAttempt);
+    CreateTimer(delay, Timer_RetryStickersQuery, retry, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_RetryStickersQuery(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    char steamId[32];
+    pack.ReadString(steamId, sizeof(steamId));
+    int altAttempt = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return Plugin_Stop;
+    }
+
+    QueryPlayerStickers(client, steamId, altAttempt);
+    return Plugin_Stop;
+}
+
 public void T_StickersCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
     pack.Reset();
     int userid = pack.ReadCell();
@@ -2633,6 +2732,10 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
 
     if (results == null) {
         LogError("[Clutch] stickers DB query failed: %s", error);
+        if (StrContains(error, "no such table", false) != -1) {
+            EnsureClutchStickersTable();
+            QueryLegacyPlayerStickers(client, steamId, altAttempt);
+        }
         return;
     }
 
@@ -2643,26 +2746,22 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         char teamLabel[4];
         results.FetchString(1, teamLabel, sizeof(teamLabel));
         int teamSlot = StrEqual(teamLabel, "CT", false) ? 1 : 0;
-        int idx = ClutchIndexFromDefIndex(defIndex);
-        if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
-            continue;
-        }
-
-        for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
-            g_iStickerSlots[client][teamSlot][idx][s] = results.FetchInt(2 + s);
-        }
+        ClutchCacheStickerRowForTeam(client, defIndex, teamSlot, results, 2);
 
         if (g_cvDebug.BoolValue) {
-            LogMessage(
-                "[Clutch] Cached stickers %s defindex %d (%s) slots %d,%d,%d for %N",
-                teamLabel,
-                defIndex,
-                g_ClutchWeaponKeys[idx],
-                g_iStickerSlots[client][teamSlot][idx][0],
-                g_iStickerSlots[client][teamSlot][idx][1],
-                g_iStickerSlots[client][teamSlot][idx][2],
-                client
-            );
+            int idx = ClutchIndexFromDefIndex(defIndex);
+            if (idx >= 0) {
+                LogMessage(
+                    "[Clutch] Cached stickers %s defindex %d (%s) slots %d,%d,%d for %N",
+                    teamLabel,
+                    defIndex,
+                    g_ClutchWeaponKeys[idx],
+                    g_iStickerSlots[client][teamSlot][idx][0],
+                    g_iStickerSlots[client][teamSlot][idx][1],
+                    g_iStickerSlots[client][teamSlot][idx][2],
+                    client
+                );
+            }
         }
     }
 
@@ -2677,10 +2776,81 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
             return;
         }
 
+        QueryLegacyPlayerStickers(client, steamId, 0);
+        return;
+    }
+
+    ClutchReapplyStickersOnPlayerWeapons(client);
+}
+
+public void T_LegacyStickersCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    char steamId[32];
+    pack.ReadString(steamId, sizeof(steamId));
+    int altAttempt = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return;
+    }
+
+    if (results == null) {
+        LogError("[Clutch] legacy stickers DB query failed: %s", error);
         ClutchClearStickerCache(client);
         return;
     }
 
+    bool anyRow = false;
+    while (results.FetchRow()) {
+        anyRow = true;
+        int defIndex = results.FetchInt(0);
+        int slots[CLUTCH_STICKER_SLOTS];
+        for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+            slots[s] = results.FetchInt(1 + s);
+        }
+
+        int idx = ClutchIndexFromDefIndex(defIndex);
+        if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+            continue;
+        }
+
+        for (int teamSlot = 0; teamSlot < 2; teamSlot++) {
+            for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+                g_iStickerSlots[client][teamSlot][idx][s] = slots[s];
+            }
+        }
+
+        if (g_cvDebug.BoolValue) {
+            LogMessage(
+                "[Clutch] Cached legacy stickers defindex %d (%s) slots %d,%d,%d for %N (T+CT)",
+                defIndex,
+                g_ClutchWeaponKeys[idx],
+                slots[0],
+                slots[1],
+                slots[2],
+                client
+            );
+        }
+    }
+
+    if (!anyRow) {
+        if (altAttempt == 0) {
+            if (steamId[6] == '1') {
+                steamId[6] = '0';
+            } else if (steamId[6] == '0') {
+                steamId[6] = '1';
+            }
+            QueryLegacyPlayerStickers(client, steamId, 1);
+            return;
+        }
+
+        ClutchClearStickerCache(client);
+        return;
+    }
+
+    LogMessage("[Clutch] Applied stickers from legacy %s for %N", g_sLegacyStickersTable, client);
     ClutchReapplyStickersOnPlayerWeapons(client);
 }
 
