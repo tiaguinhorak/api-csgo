@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.13"
+#define PLUGIN_VERSION "3.8.14"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -2739,6 +2739,8 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         return;
     }
 
+    ClutchClearStickerCache(client);
+
     bool anyRow = false;
     while (results.FetchRow()) {
         anyRow = true;
@@ -2816,7 +2818,7 @@ public void T_LegacyStickersCallback(Database database, DBResultSet results, con
             continue;
         }
 
-        for (int teamSlot = 0; teamSlot < 2; teamSlot++) {
+        for (int teamSlot = 0; teamSlot < 1; teamSlot++) {
             for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
                 g_iStickerSlots[client][teamSlot][idx][s] = slots[s];
             }
@@ -2824,7 +2826,7 @@ public void T_LegacyStickersCallback(Database database, DBResultSet results, con
 
         if (g_cvDebug.BoolValue) {
             LogMessage(
-                "[Clutch] Cached legacy stickers defindex %d (%s) slots %d,%d,%d for %N (T+CT)",
+                "[Clutch] Cached legacy stickers defindex %d (%s) slots %d,%d,%d for %N (TR only)",
                 defIndex,
                 g_ClutchWeaponKeys[idx],
                 slots[0],
@@ -2850,7 +2852,7 @@ public void T_LegacyStickersCallback(Database database, DBResultSet results, con
         return;
     }
 
-    LogMessage("[Clutch] Applied stickers from legacy %s for %N", g_sLegacyStickersTable, client);
+    LogMessage("[Clutch] Applied stickers from legacy %s for %N (TR only — save CT stickers on site)", g_sLegacyStickersTable, client);
     ClutchReapplyStickersOnPlayerWeapons(client);
 }
 
