@@ -1632,19 +1632,6 @@ void RefreshWeaponsReloadNativeFlag() {
     g_bWeaponsRefreshNative =
         GetFeatureStatus(FeatureType_Native, "Weapons_RefreshWeapon") == FeatureStatus_Available;
 
-    if (!g_bWeaponsReloadNative) {
-        int nativeIdx = GetNativeByName("Weapons_ReloadClientData");
-        if (nativeIdx != INVALID_NATIVE && GetNativeStatus(nativeIdx) == Native_Available) {
-            g_bWeaponsReloadNative = true;
-        }
-    }
-    if (!g_bWeaponsRefreshNative) {
-        int nativeIdx = GetNativeByName("Weapons_RefreshWeapon");
-        if (nativeIdx != INVALID_NATIVE && GetNativeStatus(nativeIdx) == Native_Available) {
-            g_bWeaponsRefreshNative = true;
-        }
-    }
-
     if (g_bWeaponsReloadNative) {
         g_bLoggedMissingReloadNative = false;
     }
