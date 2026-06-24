@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.10"
+#define PLUGIN_VERSION "3.8.11"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -76,7 +76,7 @@ int g_CachedTrak[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 int g_CachedTrakCount[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 char g_CachedTag[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][64];
 int g_iAppliedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
-int g_iStickerSlots[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS][CLUTCH_STICKER_SLOTS];
+int g_iStickerSlots[MAXPLAYERS + 1][2][CLUTCH_WEAPON_SLOTS][CLUTCH_STICKER_SLOTS];
 char g_CachedKnifeClass[MAXPLAYERS + 1][CLUTCH_KNIFE_CLASS_LEN];
 float g_fLastEntityApply[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 float g_fLastWeaponRegive[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
@@ -303,7 +303,7 @@ public void OnConfigsExecuted() {
     g_cvWeaponsTablePrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
     char stickersPrefix[16];
     g_cvStickersTablePrefix.GetString(stickersPrefix, sizeof(stickersPrefix));
-    Format(g_sStickersTable, sizeof(g_sStickersTable), "%sweaponstickers1", stickersPrefix);
+    Format(g_sStickersTable, sizeof(g_sStickersTable), "%sclutch_weaponstickers", stickersPrefix);
     UpdateRefreshTimer();
 }
 
@@ -465,7 +465,7 @@ void ConnectStickersDatabase() {
     g_cvStickersDb.GetString(dbName, sizeof(dbName));
     char stickersPrefix[16];
     g_cvStickersTablePrefix.GetString(stickersPrefix, sizeof(stickersPrefix));
-    Format(g_sStickersTable, sizeof(g_sStickersTable), "%sweaponstickers1", stickersPrefix);
+    Format(g_sStickersTable, sizeof(g_sStickersTable), "%sclutch_weaponstickers", stickersPrefix);
 
     Database.Connect(StickersDatabaseConnected, dbName);
 }
@@ -1730,10 +1730,16 @@ int ClutchIndexFromWeaponEntity(int client, int weapon) {
     return GetClutchIndexForClassname(client, classname);
 }
 
+int ClutchStickerTeamSlot(int team) {
+    return team == CS_TEAM_CT ? 1 : 0;
+}
+
 void ClutchClearStickerCache(int client) {
-    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
-        for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
-            g_iStickerSlots[client][i][s] = 0;
+    for (int t = 0; t < 2; t++) {
+        for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+            for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+                g_iStickerSlots[client][t][i][s] = 0;
+            }
         }
     }
 }
@@ -1743,8 +1749,10 @@ bool ClutchWeaponHasStickerCache(int client, int idx) {
         return false;
     }
 
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+
     for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
-        if (g_iStickerSlots[client][idx][s] != 0) {
+        if (g_iStickerSlots[client][teamSlot][idx][s] != 0) {
             return true;
         }
     }
@@ -1765,12 +1773,13 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
         return false;
     }
 
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
     CEconItemView itemView = PTaH_GetEconItemViewFromEconEntity(entity);
     CAttributeList attrList = itemView.NetworkedDynamicAttributesForDemos;
     bool updated = false;
 
     for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
-        int stickerId = g_iStickerSlots[client][idx][s];
+        int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
         if (stickerId != 0) {
             attrList.SetOrAddAttributeValue(113 + s * 4, stickerId);
             updated = true;
@@ -2602,7 +2611,7 @@ void QueryPlayerStickers(int client, const char[] steamId, int altAttempt) {
     Format(
         query,
         sizeof(query),
-        "SELECT weaponindex, slot0, slot1, slot2, slot3, slot4, slot5 FROM %s WHERE steamid='%s'",
+        "SELECT weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5 FROM %s WHERE steamid='%s'",
         g_sStickersTable,
         escaped
     );
@@ -2631,23 +2640,27 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
     while (results.FetchRow()) {
         anyRow = true;
         int defIndex = results.FetchInt(0);
+        char teamLabel[4];
+        results.FetchString(1, teamLabel, sizeof(teamLabel));
+        int teamSlot = StrEqual(teamLabel, "CT", false) ? 1 : 0;
         int idx = ClutchIndexFromDefIndex(defIndex);
         if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
             continue;
         }
 
         for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
-            g_iStickerSlots[client][idx][s] = results.FetchInt(1 + s);
+            g_iStickerSlots[client][teamSlot][idx][s] = results.FetchInt(2 + s);
         }
 
         if (g_cvDebug.BoolValue) {
             LogMessage(
-                "[Clutch] Cached stickers defindex %d (%s) slots %d,%d,%d for %N",
+                "[Clutch] Cached stickers %s defindex %d (%s) slots %d,%d,%d for %N",
+                teamLabel,
                 defIndex,
                 g_ClutchWeaponKeys[idx],
-                g_iStickerSlots[client][idx][0],
-                g_iStickerSlots[client][idx][1],
-                g_iStickerSlots[client][idx][2],
+                g_iStickerSlots[client][teamSlot][idx][0],
+                g_iStickerSlots[client][teamSlot][idx][1],
+                g_iStickerSlots[client][teamSlot][idx][2],
                 client
             );
         }

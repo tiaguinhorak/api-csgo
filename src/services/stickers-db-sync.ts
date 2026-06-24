@@ -2,7 +2,9 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import {
+  buildEnsureClutchStickersTableSql,
   buildEnsureStickersTableSql,
+  buildClutchStickerLoadoutSql,
   buildStickerLoadoutSql,
   type StickerSyncEntry,
 } from './stickers-db-map';
@@ -49,14 +51,16 @@ export async function syncPlayerStickersToDb(
   const tablePrefix = process.env.STICKERS_TABLE_PREFIX?.trim() || '';
 
   db.exec(buildEnsureStickersTableSql(tablePrefix));
+  db.exec(buildEnsureClutchStickersTableSql(tablePrefix));
 
   const steamIds = resolvePluginSteamIds(steamId);
   let updated = 0;
 
   const tx = db.transaction(() => {
     for (const targetSteam of steamIds) {
-      const statements = buildStickerLoadoutSql(tablePrefix, targetSteam, entries);
-      for (const sql of statements) {
+      const legacyStatements = buildStickerLoadoutSql(tablePrefix, targetSteam, entries);
+      const clutchStatements = buildClutchStickerLoadoutSql(tablePrefix, targetSteam, entries);
+      for (const sql of [...legacyStatements, ...clutchStatements]) {
         db.exec(sql);
         updated += 1;
       }
