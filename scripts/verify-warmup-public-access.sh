@@ -29,10 +29,15 @@ is_private_ip() {
   return 1
 }
 
-detect_public_ip() {
-  curl -sf --max-time 5 ifconfig.me 2>/dev/null || \
-    curl -sf --max-time 5 icanhazip.com 2>/dev/null || \
+detect_public_ipv4() {
+  curl -sf --max-time 5 -4 ifconfig.me 2>/dev/null || \
+    curl -sf --max-time 5 -4 icanhazip.com 2>/dev/null || \
+    curl -sf --max-time 5 -4 api.ipify.org 2>/dev/null || \
     echo ""
+}
+
+detect_public_ipv6() {
+  curl -sf --max-time 5 -6 ifconfig.me 2>/dev/null || echo ""
 }
 
 echo "=== Clutch — warmup public access check ==="
@@ -55,16 +60,25 @@ else
   echo "OK: register host looks public (${REGISTER_HOST})"
 fi
 
-DETECTED="$(detect_public_ip)"
-if [[ -n "${DETECTED}" ]]; then
+DETECTED_V4="$(detect_public_ipv4)"
+DETECTED_V6="$(detect_public_ipv6)"
+if [[ -n "${DETECTED_V4}" ]]; then
   echo ""
-  echo "Detected outbound public IP: ${DETECTED}"
-  if [[ -n "${PUBLIC_HOST}" && "${PUBLIC_HOST}" != "${DETECTED}" ]]; then
-    echo "WARN: CSGO_PUBLIC_HOST (${PUBLIC_HOST}) != detected (${DETECTED})"
+  echo "Detected public IPv4: ${DETECTED_V4}"
+  if [[ -n "${PUBLIC_HOST}" && "${PUBLIC_HOST}" != "${DETECTED_V4}" ]]; then
+    echo "WARN: CSGO_PUBLIC_HOST (${PUBLIC_HOST}) != detected IPv4 (${DETECTED_V4})"
   fi
   if is_private_ip "${REGISTER_HOST}"; then
-    echo "  Suggested: CSGO_PUBLIC_HOST=${DETECTED}"
+    echo "  Suggested: CSGO_PUBLIC_HOST=${DETECTED_V4}"
   fi
+fi
+if [[ -n "${DETECTED_V6}" ]]; then
+  echo "Detected public IPv6: ${DETECTED_V6}"
+  echo "  (CS:GO connect usually needs IPv4 — set CSGO_PUBLIC_HOST to your IPv4, not IPv6)"
+fi
+if [[ -z "${DETECTED_V4}" && -z "${DETECTED_V6}" ]]; then
+  echo ""
+  echo "Could not detect public IP — set CSGO_PUBLIC_HOST manually in .env"
 fi
 
 echo ""
@@ -94,7 +108,7 @@ if ss -tln 2>/dev/null | grep -qE ":${API_PORT}\\s"; then
 else
   echo "WARN: nothing listening on TCP ${API_PORT} (pm2 api-csgo?)"
 fi
-if [[ "${BIND_API}" == 127.0.0.1" ]]; then
+if [[ "${BIND_API}" == "127.0.0.1" ]]; then
   echo "FAIL: BIND_HOST=127.0.0.1 — site cannot push skins from Hostinger"
   echo "  Fix: BIND_HOST=0.0.0.0 && pm2 restart api-csgo --update-env"
 fi
@@ -141,13 +155,17 @@ fi
 
 echo ""
 echo "=== Site (Hostinger) site/.env ==="
-echo "CSGO_WARMUP_API_URL must use PUBLIC IP (not 192.168.x):"
-echo "  CSGO_WARMUP_API_URL=http://${DETECTED:-YOUR_PUBLIC_IP}:${API_PORT}"
+echo "CSGO_WARMUP_API_URL must use PUBLIC IPv4 (not 192.168.x):"
+echo "  CSGO_WARMUP_API_URL=http://${DETECTED_V4:-YOUR_PUBLIC_IPV4}:${API_PORT}"
 echo "Or CSGO_API_URLS=ranked-ip:3001,warmup-public-ip:3001"
 echo ""
 echo "Player connect (from outside LAN):"
-echo "  connect ${REGISTER_HOST}:${PORT_GAME}"
+CONNECT_HOST="${PUBLIC_HOST}"
+if [[ -z "${CONNECT_HOST}" ]] || is_private_ip "${CONNECT_HOST}"; then
+  CONNECT_HOST="${DETECTED_V4:-YOUR_PUBLIC_IPV4}"
+fi
+echo "  connect ${CONNECT_HOST}:${PORT_GAME}"
 echo ""
 echo "From YOUR PC (not on LAN) test UDP:"
-echo "  Test-NetConnection -ComputerName ${REGISTER_HOST} -Port ${PORT_GAME}"
+echo "  Test-NetConnection -ComputerName ${CONNECT_HOST} -Port ${PORT_GAME}"
 echo "  (UDP may show TcpTestSucceeded=False — use in-game connect or A2S query)"
