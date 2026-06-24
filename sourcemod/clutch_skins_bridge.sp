@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.18"
+#define PLUGIN_VERSION "3.8.19"
 #define CLUTCH_SITE_STICKER_SLOTS 5
 #define STICKER_REAPPLY_PASS_COUNT 3
 #define GLOVE_THINK_TICK_MOD 8
@@ -495,30 +495,110 @@ public void StickersDatabaseConnected(Database database, const char[] error, any
 
     g_hStickersDb = database;
 
+    char dbPath[PLATFORM_MAX_PATH];
+    ClutchResolveStickersDbPath(dbPath, sizeof(dbPath));
+    strcopy(g_sResolvedStickersDbPath, sizeof(g_sResolvedStickersDbPath), dbPath);
+
     if (g_cvDebug.BoolValue) {
-        LogMessage("[Clutch] Connected to stickers database table %s", g_sStickersTable);
+        LogMessage(
+            "[Clutch] Connected to stickers database table %s (expected path %s)",
+            g_sStickersTable,
+            dbPath
+        );
     }
 
     EnsureClutchStickersTable();
 }
 
-void ClutchResolveStickersDbPath(char[] dbPath, int maxlen) {
-    g_cvStickersDbPath.GetString(dbPath, maxlen);
+void ClutchNormalizeRelativeStickersPath(char[] relative, int maxlen) {
+    ReplaceString(relative, maxlen, "addons/sourcemod/", "");
+    ReplaceString(relative, maxlen, "addons\\sourcemod\\", "");
+    ReplaceString(relative, maxlen, "\\", "/");
 
-    if (dbPath[0] == '\0') {
-        BuildPath(Path_SM, dbPath, maxlen, "data/sqlite/csgo_weaponstickers.sq3");
-        return;
+    while (relative[0] == '/' || relative[0] == '\\') {
+        int len = strlen(relative);
+        if (len <= 1) {
+            relative[0] = '\0';
+            break;
+        }
+        for (int i = 0; i < len; i++) {
+            relative[i] = relative[i + 1];
+        }
     }
+}
 
-    if (dbPath[0] == '/' || (strlen(dbPath) > 2 && dbPath[1] == ':')) {
+void ClutchResolveStickersDbPath(char[] dbPath, int maxlen) {
+    char configured[PLATFORM_MAX_PATH];
+    g_cvStickersDbPath.GetString(configured, sizeof(configured));
+
+    if (configured[0] != '\0'
+        && (configured[0] == '/' || (strlen(configured) > 2 && configured[1] == ':'))) {
+        strcopy(dbPath, maxlen, configured);
+        ReplaceString(dbPath, maxlen, "\\", "/");
         return;
     }
 
     char relative[PLATFORM_MAX_PATH];
-    strcopy(relative, sizeof(relative), dbPath);
-    ReplaceString(relative, sizeof(relative), "addons/sourcemod/", "");
-    ReplaceString(relative, sizeof(relative), "addons\\sourcemod\\", "");
-    BuildPath(Path_SM, dbPath, maxlen, relative);
+    if (configured[0] == '\0') {
+        strcopy(relative, sizeof(relative), "data/sqlite/csgo_weaponstickers.sq3");
+    } else {
+        strcopy(relative, sizeof(relative), configured);
+        ClutchNormalizeRelativeStickersPath(relative, sizeof(relative));
+    }
+
+    // BuildPath alone can return a game-relative path; SQL_ConnectCustom sqlite resolves
+    // relative paths from addons/sourcemod/, which doubles addons/sourcemod/ and opens an empty twin DB.
+    char smRoot[PLATFORM_MAX_PATH];
+    BuildPath(Path_SM, smRoot, sizeof(smRoot), "");
+    ReplaceString(smRoot, sizeof(smRoot), "\\", "/");
+    int rootLen = strlen(smRoot);
+    if (rootLen > 0 && smRoot[rootLen - 1] != '/') {
+        Format(smRoot, sizeof(smRoot), "%s/", smRoot);
+    }
+
+    Format(dbPath, maxlen, "%s%s", smRoot, relative);
+    ReplaceString(dbPath, maxlen, "\\", "/");
+}
+
+void ClutchExtractSteamAccountId(const char[] steamId, char[] accountId, int maxlen) {
+    int lastColon = -1;
+    for (int i = 0; steamId[i] != '\0'; i++) {
+        if (steamId[i] == ':') {
+            lastColon = i;
+        }
+    }
+
+    if (lastColon >= 0 && steamId[lastColon + 1] != '\0') {
+        strcopy(accountId, maxlen, steamId[lastColon + 1]);
+    } else {
+        accountId[0] = '\0';
+    }
+}
+
+void ClutchProbeStickersDbCount() {
+    if (g_hStickersDb == null) {
+        return;
+    }
+
+    char query[128];
+    Format(query, sizeof(query), "SELECT COUNT(*) FROM %s", g_sStickersTable);
+    g_hStickersDb.Query(T_StickersProbeCallback, query, _, DBPrio_Low);
+}
+
+public void T_StickersProbeCallback(Database database, DBResultSet results, const char[] error, any data) {
+    if (results == null) {
+        LogMessage("[Clutch] stickers DB probe failed: %s", error);
+        return;
+    }
+
+    if (results.FetchRow()) {
+        LogMessage(
+            "[Clutch] stickers DB %s row count: %d (path=%s)",
+            g_sStickersTable,
+            results.FetchInt(0),
+            g_sResolvedStickersDbPath
+        );
+    }
 }
 
 void ConnectStickersDatabaseDirect() {
@@ -550,7 +630,7 @@ void ConnectStickersDatabaseDirect() {
 
     g_hStickersDb = database;
 
-    LogMessage("[Clutch] stickers DB path: %s (table %s)", dbPath, g_sStickersTable);
+    LogMessage("[Clutch] stickers DB absolute path: %s (table %s)", dbPath, g_sStickersTable);
 
     EnsureClutchStickersTable();
     EnsureLegacyStickersTable();
@@ -561,7 +641,7 @@ void EnsureClutchStickersTable() {
         return;
     }
 
-    char query[768];
+    char query[1024];
     Format(
         query,
         sizeof(query),
@@ -578,6 +658,7 @@ public void T_EnsureClutchStickersTableCallback(Database database, DBResultSet r
     }
     g_bStickersTableReady = true;
     LogMessage("[Clutch] %s table ready", g_sStickersTable);
+    ClutchProbeStickersDbCount();
 }
 
 void EnsureLegacyStickersTable() {
@@ -585,7 +666,7 @@ void EnsureLegacyStickersTable() {
         return;
     }
 
-    char query[768];
+    char query[1024];
     Format(
         query,
         sizeof(query),
@@ -2875,19 +2956,39 @@ void QueryPlayerStickers(int client, const char[] steamId, int altAttempt) {
     char escaped[64];
     g_hStickersDb.Escape(steamId, escaped, sizeof(escaped));
 
+    char accountId[16];
+    ClutchExtractSteamAccountId(steamId, accountId, sizeof(accountId));
+    char escapedAccount[32];
+    if (accountId[0] != '\0') {
+        g_hStickersDb.Escape(accountId, escapedAccount, sizeof(escapedAccount));
+    } else {
+        escapedAccount[0] = '\0';
+    }
+
     DataPack pack = new DataPack();
     pack.WriteCell(GetClientUserId(client));
     pack.WriteString(steamId);
     pack.WriteCell(altAttempt);
 
-    char query[384];
-    Format(
-        query,
-        sizeof(query),
-        "SELECT weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5 FROM %s WHERE steamid='%s'",
-        g_sStickersTable,
-        escaped
-    );
+    char query[512];
+    if (escapedAccount[0] != '\0') {
+        Format(
+            query,
+            sizeof(query),
+            "SELECT weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5 FROM %s WHERE steamid='%s' OR steamid LIKE '%%:%s'",
+            g_sStickersTable,
+            escaped,
+            escapedAccount
+        );
+    } else {
+        Format(
+            query,
+            sizeof(query),
+            "SELECT weaponindex, team, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5 FROM %s WHERE steamid='%s'",
+            g_sStickersTable,
+            escaped
+        );
+    }
     g_hStickersDb.Query(T_StickersCallback, query, pack);
 }
 
