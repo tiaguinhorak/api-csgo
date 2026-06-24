@@ -9,6 +9,7 @@ import csgoSkinsPushRouter, { logSkinsAuthStatus } from './routes/csgo-skins-pus
 import csgoStickersPushRouter from './routes/csgo-stickers-push';
 import { skinManager } from './services/skin-manager';
 import { resolveWeaponsDbPath } from './services/weapons-db-path';
+import { logStickersDbPath } from './services/stickers-db-sync';
 import { startMatchLiveWatcher } from './services/match-live-watcher';
 import { startSteamAllowlistSync } from './services/steam-allowlist-sync';
 import { assertProductionApiKey, requireApiAuth } from './middleware/auth';
@@ -59,6 +60,7 @@ try {
   const message = err instanceof Error ? err.message : String(err);
   console.warn(`[csgo-skins] weapons DB not ready: ${message}`);
 }
+logStickersDbPath();
 
 startMatchLiveWatcher();
 

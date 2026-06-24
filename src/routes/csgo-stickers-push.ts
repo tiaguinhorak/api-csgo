@@ -26,6 +26,10 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       entries: body.entries.length,
       updated: result.updated,
       dbPath: result.dbPath,
+      clutchTable: result.clutchTable,
+      legacyTable: result.legacyTable,
+      clutchRows: result.clutchRows,
+      legacyRows: result.legacyRows,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'sticker sync failed';
