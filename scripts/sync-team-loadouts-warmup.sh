@@ -11,6 +11,14 @@ if [[ ! -f dist/services/weapons-db-sync.js ]]; then
   exit 1
 fi
 
+# Warmup uses compiled JS — rebuild when TypeScript sync logic changed.
+if [[ ! -f dist/services/weapons-db-map.js ]] \
+  || [[ src/services/weapons-db-map.ts -nt dist/services/weapons-db-map.js ]] \
+  || [[ src/services/weapons-db-sync.ts -nt dist/services/weapons-db-sync.js ]]; then
+  echo ">>> Building api-csgo (sync services changed)..."
+  npm run build
+fi
+
 if [[ -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -68,6 +76,20 @@ if [[ -f "${DB_PATH}" ]]; then
   sqlite3 "${DB_PATH}" "SELECT COUNT(*) AS total FROM clutch_team_loadout;"
   sqlite3 "${DB_PATH}" \
     "SELECT steamid, team, weapon_id, paintkit FROM clutch_team_loadout ORDER BY steamid, team LIMIT 20;"
+fi
+
+echo ""
+echo ">>> kgns weapons row (knife index + bayonet paint)"
+if [[ -f "${DB_PATH}" ]]; then
+  sqlite3 "${DB_PATH}" \
+    "SELECT steamid, knife, bayonet, deagle, ak47 FROM weapons WHERE steamid LIKE '%203852188%' OR steamid LIKE '%407704376%' LIMIT 4;"
+fi
+
+echo ""
+echo ">>> gloves row"
+if [[ -f "${DB_PATH}" ]]; then
+  sqlite3 "${DB_PATH}" \
+    "SELECT steamid, t_group, t_glove, ct_group, ct_glove FROM gloves WHERE steamid LIKE '%203852188%' OR steamid LIKE '%407704376%' LIMIT 4;"
 fi
 
 echo ""

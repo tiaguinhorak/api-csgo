@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.4"
+#define PLUGIN_VERSION "3.8.5"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -298,17 +298,10 @@ void RefreshGlovesNativeFlag() {
     }
 
     g_bGlovesNativeReady = GetFeatureStatus(FeatureType_Native, "ClutchGloves_RefreshClient") == FeatureStatus_Available
-        && GetFeatureStatus(FeatureType_Native, "ClutchGloves_ApplyClient") == FeatureStatus_Available
-        && GetFeatureStatus(FeatureType_Native, "ClutchGloves_IsClientUsingGloves") == FeatureStatus_Available;
+        && GetFeatureStatus(FeatureType_Native, "ClutchGloves_ApplyClient") == FeatureStatus_Available;
     if (g_bGlovesNativeReady) {
         g_bLoggedGlovesNativeMissing = false;
         LogMessage("[Clutch] z_clutch_gloves natives ready");
-    }
-}
-
-void ClutchGlovesApplyClientSafe(int client) {
-    if (g_bGlovesNativeReady) {
-        ClutchGloves_ApplyClient(client);
     }
 }
 
@@ -316,11 +309,22 @@ void ClutchGlovesRefreshClientSafe(int client) {
     RefreshGlovesNativeFlag();
     if (g_bGlovesNativeReady) {
         ClutchGloves_RefreshClient(client);
+    } else if (LibraryExists("clutch_gloves")) {
+        ServerCommand("sm_clutch_gloves_refresh");
     } else if (!g_bLoggedGlovesNativeMissing) {
         g_bLoggedGlovesNativeMissing = true;
         LogError(
             "[Clutch] z_clutch_gloves not ready — run: sm plugins unload z_clutch_skins_bridge; sm plugins unload z_clutch_gloves; sm plugins load z_clutch_gloves; sm plugins load z_clutch_skins_bridge"
         );
+    }
+}
+
+void ClutchGlovesApplyClientSafe(int client) {
+    RefreshGlovesNativeFlag();
+    if (g_bGlovesNativeReady) {
+        ClutchGloves_ApplyClient(client);
+    } else if (LibraryExists("clutch_gloves")) {
+        ServerCommand("sm_clutch_gloves_apply");
     }
 }
 
@@ -632,14 +636,24 @@ public Action ClutchBlockWsChatForPlayers(int client, const char[] command, int 
 void ClutchBeginForcedSync(int client) {
     g_bAllowWeaponRegive[client] = true;
 #if defined _clutch_gloves_included_
-    // Mid-game: refresh glove cache only — z_clutch_gloves applies on player_spawn.
     ClutchGlovesRefreshClientSafe(client);
+    CreateTimer(1.0, Timer_ApplyGlovesAfterRefresh, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 #endif
 
     DataPack pack = new DataPack();
     pack.WriteCell(GetClientUserId(client));
     CreateTimer(FORCE_WEAPONS_AFTER_GLOVES_DELAY, Timer_ApplyWeaponsAfterGloves, pack, TIMER_FLAG_NO_MAPCHANGE);
 }
+
+#if defined _clutch_gloves_included_
+public Action Timer_ApplyGlovesAfterRefresh(Handle timer, any userid) {
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        ClutchGlovesApplyClientSafe(client);
+    }
+    return Plugin_Stop;
+}
+#endif
 
 public Action Timer_ApplyWeaponsAfterGloves(Handle timer, DataPack pack) {
     pack.Reset();
@@ -1146,6 +1160,26 @@ public Action Timer_ApplyKnifeSkinDelayed(Handle timer, DataPack pack) {
     return Plugin_Stop;
 }
 
+public Action Timer_ApplyKnifeSkinFromCache(Handle timer, any userid) {
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || g_CachedKnifeClass[client][0] == '\0') {
+        return Plugin_Stop;
+    }
+
+    int idx = GetClutchIndexForClassname(client, g_CachedKnifeClass[client]);
+    if (idx < 0 || g_CachedPaintkit[client][idx] <= 0) {
+        return Plugin_Stop;
+    }
+
+    int weapon = FindPlayerWeapon(client, g_CachedKnifeClass[client]);
+    if (weapon == -1) {
+        return Plugin_Stop;
+    }
+
+    ApplyCachedSkinToEntity(client, weapon, idx, true, true, false);
+    return Plugin_Stop;
+}
+
 bool IsMeleeWeaponKey(const char[] weaponKey) {
     return StrContains(weaponKey, "knife", false) != -1
         || StrContains(weaponKey, "bayonet", false) != -1;
@@ -1583,6 +1617,56 @@ bool ClutchRefreshWeaponSlot(int client, int idx) {
     return true;
 }
 
+bool ClutchRegiveKnife(int client) {
+    if (g_CachedKnifeClass[client][0] == '\0') {
+        return false;
+    }
+
+    int idx = GetClutchIndexForClassname(client, g_CachedKnifeClass[client]);
+    if (idx < 0) {
+        return false;
+    }
+
+    int paintkit = g_CachedPaintkit[client][idx];
+    if (paintkit <= 0) {
+        return false;
+    }
+
+    char knifeClass[64];
+    strcopy(knifeClass, sizeof(knifeClass), g_CachedKnifeClass[client]);
+
+    int existing = FindPlayerWeapon(client, knifeClass);
+    if (existing != -1) {
+        RemovePlayerItem(client, existing);
+        if (IsValidEntity(existing)) {
+            AcceptEntityInput(existing, "KillHierarchy");
+        }
+    }
+
+    int newKnife = GivePlayerItem(client, knifeClass);
+    if (newKnife == -1) {
+        return false;
+    }
+
+    SetClutchWeaponProps(
+        client,
+        newKnife,
+        paintkit,
+        g_CachedWear[client][idx],
+        g_CachedSeed[client][idx],
+        g_CachedTrak[client][idx],
+        g_CachedTrakCount[client][idx],
+        g_CachedTag[client][idx],
+        true
+    );
+    g_iAppliedPaintkit[client][idx] = paintkit;
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Re-gave %s paintkit %d for %N", knifeClass, paintkit, client);
+    }
+    return true;
+}
+
 public Action Timer_RestoreWeaponAmmo(Handle timer, DataPack pack) {
     pack.Reset();
     int userid = pack.ReadCell();
@@ -1799,6 +1883,10 @@ public Action Timer_ForceReapplyPass(Handle timer, DataPack pack) {
     }
 
     ApplyAllCachedWeaponsToClient(client, force, allowRegive);
+
+    if (allowRegive && pass == 0) {
+        ClutchRegiveKnife(client);
+    }
 
     if (force && pass == REAPPLY_PASS_COUNT - 1 && g_cvDebug.BoolValue) {
         LogMessage("[Clutch] Finished forced re-apply passes for %N", client);
@@ -2082,6 +2170,12 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
 
     if (knifePaintkit > 0 && knifeClass[0] != '\0') {
         strcopy(g_CachedKnifeClass[client], CLUTCH_KNIFE_CLASS_LEN, knifeClass);
+#if defined _weapons_included_
+        if (force) {
+            RefreshWeaponsReloadNativeFlag();
+            TryReloadWeaponsPluginData(client);
+        }
+#endif
         ClutchSetClientKnife(client, knifeClass);
 
         int knifeWeapon = FindPlayerWeapon(client, knifeClass);
@@ -2099,6 +2193,9 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
         knifePack.WriteCell(knifeTrakCount);
         knifePack.WriteString(knifeTag);
         CreateTimer(0.35, Timer_ApplyKnifeSkinDelayed, knifePack, TIMER_FLAG_NO_MAPCHANGE);
+        int useridKnife = GetClientUserId(client);
+        CreateTimer(0.75, Timer_ApplyKnifeSkinFromCache, useridKnife, TIMER_FLAG_NO_MAPCHANGE);
+        CreateTimer(1.5, Timer_ApplyKnifeSkinFromCache, useridKnife, TIMER_FLAG_NO_MAPCHANGE);
     }
 
     bool allowRegive = g_bAllowWeaponRegive[client];
