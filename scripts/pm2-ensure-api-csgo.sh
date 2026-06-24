@@ -31,6 +31,13 @@ maybe_kill_stale_before_start() {
 
 maybe_kill_stale_before_start
 
+if [[ ! -f dist/services/stickers-db-sync.js ]] \
+  || [[ src/services/stickers-db-sync.ts -nt dist/services/stickers-db-sync.js ]] \
+  || ! grep -q 'clutchStickersTableName' dist/services/stickers-db-sync.js 2>/dev/null; then
+  echo "[pm2-ensure] building api-csgo (dist out of date)..."
+  npm run build
+fi
+
 restart_ok=0
 if pm2 describe api-csgo >/dev/null 2>&1; then
   if pm2 restart api-csgo --update-env; then

@@ -55,4 +55,14 @@ if [[ -f "${ALT_DATA_DB}" ]]; then
 fi
 
 echo ""
-echo "Fix wrong path: set STICKERS_DB_PATH=${STICKERS_DB} in api-csgo .env, pm2 restart api-csgo, save stickers on site."
+echo ">>> dist build (clutch sync in compiled JS)"
+if [[ -f "${REPO_ROOT}/dist/services/stickers-db-sync.js" ]] \
+  && grep -q 'clutchStickersTableName' "${REPO_ROOT}/dist/services/stickers-db-sync.js"; then
+  echo "OK: dist has clutch_weaponstickers sync"
+else
+  echo "WARN: dist OUT OF DATE — run: cd ~/api-csgo && npm run build && pm2 restart api-csgo --update-env"
+fi
+
+echo ""
+echo "Fix wrong path: set STICKERS_DB_PATH=${STICKERS_DB} in api-csgo .env, npm run build, pm2 restart, save stickers on site."
+echo "Quick migrate TR from legacy: bash scripts/migrate-legacy-stickers-to-clutch.sh ${STEAM_FRAGMENT}"

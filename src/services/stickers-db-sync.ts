@@ -63,6 +63,88 @@ function countRowsForSteam(
   return row.c ?? 0;
 }
 
+function migrateLegacyStickersToClutch(
+  db: Database.Database,
+  tablePrefix: string,
+  steamIds: string[],
+): number {
+  const legacyTable = stickersTableName(tablePrefix);
+  const clutchTable = clutchStickersTableName(tablePrefix);
+  if (countRowsForSteam(db, clutchTable, steamIds) > 0) {
+    return 0;
+  }
+
+  const placeholders = steamIds.map(() => '?').join(',');
+  const legacyRows = db
+    .prepare(
+      `SELECT steamid, weaponindex, slot0, slot1, slot2, slot3, slot4, slot5,
+              wear0, wear1, wear2, wear3, wear4, wear5
+       FROM ${legacyTable}
+       WHERE steamid IN (${placeholders})
+         AND (slot0 != 0 OR slot1 != 0 OR slot2 != 0 OR slot3 != 0 OR slot4 != 0 OR slot5 != 0)`,
+    )
+    .all(...steamIds) as Array<{
+      steamid: string;
+      weaponindex: number;
+      slot0: number;
+      slot1: number;
+      slot2: number;
+      slot3: number;
+      slot4: number;
+      slot5: number;
+      wear0: number;
+      wear1: number;
+      wear2: number;
+      wear3: number;
+      wear4: number;
+      wear5: number;
+    }>;
+
+  if (legacyRows.length === 0) return 0;
+
+  const insert = db.prepare(
+    `INSERT INTO ${clutchTable} (
+       steamid, weaponindex, team,
+       slot0, slot1, slot2, slot3, slot4, slot5,
+       wear0, wear1, wear2, wear3, wear4, wear5
+     ) VALUES (?, ?, 'T', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(steamid, weaponindex, team) DO UPDATE SET
+       slot0=excluded.slot0, slot1=excluded.slot1, slot2=excluded.slot2,
+       slot3=excluded.slot3, slot4=excluded.slot4, slot5=excluded.slot5,
+       wear0=excluded.wear0, wear1=excluded.wear1, wear2=excluded.wear2,
+       wear3=excluded.wear3, wear4=excluded.wear4, wear5=excluded.wear5`,
+  );
+
+  let migrated = 0;
+  for (const row of legacyRows) {
+    insert.run(
+      row.steamid,
+      row.weaponindex,
+      row.slot0,
+      row.slot1,
+      row.slot2,
+      row.slot3,
+      row.slot4,
+      row.slot5,
+      row.wear0,
+      row.wear1,
+      row.wear2,
+      row.wear3,
+      row.wear4,
+      row.wear5,
+    );
+    migrated += 1;
+  }
+
+  if (migrated > 0) {
+    console.log(
+      `[csgo-stickers] migrated ${migrated} legacy rows → ${clutchTable} (team T only)`,
+    );
+  }
+
+  return migrated;
+}
+
 export async function syncPlayerStickersToDb(
   steamId: string,
   entries: StickerSyncEntry[],
@@ -104,6 +186,8 @@ export async function syncPlayerStickersToDb(
   });
   tx();
 
+  let migrated = migrateLegacyStickersToClutch(db, tablePrefix, steamIds);
+
   db.pragma('wal_checkpoint(TRUNCATE)');
 
   const clutchRows = countRowsForSteam(db, clutchTable, steamIds);
@@ -111,7 +195,7 @@ export async function syncPlayerStickersToDb(
 
   console.log(
     `[csgo-stickers] synced ${entries.length} entries for ${steamIds.join(', ')} ` +
-      `(${updated} sql ops, legacy stmts=${legacyStmtCount}, clutch stmts=${clutchStmtCount}) ` +
+      `(${updated} sql ops, legacy stmts=${legacyStmtCount}, clutch stmts=${clutchStmtCount}, migrated=${migrated}) ` +
       `db=${dbPath} table=${clutchTable} rows=${clutchRows} (legacy ${legacyTable} rows=${legacyRows})`,
   );
 
