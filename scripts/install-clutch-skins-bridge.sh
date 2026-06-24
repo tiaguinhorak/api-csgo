@@ -64,6 +64,12 @@ if [[ ! -d "${SM}/scripting" ]]; then
   exit 1
 fi
 
+echo ">>> PTaH (required for z_clutch_skins_bridge compile)"
+bash "${REPO_ROOT}/scripts/install-ptah.sh"
+
+echo ">>> kgns weapons.smx (shared SQLite skin DB with ranked)"
+bash "${REPO_ROOT}/scripts/install-kgns-weapons.sh"
+
 SPCOMP="${SM}/scripting/spcomp"
 if [[ ! -x "${SPCOMP}" ]]; then
   SPCOMP="${SM}/scripting/spcomp64"
