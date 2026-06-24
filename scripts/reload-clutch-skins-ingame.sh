@@ -16,6 +16,9 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
+SM_PLUGINS="${CSGO_ROOT}/addons/sourcemod/plugins"
+
 EXPECTED_BRIDGE_VERSION="$(grep -E '#define PLUGIN_VERSION' "${REPO_ROOT}/sourcemod/clutch_skins_bridge.sp" | sed 's/.*"\(.*\)".*/\1/')"
 EXPECTED_GLOVES_VERSION="$(grep -E '#define PLUGIN_VERSION' "${REPO_ROOT}/sourcemod/z_clutch_gloves.sp" | sed 's/.*"\(.*\)".*/\1/')"
 
@@ -32,7 +35,7 @@ resolve_screen_session() {
   fi
 
   while IFS= read -r line; do
-    if [[ "${line}" == *"(Detached)"* ]] && [[ "${line}" == *"csgo-clutch"* ]]; then
+    if [[ "${line}" == *"(Detached)"* ]] && [[ "${line}" == *"csgo-"* ]]; then
       full="$(echo "${line}" | awk '{print $1}')"
       if [[ -n "${full}" ]]; then
         echo "${full}"
@@ -44,21 +47,17 @@ resolve_screen_session() {
   return 1
 }
 
+plugin_file_exists() {
+  [[ -f "${SM_PLUGINS}/${1}.smx" ]]
+}
+
 FULL_SCREEN="$(resolve_screen_session || true)"
 if [[ -z "${FULL_SCREEN}" ]]; then
   echo "No CS screen session found (server may be offline)." >&2
   echo "" >&2
   screen -ls 2>/dev/null || echo "(screen -ls failed)" >&2
   echo "" >&2
-  echo "Start CS first, then re-run:" >&2
-  echo "  bash scripts/reload-clutch-skins-ingame.sh" >&2
-  echo "" >&2
-  echo "Or attach manually and run one command per line:" >&2
-  echo "  screen -r csgo-clutch-#1" >&2
-  echo "  sm plugins load z_clutch_gloves" >&2
-  echo "  sm plugins load z_clutch_skins_bridge" >&2
-  echo "  sm plugins info z_clutch_gloves" >&2
-  echo "  sm plugins info z_clutch_skins_bridge" >&2
+  echo "Start CS first: bash scripts/start-csgo-screen.sh" >&2
   exit 1
 fi
 
@@ -74,6 +73,10 @@ send_cmd() {
 
 send_plugin() {
   local name="$1"
+  if ! plugin_file_exists "${name}"; then
+    echo ">>> skip ${name}.smx (not installed)"
+    return 0
+  fi
   send_cmd "sm plugins reload ${name}" 0.3
   send_cmd "sm plugins load ${name}" 0.5
 }
@@ -84,24 +87,31 @@ send_cmd "sm plugins unload z_clutch_skins_bridge" 0.6
 send_plugin "z_clutch_gloves"
 send_cmd "sm plugins info z_clutch_gloves"
 send_cmd "sm plugins load z_clutch_skins_bridge" 0.8
+send_cmd "sm plugins reload z_clutch_skins_bridge" 0.8
 send_cmd "sm plugins info z_clutch_skins_bridge"
 send_plugin "clutch_platform_gate"
 send_cmd "sm plugins info clutch_platform_gate"
-send_plugin "clutch_match_tracker"
-send_plugin "eItems"
-send_plugin "csgo_weaponstickers"
+
+if [[ "${WARMUP_VPS:-0}" != "1" ]] && plugin_file_exists "clutch_match_tracker"; then
+  send_plugin "clutch_match_tracker"
+fi
+
+if plugin_file_exists "eItems"; then
+  send_plugin "eItems"
+fi
+if plugin_file_exists "csgo_weaponstickers"; then
+  send_plugin "csgo_weaponstickers"
+fi
+
 send_cmd "clutch_gloves_debug 1"
 send_cmd "clutch_skins_debug 1"
-send_cmd "sm_clutch_gloves_status"
-send_cmd "sm_clutch_gloves_refresh"
-send_cmd "sm_clutch_applyskins"
 
 echo ""
-echo "Done. Expect z_clutch_gloves Version: ${EXPECTED_GLOVES_VERSION}"
-echo "       z_clutch_skins_bridge Version: ${EXPECTED_BRIDGE_VERSION}"
+echo "Plugins reloaded. Connect in-game FIRST (Steam auth must be ready, not auth-pending)."
+echo "Then in server console:"
+echo "  sm_clutch_gloves_refresh"
+echo "  sm_clutch_applyskins"
+echo "  mp_restartgame 1"
 echo ""
-echo "If still 'not loaded', run install first:"
-echo "  ./scripts/install-clutch-skins-bridge.sh"
-echo "Then re-run this script or: sm plugins load z_clutch_gloves / z_clutch_skins_bridge"
-echo "If load fails, check: ./scripts/verify-clutch-skins-bridge.sh"
-echo "Respawn in-game after apply."
+echo "Expect z_clutch_gloves Version: ${EXPECTED_GLOVES_VERSION}"
+echo "       z_clutch_skins_bridge Version: ${EXPECTED_BRIDGE_VERSION}"

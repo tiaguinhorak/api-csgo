@@ -447,6 +447,9 @@ public Action Command_ReloadSkins(int client, int args) {
 }
 
 public Action Command_ApplySkins(int client, int args) {
+#if defined _clutch_gloves_included_
+    RefreshGlovesNativeFlag();
+#endif
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && !IsFakeClient(i)) {
             g_bPendingWebLoadout[i] = false;
