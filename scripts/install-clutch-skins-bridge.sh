@@ -89,6 +89,7 @@ echo "Copying source..."
 cp -f "${SP_SRC}" "${SM}/scripting/clutch_skins_bridge.sp"
 INC_SRC="${REPO_ROOT}/sourcemod/include/weapons.inc"
 GLOVES_INC_SRC="${REPO_ROOT}/sourcemod/include/clutch_gloves.inc"
+STEAM_INC_SRC="${REPO_ROOT}/sourcemod/include/clutch_steam.inc"
 GLOVES_SP_SRC="${REPO_ROOT}/sourcemod/z_clutch_gloves.sp"
 GLOVES_CFG_SRC="${REPO_ROOT}/sourcemod/clutch_gloves.cfg"
 if [[ -f "${INC_SRC}" ]]; then
@@ -96,6 +97,9 @@ if [[ -f "${INC_SRC}" ]]; then
 fi
 if [[ -f "${GLOVES_INC_SRC}" ]]; then
   cp -f "${GLOVES_INC_SRC}" "${SM}/scripting/include/clutch_gloves.inc"
+fi
+if [[ -f "${STEAM_INC_SRC}" ]]; then
+  cp -f "${STEAM_INC_SRC}" "${SM}/scripting/include/clutch_steam.inc"
 fi
 if [[ -f "${GLOVES_SP_SRC}" ]]; then
   cp -f "${GLOVES_SP_SRC}" "${SM}/scripting/z_clutch_gloves.sp"

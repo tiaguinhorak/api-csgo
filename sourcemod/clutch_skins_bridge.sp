@@ -4,6 +4,7 @@
 #include <sourcemod>
 #include <sdktools>
 #include <cstrike>
+#include <clutch_steam>
 
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
@@ -493,7 +494,7 @@ int FindClientBySteam2(const char[] steam) {
         if (!IsClientInGame(i) || IsFakeClient(i)) {
             continue;
         }
-        if (!GetClientAuthId(i, AuthId_Steam2, clientSteam, sizeof(clientSteam), true)) {
+        if (!ClutchGetClientSteam2(i, clientSteam, sizeof(clientSteam))) {
             continue;
         }
         if (StrEqual(clientSteam, steam, false)) {
@@ -679,6 +680,16 @@ public void OnClientPutInServer(int client) {
         return;
     }
     SDKHook(client, SDKHook_WeaponEquip, OnWeaponEquip);
+#if defined _clutch_gloves_included_
+    ClutchGlovesRefreshClientSafe(client);
+#endif
+    ScheduleApplyClientSkins(client);
+}
+
+public void OnClientAuthorized(int client, const char[] authString) {
+    if (IsFakeClient(client)) {
+        return;
+    }
 #if defined _clutch_gloves_included_
     ClutchGlovesRefreshClientSafe(client);
 #endif
@@ -1049,7 +1060,7 @@ void ForceReapplyPlayerGloves(int client) {
     g_iGloveApplyGen[client]++;
 
     char steamId[32];
-    if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+    if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
         g_bForceGloveApply[client] = false;
         return;
     }
@@ -1081,7 +1092,7 @@ public Action Timer_QueryPlayerGlovesDelayed(Handle timer, any userid) {
     }
 
     char steamId[32];
-    if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+    if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
         return Plugin_Stop;
     }
 
@@ -2393,7 +2404,7 @@ public Action Timer_RetryGlovesAfterTeam(Handle timer, DataPack pack) {
     int client = GetClientOfUserId(userid);
     if (client > 0 && IsClientInGame(client)) {
         char steamId[32];
-        if (GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+        if (ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
             QueryPlayerGloves(client, steamId, 0);
         }
     }
@@ -2740,7 +2751,7 @@ void ApplyClientSkins(int client, bool force) {
     g_fLastApplyTime[client] = now;
 
     char steamId[32];
-    if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+    if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
         return;
     }
 

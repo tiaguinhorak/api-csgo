@@ -5,6 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 #include <sdkhooks>
+#include <clutch_steam>
 
 #define PLUGIN_VERSION "1.4.0"
 #define GLOVE_THINK_TICK_MOD 8
@@ -141,6 +142,13 @@ public void OnClientPostAdminCheck(int client) {
     RefreshClientFromDatabase(client, 0);
 }
 
+public void OnClientAuthorized(int client, const char[] authString) {
+    if (IsFakeClient(client)) {
+        return;
+    }
+    RefreshClientFromDatabase(client, 0);
+}
+
 void ConnectDatabase() {
     SyncSharedConVars();
 
@@ -229,7 +237,7 @@ public Action Command_Status(int client, int args) {
         }
 
         char steamId[32];
-        if (!GetClientAuthId(i, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+        if (!ClutchGetClientSteam2(i, steamId, sizeof(steamId))) {
             strcopy(steamId, sizeof(steamId), "auth-pending");
         }
 
@@ -308,7 +316,7 @@ void RefreshClientFromDatabase(int client, int altAttempt) {
     }
 
     char steamId[32];
-    if (!GetClientAuthId(client, AuthId_Steam2, steamId, sizeof(steamId), true)) {
+    if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
         return;
     }
 
