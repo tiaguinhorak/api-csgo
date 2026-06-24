@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.2"
+#define PLUGIN_VERSION "3.8.3"
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
 #define CLUTCH_WEAPON_SLOTS 53
@@ -1704,6 +1704,20 @@ void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = fa
         ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force, allowRegive);
     }
 
+    ClutchBridgeUpdateClientModel(client);
+}
+
+/**
+ * Refreshing the player model strips the glove wearable. Let z_clutch_gloves own
+ * the model when it runs (even if its natives are not bound yet), so warmup reloads
+ * do not wipe gloves.
+ */
+void ClutchBridgeUpdateClientModel(int client) {
+#if defined _clutch_gloves_included_
+    if (ClutchUseExternalGlovesPlugin()) {
+        return;
+    }
+#endif
     if (ClutchClientHasGlovesLoaded(client)) {
         return;
     }
@@ -1797,7 +1811,8 @@ void ClutchSetClientKnife(int client, const char[] knifeClass) {
     if (LibraryExists("weapons")) {
         char knife[64];
         strcopy(knife, sizeof(knife), knifeClass);
-        Weapons_SetClientKnife(client, knife, false);
+        // update=true so kgns swaps the knife model immediately (not only on next spawn/death).
+        Weapons_SetClientKnife(client, knife, IsPlayerAlive(client));
     }
 #endif
 }
