@@ -102,8 +102,9 @@ if ! command -v pm2 >/dev/null 2>&1; then
   echo ""
   echo ">>> installing pm2 (local npm — site push needs api-csgo on warmup)"
   npm install pm2 --no-save --no-audit --no-fund
-  export PATH="${REPO_ROOT}/node_modules/.bin:${PATH}"
 fi
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/pm2-local.sh"
 
 if ! grep -q 'gloves: result.gloves' dist/routes/csgo-skins-push.js; then
   echo "ERROR: build sem gloves sync — verifique erros de compilação" >&2

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Libera porta 3000 e sobe api-csgo com PM2 (uma instância só).
+# Libera porta e sobe api-csgo com PM2 (uma instância só).
 set -euo pipefail
-cd "$(dirname "$0")/.."
-REPO_ROOT="$(pwd)"
 
-API_PORT="${PORT:-3000}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${REPO_ROOT}"
+
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/pm2-local.sh"
 
 echo "[pm2-recover] Stopping PM2 daemon and all apps..."
 pm2 delete api-csgo 2>/dev/null || true
@@ -29,11 +31,11 @@ if ! grep -q 'player-sync' dist/routes/csgo-stickers-push.js 2>/dev/null; then
   exit 1
 fi
 
-echo "[pm2-recover] Starting api-csgo via pm2..."
+echo "[pm2-recover] Starting api-csgo via pm2 on :${API_PORT}..."
 pm2 start ecosystem.config.js --update-env
 sleep 5
 
-HEALTH="$(curl -sf "http://127.0.0.1:${API_PORT}/health" 2>/dev/null || true)"
+HEALTH="$(curl -sf "${CLUTCH_API_URL}/health" 2>/dev/null || true)"
 if [[ -z "${HEALTH}" ]]; then
   echo "[pm2-recover] health check failed:" >&2
   pm2 logs api-csgo --lines 20 --nostream 2>/dev/null || true
@@ -46,7 +48,7 @@ if ! echo "${HEALTH}" | grep -q 'glovesPlayerSync'; then
     pm2 delete api-csgo 2>/dev/null || true
     pm2 start ecosystem.config.js --update-env
     sleep 5
-    HEALTH="$(curl -sf "http://127.0.0.1:${API_PORT}/health" 2>/dev/null || true)"
+    HEALTH="$(curl -sf "${CLUTCH_API_URL}/health" 2>/dev/null || true)"
   else
     stale_rc=$?
     if [[ "${stale_rc}" -eq 2 ]]; then
@@ -82,5 +84,5 @@ pm2 save
 
 echo "[pm2-recover] OK"
 pm2 status
-curl -s "http://127.0.0.1:${API_PORT}/health"
+curl -s "${CLUTCH_API_URL}/health"
 echo ""

@@ -49,3 +49,6 @@ if ! grep -qE '^CSGO_RCON_PASSWORD=' "${ENV_FILE}"; then
 fi
 
 echo "OK: warmup api .env checked ($(grep -c '^' "${ENV_FILE}") lines)"
+
+bash "${REPO_ROOT}/scripts/pm2-local.sh" >/dev/null
+echo "OK: pm2 available ($(command -v pm2))"
