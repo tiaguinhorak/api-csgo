@@ -42,6 +42,56 @@ bash "${REPO_ROOT}/scripts/ensure-clutch-site-env.sh"
 
 set_kv_if_missing "CLUTCH_SITE_FALLBACK_URL" "http://192.168.100.6:3000"
 
+# shellcheck source=lib/parse-site-url.sh
+source "${REPO_ROOT}/scripts/lib/parse-site-url.sh"
+
+fix_warmup_site_url_if_dns_broken() {
+  set -a
+  # shellcheck disable=SC1091
+  source "${ENV_FILE}"
+  set +a
+
+  local site_url="${CLUTCH_SITE_URL:-https://clutchclube.com.br}"
+  local fallback="${CLUTCH_SITE_FALLBACK_URL:-http://192.168.100.6:3000}"
+  parse_clutch_site_url "${site_url}"
+
+  if clutch_site_host_is_ip "${SITE_HOST}"; then
+    return 0
+  fi
+
+  if getent hosts "${SITE_HOST}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "WARN: VPS cannot resolve ${SITE_HOST} (system DNS broken)"
+
+  RESOLVED_SITE_IP=""
+  if clutch_resolve_site_ip "${SITE_HOST}"; then
+    if ! grep -qE "^CLUTCH_SITE_RESOLVE_IP=${RESOLVED_SITE_IP}" "${ENV_FILE}"; then
+      if grep -qE '^CLUTCH_SITE_RESOLVE_IP=' "${ENV_FILE}"; then
+        sed -i "s|^CLUTCH_SITE_RESOLVE_IP=.*|CLUTCH_SITE_RESOLVE_IP=${RESOLVED_SITE_IP}|" "${ENV_FILE}"
+      else
+        echo "CLUTCH_SITE_RESOLVE_IP=${RESOLVED_SITE_IP}" >> "${ENV_FILE}"
+      fi
+      echo "Set CLUTCH_SITE_RESOLVE_IP=${RESOLVED_SITE_IP} (public DNS lookup)"
+    fi
+    return 0
+  fi
+
+  echo "WARN: public DNS lookup failed — switching CLUTCH_SITE_URL to LAN fallback ${fallback}"
+  if grep -qE '^CLUTCH_SITE_URL=' "${ENV_FILE}"; then
+    sed -i "s|^CLUTCH_SITE_URL=.*|CLUTCH_SITE_URL=${fallback}|" "${ENV_FILE}"
+  else
+    echo "CLUTCH_SITE_URL=${fallback}" >> "${ENV_FILE}"
+  fi
+  if grep -qE '^SITE_ORIGIN=' "${ENV_FILE}"; then
+    sed -i "s|^SITE_ORIGIN=.*|SITE_ORIGIN=${fallback}|" "${ENV_FILE}"
+  fi
+  echo "Updated .env — restart api-csgo: npm run pm2:restart"
+}
+
+fix_warmup_site_url_if_dns_broken
+
 if ! grep -qE '^CSGO_SKINS_SYNC_KEY=' "${ENV_FILE}"; then
   echo "ERROR: CSGO_SKINS_SYNC_KEY missing in .env (must match site/.env)" >&2
   exit 1

@@ -13,6 +13,13 @@ elif [[ -f "${REPO_ROOT}/scripts/ensure-clutch-site-env.sh" ]]; then
   bash "${REPO_ROOT}/scripts/ensure-clutch-site-env.sh" || true
 fi
 
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 if [[ ! -f dist/services/weapons-db-sync.js ]]; then
   echo "ERROR: dist missing — run: npm install && npm run build" >&2
   exit 1
@@ -39,14 +46,31 @@ JSON_FILE="/tmp/clutch-site-loadouts.json"
 echo "=== Warmup loadout sync (site → local SQLite) ==="
 echo "DB: ${DB_PATH}"
 
-bash "${REPO_ROOT}/scripts/fetch-site-loadouts.sh" "${JSON_FILE}"
-
-if ! command -v jq >/dev/null 2>&1; then
-  echo "ERROR: jq required — apt install jq (as root/clutch)" >&2
-  exit 1
+if ! bash "${REPO_ROOT}/scripts/fetch-site-loadouts.sh" "${JSON_FILE}"; then
+  echo ""
+  echo ">>> fetch failed — trying local api-csgo POST /sync-from-site"
+  API_URL="${CLUTCH_API_URL:-http://127.0.0.1:${PORT:-3001}}"
+  SYNC_RESP="$(curl -sf -X POST "${API_URL}/api/csgo/skins/sync-from-site" \
+    -H "x-skins-sync-key: ${CSGO_SKINS_SYNC_KEY}" \
+    -H "Content-Type: application/json" 2>/dev/null || echo '{"ok":false}')"
+  if command -v jq >/dev/null 2>&1 && jq -e '.synced > 0 or .ok == true' <<<"${SYNC_RESP}" >/dev/null 2>&1; then
+    echo "OK via api-csgo sync-from-site: ${SYNC_RESP}"
+    SKIP_NODE_SYNC=1
+  else
+    echo "FAIL: ${SYNC_RESP}" >&2
+    echo "Fix: bash scripts/ensure-warmup-api-env.sh && npm run pm2:restart" >&2
+    echo "      Ensure site runs at CLUTCH_SITE_URL in .env (often http://192.168.100.6:3000)" >&2
+    exit 1
+  fi
 fi
 
-node <<'NODE'
+if [[ "${SKIP_NODE_SYNC:-0}" != "1" ]]; then
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "ERROR: jq required — apt install jq (as root/clutch)" >&2
+    exit 1
+  fi
+
+  node <<'NODE'
 (async () => {
 require('dotenv').config();
 const fs = require('fs');
@@ -76,6 +100,7 @@ console.log(`[warmup-loadout] done synced=${ok} errors=${err} total=${loadouts.l
 if (ok === 0 && loadouts.length > 0) process.exit(1);
 })();
 NODE
+fi
 
 echo ""
 echo ">>> clutch_team_loadout"
