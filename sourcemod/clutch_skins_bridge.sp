@@ -2651,7 +2651,7 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
     pack.Reset();
     int userid = pack.ReadCell();
     bool force = pack.ReadCell() == 1;
-    bool skipWeaponsReload = pack.ReadCell() == 1;
+    pack.ReadCell();
     delete pack;
 
     int client = GetClientOfUserId(userid);
@@ -2660,10 +2660,7 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
     }
 
     bool allowRegive = g_bAllowWeaponRegive[client];
-#if defined _weapons_included_
     // Never ReloadClientData here — weapons.smx gives guns from kgns columns (auto-buy).
-    (void)allowRegive;
-#endif
     ApplyAllCachedWeaponsToClient(client, force, allowRegive);
     ScheduleForceReapply(client, force, allowRegive);
     return Plugin_Stop;
