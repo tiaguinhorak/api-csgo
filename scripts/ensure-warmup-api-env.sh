@@ -40,6 +40,8 @@ fi
 
 bash "${REPO_ROOT}/scripts/ensure-clutch-site-env.sh"
 
+set_kv_if_missing "CLUTCH_SITE_FALLBACK_URL" "http://192.168.100.6:3000"
+
 if ! grep -qE '^CSGO_SKINS_SYNC_KEY=' "${ENV_FILE}"; then
   echo "ERROR: CSGO_SKINS_SYNC_KEY missing in .env (must match site/.env)" >&2
   exit 1
