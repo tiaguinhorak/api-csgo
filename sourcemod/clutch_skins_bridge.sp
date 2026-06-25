@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.56"
+#define PLUGIN_VERSION "3.8.57"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define RESPAWN_VISUAL_PASS_COUNT 2
@@ -1412,6 +1412,13 @@ void ClutchBeginForcedSync(int client) {
     g_bAllowWeaponRegive[client] = false;
     g_bInitialSyncPending[client] = true;
 
+    char steamId[32];
+    if (ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
+        g_bStickerDbSynced[client] = false;
+        QueryPlayerLoadout(client, steamId, 0, true);
+        QueryPlayerStickers(client, steamId, 0);
+    }
+
 #if defined _clutch_gloves_included_
     g_iForcedSyncWeaponGen[client]++;
     int gen = g_iForcedSyncWeaponGen[client];
@@ -1598,7 +1605,7 @@ public Action Timer_ApplyEquippedWeapon(Handle timer, DataPack pack) {
 
     ApplyCachedSkinToEntity(client, weapon, idx, isKnife, false);
     if (!isKnife && ClutchWeaponHasStickerCache(client, idx)) {
-        ClutchApplyStickersForWeapon(client, weapon, idx, false);
+        ClutchApplyStickersForWeapon(client, weapon, idx, true);
     }
     return Plugin_Stop;
 }
@@ -1921,6 +1928,9 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
     if (!force
         && g_iAppliedPaintkit[client][idx] == paintkit
         && entityPaint == paintkit) {
+        if (!isKnife && ClutchWeaponHasStickerCache(client, idx)) {
+            ClutchApplyStickersForWeapon(client, entity, idx, false);
+        }
         return false;
     }
 
@@ -2587,6 +2597,14 @@ int ClutchIndexFromWeaponEntity(int client, int weapon) {
         return -1;
     }
 
+    if (HasEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex")) {
+        int defIndex = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
+        int idxFromDef = ClutchIndexFromDefIndex(defIndex);
+        if (idxFromDef >= 0) {
+            return idxFromDef;
+        }
+    }
+
     char classname[64];
     GetEntityClassname(weapon, classname, sizeof(classname));
     return GetClutchIndexForClassname(client, classname);
@@ -2631,6 +2649,76 @@ public void T_ClutchExecStickerSqlCallback(Database database, DBResultSet result
     if (results == null && error[0] != '\0') {
         LogError("[Clutch] sticker mirror SQL failed: %s", error);
     }
+}
+
+void ClutchSyncLegacyStickerRowForWeapon(int client, int idx) {
+    if (g_hStickersDb == null || client <= 0 || !IsClientInGame(client)) {
+        return;
+    }
+
+    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+        return;
+    }
+
+    int defIndex = g_ClutchWeaponDefIndex[idx];
+    if (defIndex <= 0) {
+        return;
+    }
+
+    char steamId[32];
+    if (!ClutchGetClientSteam3(client, steamId, sizeof(steamId))) {
+        return;
+    }
+
+    char escaped[64];
+    g_hStickersDb.Escape(steamId, escaped, sizeof(escaped));
+
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    int now = GetTime();
+
+    int s0 = g_iStickerSlots[client][teamSlot][idx][0];
+    int s1 = g_iStickerSlots[client][teamSlot][idx][1];
+    int s2 = g_iStickerSlots[client][teamSlot][idx][2];
+    int s3 = g_iStickerSlots[client][teamSlot][idx][3];
+    int s4 = g_iStickerSlots[client][teamSlot][idx][4];
+    int s5 = g_iStickerSlots[client][teamSlot][idx][5];
+
+    char query[640];
+    if (!s0 && !s1 && !s2 && !s3 && !s4 && !s5) {
+        Format(
+            query,
+            sizeof(query),
+            "DELETE FROM %s WHERE steamid='%s' AND weaponindex=%d",
+            g_sLegacyStickersTable,
+            escaped,
+            defIndex
+        );
+        ClutchExecStickerSql(query);
+        return;
+    }
+
+    Format(
+        query,
+        sizeof(query),
+        "INSERT INTO %s (steamid, weaponindex, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5, last_seen) VALUES ('%s', %d, %d, %d, %d, %d, %d, %d, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %d) ON CONFLICT(steamid, weaponindex) DO UPDATE SET slot0=excluded.slot0, slot1=excluded.slot1, slot2=excluded.slot2, slot3=excluded.slot3, slot4=excluded.slot4, slot5=excluded.slot5, wear0=excluded.wear0, wear1=excluded.wear1, wear2=excluded.wear2, wear3=excluded.wear3, wear4=excluded.wear4, wear5=excluded.wear5, last_seen=excluded.last_seen",
+        g_sLegacyStickersTable,
+        escaped,
+        defIndex,
+        s0,
+        s1,
+        s2,
+        s3,
+        s4,
+        s5,
+        g_fStickerWears[client][teamSlot][idx][0],
+        g_fStickerWears[client][teamSlot][idx][1],
+        g_fStickerWears[client][teamSlot][idx][2],
+        g_fStickerWears[client][teamSlot][idx][3],
+        g_fStickerWears[client][teamSlot][idx][4],
+        g_fStickerWears[client][teamSlot][idx][5],
+        now
+    );
+    ClutchExecStickerSql(query);
 }
 
 void ClutchSyncLegacyStickerTableForClient(int client) {
@@ -2727,7 +2815,7 @@ bool ClutchApplyStickersViaNative(int client, int weapon, int idx, bool force = 
         return false;
     }
 
-    ClutchSyncLegacyStickerTableForClient(client);
+    ClutchSyncLegacyStickerRowForWeapon(client, idx);
     ClutchEnsureEconItemInitialized(client, weapon);
 
     int slotCount = ClutchSiteStickerSlotCount(idx);
@@ -3075,6 +3163,19 @@ void ClutchReapplyStickersOnPlayerWeapons(int client, bool force = false) {
         return;
     }
 
+    // Pass 1: every weapon slot with sticker cache (FindPlayerWeapon by classname key).
+    for (int idx = 0; idx < CLUTCH_WEAPON_SLOTS; idx++) {
+        if (IsMeleeWeaponKey(g_ClutchWeaponKeys[idx]) || !ClutchWeaponHasStickerCache(client, idx)) {
+            continue;
+        }
+
+        int weapon = FindPlayerWeapon(client, g_ClutchWeaponKeys[idx]);
+        if (weapon != -1) {
+            ClutchApplyStickersForWeapon(client, weapon, idx, force);
+        }
+    }
+
+    // Pass 2: held weapons — defindex/classname edge cases and force-clear paths.
     int size = GetEntPropArraySize(client, Prop_Send, "m_hMyWeapons");
     for (int i = 0; i < size; i++) {
         int weapon = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
@@ -3766,6 +3867,9 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
         int weapon = FindPlayerWeapon(client, weaponId);
         if (weapon != -1) {
             ApplyCachedSkinToEntity(client, weapon, idx, false, true, false);
+            if (ClutchWeaponHasStickerCache(client, idx)) {
+                ClutchApplyStickersForWeapon(client, weapon, idx, true);
+            }
         } else if (g_cvDebug.BoolValue) {
             LogMessage(
                 "[Clutch] Cached %s paintkit %d for %N (buy/pick up weapon to apply)",
