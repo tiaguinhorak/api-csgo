@@ -24,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.47"
+#define PLUGIN_VERSION "3.8.48"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -76,8 +76,6 @@ float g_fTeamGloveWear[MAXPLAYERS + 1][2];
 Handle g_hRefreshTimer = null;
 bool g_bPendingWebLoadout[MAXPLAYERS + 1];
 StringMap g_hOfflineWebSyncPending = null;
-
-void ClutchApplyWebLoadoutForClient(int client);
 
 int g_CachedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 float g_CachedWear[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
@@ -284,13 +282,6 @@ public void OnPluginStart() {
     CreateTimer(3.0, Timer_RecheckPluginNatives, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
-public void OnPluginEnd() {
-    if (g_hOfflineWebSyncPending != null) {
-        delete g_hOfflineWebSyncPending;
-        g_hOfflineWebSyncPending = null;
-    }
-}
-
 public Action Timer_RecheckPluginNatives(Handle timer) {
 #if defined _clutch_gloves_included_
     RefreshGlovesNativeFlag();
@@ -464,6 +455,10 @@ void ClutchWarnIfKgnsGlovesLoaded() {
 }
 
 public void OnPluginEnd() {
+    if (g_hOfflineWebSyncPending != null) {
+        delete g_hOfflineWebSyncPending;
+        g_hOfflineWebSyncPending = null;
+    }
     if (g_hWeaponsDb != null) {
         delete g_hWeaponsDb;
         g_hWeaponsDb = null;
