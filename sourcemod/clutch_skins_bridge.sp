@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.57"
+#define PLUGIN_VERSION "3.8.58"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define RESPAWN_VISUAL_PASS_COUNT 2
@@ -1603,10 +1603,7 @@ public Action Timer_ApplyEquippedWeapon(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
-    ApplyCachedSkinToEntity(client, weapon, idx, isKnife, false);
-    if (!isKnife && ClutchWeaponHasStickerCache(client, idx)) {
-        ClutchApplyStickersForWeapon(client, weapon, idx, true);
-    }
+    ClutchApplyWeaponVisualsForIndex(client, weapon, idx, isKnife, true, false);
     return Plugin_Stop;
 }
 
@@ -1928,9 +1925,6 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
     if (!force
         && g_iAppliedPaintkit[client][idx] == paintkit
         && entityPaint == paintkit) {
-        if (!isKnife && ClutchWeaponHasStickerCache(client, idx)) {
-            ClutchApplyStickersForWeapon(client, entity, idx, false);
-        }
         return false;
     }
 
@@ -1986,6 +1980,24 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
     }
 
     return true;
+}
+
+/** Skin first, then stickers — never mirror skin to viewmodel without re-syncing stickers. */
+void ClutchApplyWeaponVisualsForIndex(int client, int weapon, int idx, bool isKnife, bool force, bool allowRegive = false) {
+    if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
+        return;
+    }
+
+    int paintkit = g_CachedPaintkit[client][idx];
+    if (paintkit > 0) {
+        ApplyCachedSkinToEntity(client, weapon, idx, isKnife, force, allowRegive);
+    } else {
+        ClutchEnsureEconItemInitialized(client, weapon);
+    }
+
+    if (!isKnife && ClutchWeaponHasStickerCache(client, idx)) {
+        ClutchApplyStickersForWeapon(client, weapon, idx, force);
+    }
 }
 
 public Action Timer_ApplyAllPlayersSkins(Handle timer) {
@@ -2359,10 +2371,6 @@ void SetClutchWeaponProps(
     ClutchNetworkUpdateWeaponSkin(weapon);
     if (!isKnife) {
         ClutchMirrorSkinToViewModels(client, weapon);
-        int stickerIdx = ClutchIndexFromWeaponEntity(client, weapon);
-        if (stickerIdx >= 0) {
-            ClutchApplyStickersForWeapon(client, weapon, stickerIdx, true);
-        }
     }
     if (isKnife && ClutchClientHasGlovesLoaded(client)) {
         return;
@@ -2434,6 +2442,15 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
         }
 
         ClutchCopyWeaponSkinProps(weapon, predicted);
+    }
+
+    int idx = ClutchIndexFromWeaponEntity(client, weapon);
+    if (
+        idx >= 0
+        && !IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])
+        && ClutchWeaponHasStickerCache(client, idx)
+    ) {
+        ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
     }
 }
 
@@ -2518,13 +2535,11 @@ public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
     }
 
     ClutchEnsureEconItemInitialized(client, weapon);
-    ClutchApplyStickersToEntity(client, weapon, idx, false);
-    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
-#if defined _csgo_weaponstickers_included_
-    if (ClutchWeaponStickersNativeReady()) {
-        ClutchApplyStickersViaNative(client, weapon, idx, false);
+    int paintkit = g_CachedPaintkit[client][idx];
+    if (paintkit > 0) {
+        ApplyCachedSkinToEntity(client, weapon, idx, false, false);
     }
-#endif
+    ClutchApplyStickersForWeapon(client, weapon, idx, false);
     return Plugin_Stop;
 }
 
@@ -3129,7 +3144,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
     }
 
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
-    ClutchMaybeForceStickerFullUpdate(client, false);
+    ClutchMaybeForceStickerFullUpdate(client, true);
     ClutchScheduleViewModelStickerPasses(client, weapon, idx);
 
     if (g_cvDebug.BoolValue) {
@@ -3171,7 +3186,7 @@ void ClutchReapplyStickersOnPlayerWeapons(int client, bool force = false) {
 
         int weapon = FindPlayerWeapon(client, g_ClutchWeaponKeys[idx]);
         if (weapon != -1) {
-            ClutchApplyStickersForWeapon(client, weapon, idx, force);
+            ClutchApplyWeaponVisualsForIndex(client, weapon, idx, false, force, false);
         }
     }
 
@@ -3191,10 +3206,10 @@ void ClutchReapplyStickersOnPlayerWeapons(int client, bool force = false) {
         if (force) {
             int slotCount = ClutchSiteStickerSlotCount(idx);
             if (ClutchWeaponHasStickerCache(client, idx) || ClutchEntityHasAppliedStickers(weapon, slotCount)) {
-                ClutchApplyStickersForWeapon(client, weapon, idx, true);
+                ClutchApplyWeaponVisualsForIndex(client, weapon, idx, false, true, false);
             }
         } else if (ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
-            ClutchApplyStickersForWeapon(client, weapon, idx, false);
+            ClutchApplyWeaponVisualsForIndex(client, weapon, idx, false, false, false);
         }
     }
 }
@@ -3233,6 +3248,10 @@ bool ClutchGiveCachedWeapon(int client, int idx) {
         false
     );
     g_iAppliedPaintkit[client][idx] = paintkit;
+
+    if (ClutchWeaponHasStickerCache(client, idx)) {
+        ClutchApplyStickersForWeapon(client, weapon, idx, true);
+    }
 
     if (g_cvDebug.BoolValue) {
         LogMessage("[Clutch] Gave %s paintkit %d for %N", weaponClass, paintkit, client);
@@ -3311,6 +3330,10 @@ bool ClutchRefreshWeaponSlot(int client, int idx) {
         false
     );
     g_iAppliedPaintkit[client][idx] = paintkit;
+
+    if (ClutchWeaponHasStickerCache(client, idx)) {
+        ClutchApplyStickersForWeapon(client, newWeapon, idx, true);
+    }
 
     if (clip != -1) {
         SetEntProp(newWeapon, Prop_Send, "m_iClip1", clip);
@@ -3495,7 +3518,14 @@ void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = fa
             continue;
         }
 
-        ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force, allowRegive);
+        ClutchApplyWeaponVisualsForIndex(
+            client,
+            weapon,
+            i,
+            IsMeleeWeaponKey(weaponKey),
+            force,
+            allowRegive
+        );
     }
 
     ClutchReapplyStickersOnPlayerWeapons(client, force);
@@ -3866,10 +3896,7 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
 
         int weapon = FindPlayerWeapon(client, weaponId);
         if (weapon != -1) {
-            ApplyCachedSkinToEntity(client, weapon, idx, false, true, false);
-            if (ClutchWeaponHasStickerCache(client, idx)) {
-                ClutchApplyStickersForWeapon(client, weapon, idx, true);
-            }
+            ClutchApplyWeaponVisualsForIndex(client, weapon, idx, false, true, false);
         } else if (g_cvDebug.BoolValue) {
             LogMessage(
                 "[Clutch] Cached %s paintkit %d for %N (buy/pick up weapon to apply)",
