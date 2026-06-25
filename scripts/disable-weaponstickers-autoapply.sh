@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Disable csgo_weaponstickers auto-apply — conflicts with z_clutch_skins_bridge (smear/double apply).
+# csgo_weaponstickers: auto-apply OFF (bridge owns apply). Plugin stays loaded for CS_SetWeaponSticker native.
 set -euo pipefail
 
 CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
@@ -8,7 +8,8 @@ mkdir -p "$(dirname "${CFG}")"
 
 cat > "${CFG}" <<'EOF'
 // Clutch bridge applies stickers from clutch_weaponstickers (per TR/CT).
-// Keep csgo_weaponstickers DISABLED — dual apply causes smeared/wrong stickers.
+// Keep auto-apply DISABLED — dual apply causes smeared/wrong stickers.
+// csgo_weaponstickers.smx must stay LOADED for CS_SetWeaponSticker native.
 sm_weaponstickers_enabled "0"
 sm_weaponstickers_overrideview "0"
 sm_weaponstickers_updateviewmodel "0"
@@ -19,4 +20,4 @@ EOF
 
 echo "Written ${CFG}"
 echo "In screen run: exec sourcemod/csgo_weaponstickers.cfg"
-echo "Unload conflicting plugin: sm plugins unload csgo_weaponstickers"
+echo "Ensure plugin is loaded: sm plugins load csgo_weaponstickers"

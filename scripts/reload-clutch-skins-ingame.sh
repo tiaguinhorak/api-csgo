@@ -89,7 +89,11 @@ send_plugin() {
 }
 
 send_cmd "exec sourcemod/csgo_weaponstickers.cfg" 0.5
-send_cmd "sm plugins unload csgo_weaponstickers" 0.5
+if plugin_file_exists "csgo_weaponstickers"; then
+  send_cmd "sm plugins load csgo_weaponstickers" 0.8
+else
+  echo ">>> skip csgo_weaponstickers.smx (not installed — run install-csgo-weaponstickers.sh)"
+fi
 
 # weapons.smx must reload BEFORE bridge so patched natives register first
 send_cmd "sm plugins reload weapons" 1.2

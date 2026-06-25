@@ -240,16 +240,18 @@ source "${REPO_ROOT}/scripts/lib/ensure-clutch-stickers-sqlite.sh"
 ensure_clutch_stickers_sqlite "${SM}" || true
 
 echo ""
-echo ">>> Disable csgo_weaponstickers auto-apply"
+echo ">>> csgo_weaponstickers.smx (SDK native only — auto-apply stays disabled in cfg)"
 bash "${REPO_ROOT}/scripts/disable-weaponstickers-autoapply.sh"
 WS_SMX="${SM}/plugins/csgo_weaponstickers.smx"
 WS_DISABLED_DIR="${SM}/plugins/disabled"
 mkdir -p "${WS_DISABLED_DIR}"
-if [[ -f "${WS_SMX}" ]]; then
-  mv -f "${WS_SMX}" "${WS_DISABLED_DIR}/csgo_weaponstickers.smx"
-  echo "Moved csgo_weaponstickers.smx → plugins/disabled/ (bridge owns sticker apply)."
-elif [[ -f "${WS_DISABLED_DIR}/csgo_weaponstickers.smx" ]]; then
-  echo "csgo_weaponstickers.smx already in plugins/disabled/."
+if [[ -f "${WS_DISABLED_DIR}/csgo_weaponstickers.smx" && ! -f "${WS_SMX}" ]]; then
+  mv -f "${WS_DISABLED_DIR}/csgo_weaponstickers.smx" "${WS_SMX}"
+  echo "Restored csgo_weaponstickers.smx from plugins/disabled/ (native CS_SetWeaponSticker)."
+elif [[ -f "${WS_SMX}" ]]; then
+  echo "csgo_weaponstickers.smx present in plugins/."
+else
+  echo "WARN: csgo_weaponstickers.smx missing — run: bash scripts/install-csgo-weaponstickers.sh"
 fi
 
 if [[ -f "${REPO_ROOT}/.env" ]]; then

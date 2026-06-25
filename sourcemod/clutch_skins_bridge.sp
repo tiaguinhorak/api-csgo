@@ -24,7 +24,8 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.42"
+#define PLUGIN_VERSION "3.8.44"
+#define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
 #define GLOVE_THINK_TICK_MOD 8
@@ -93,6 +94,7 @@ bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
 float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
 bool g_bStickerDbSynced[MAXPLAYERS + 1];
+float g_fViewModelStickerDelays[STICKER_VIEWMODEL_PASS_COUNT] = {0.15, 0.45, 1.0};
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -1210,7 +1212,10 @@ public Action OnWeaponEquip(int client, int weapon) {
     char classname[64];
     GetEntityClassname(weapon, classname, sizeof(classname));
     int idx = GetClutchIndexForClassname(client, classname);
-    if (idx < 0 || g_CachedPaintkit[client][idx] <= 0) {
+    if (idx < 0) {
+        return Plugin_Continue;
+    }
+    if (g_CachedPaintkit[client][idx] <= 0 && !ClutchWeaponHasStickerCache(client, idx)) {
         return Plugin_Continue;
     }
 
@@ -1238,6 +1243,9 @@ public Action Timer_ApplyEquippedWeapon(Handle timer, DataPack pack) {
     }
 
     ApplyCachedSkinToEntity(client, weapon, idx, isKnife, false);
+    if (!isKnife && ClutchWeaponHasStickerCache(client, idx)) {
+        ClutchApplyStickersForWeapon(client, weapon, idx, true);
+    }
     return Plugin_Stop;
 }
 
@@ -2083,6 +2091,59 @@ void ClutchWriteStickerCacheToEntity(int client, int entity, int idx, int teamSl
     }
 
     ClutchNetworkUpdateWeaponSkin(entity);
+    ClutchNetworkUpdate(entity);
+}
+
+void ClutchScheduleViewModelStickerPasses(int client, int weapon, int idx) {
+    if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
+        return;
+    }
+
+    if (!ClutchWeaponHasStickerCache(client, idx)) {
+        return;
+    }
+
+    int userid = GetClientUserId(client);
+    int weaponRef = EntIndexToEntRef(weapon);
+
+    for (int i = 0; i < STICKER_VIEWMODEL_PASS_COUNT; i++) {
+        DataPack pack = new DataPack();
+        pack.WriteCell(userid);
+        pack.WriteCell(weaponRef);
+        pack.WriteCell(idx);
+        CreateTimer(g_fViewModelStickerDelays[i], Timer_ViewModelStickerPass, pack, TIMER_FLAG_NO_MAPCHANGE);
+    }
+}
+
+public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int weaponRef = pack.ReadCell();
+    int idx = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    int weapon = EntRefToEntIndex(weaponRef);
+    if (client <= 0 || !IsClientInGame(client) || weapon == -1 || !IsValidEntity(weapon)) {
+        return Plugin_Stop;
+    }
+
+    if (!ClutchWeaponHasStickerCache(client, idx)) {
+        return Plugin_Stop;
+    }
+
+    ClutchEnsureEconItemInitialized(client, weapon);
+    ClutchApplyStickersToEntity(client, weapon, idx, true);
+    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
+#if defined _csgo_weaponstickers_included_
+    if (ClutchWeaponStickersNativeReady()) {
+        ClutchApplyStickersViaNative(client, weapon, idx, true);
+    }
+#endif
+    g_fLastStickerForceUpdate[client] = 0.0;
+    ClutchMaybeForceStickerFullUpdate(client, true);
+    ClutchBridgeUpdateClientModel(client);
+    return Plugin_Stop;
 }
 
 void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
@@ -2100,6 +2161,7 @@ void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
         for (int slot = 0; slot <= 1; slot++) {
             int viewModel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", slot);
             if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
+                ClutchCopyWeaponSkinProps(weapon, viewModel);
                 ClutchEnsureEconItemInitialized(client, viewModel);
                 ClutchWriteStickerCacheToEntity(client, viewModel, idx, teamSlot);
             }
@@ -2128,6 +2190,7 @@ void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
             continue;
         }
 
+        ClutchCopyWeaponSkinProps(weapon, predicted);
         ClutchEnsureEconItemInitialized(client, predicted);
         ClutchWriteStickerCacheToEntity(client, predicted, idx, teamSlot);
     }
@@ -2606,14 +2669,31 @@ void ClutchMirrorStickersToViewModels(int client, int weapon, int idx) {
 }
 
 void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = false) {
-    bool updated = ClutchApplyStickersToEntity(client, weapon, idx, force);
-    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
-
-    if (updated) {
-        ClutchMaybeForceStickerFullUpdate(client, force || updated);
+    if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+        return;
     }
 
-    if (updated && g_cvDebug.BoolValue) {
+    bool hasCache = ClutchWeaponHasStickerCache(client, idx);
+    if (!hasCache && !force) {
+        return;
+    }
+
+    bool updated = ClutchApplyStickersToEntity(client, weapon, idx, force || hasCache);
+    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
+#if defined _csgo_weaponstickers_included_
+    if (ClutchWeaponStickersNativeReady() && hasCache) {
+        ClutchApplyStickersViaNative(client, weapon, idx, true);
+    }
+#endif
+
+    if (updated || hasCache) {
+        g_fLastStickerForceUpdate[client] = 0.0;
+        ClutchMaybeForceStickerFullUpdate(client, true);
+        ClutchBridgeUpdateClientModel(client);
+        ClutchScheduleViewModelStickerPasses(client, weapon, idx);
+    }
+
+    if ((updated || hasCache) && g_cvDebug.BoolValue) {
         char classname[64];
         GetEntityClassname(weapon, classname, sizeof(classname));
         int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);
