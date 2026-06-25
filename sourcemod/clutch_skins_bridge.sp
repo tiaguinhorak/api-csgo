@@ -24,9 +24,8 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.40"
+#define PLUGIN_VERSION "3.8.41"
 #define CLUTCH_SITE_STICKER_SLOTS 4
-#define STICKER_REAPPLY_PASS_COUNT 2
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
@@ -92,7 +91,6 @@ int g_iReapplyGen[MAXPLAYERS + 1];
 bool g_bAllowWeaponRegive[MAXPLAYERS + 1];
 bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
-float g_fStickerReapplyDelays[STICKER_REAPPLY_PASS_COUNT] = {0.2, 0.55};
 float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
 bool g_bStickerDbSynced[MAXPLAYERS + 1];
 
@@ -154,6 +152,9 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 #endif
     MarkNativeAsOptional("PTaH_GetItemDefinitionByDefIndex");
     MarkNativeAsOptional("CEconItemView.AttributeList.get");
+    MarkNativeAsOptional("CEconItemView.NetworkedDynamicAttributesForDemos.get");
+    MarkNativeAsOptional("CAttributeList.GetAttributeByDefIndex");
+    MarkNativeAsOptional("CEconItemAttribute.Value.get");
     MarkNativeAsOptional("CS_SetWeaponSticker");
     return APLRes_Success;
 }
@@ -1963,19 +1964,10 @@ void SetClutchWeaponProps(
 
     ClutchNetworkUpdateWeaponSkin(weapon);
     if (!isKnife) {
+        ClutchMirrorSkinToViewModels(client, weapon);
         int stickerIdx = ClutchIndexFromWeaponEntity(client, weapon);
         if (stickerIdx >= 0) {
             ClutchApplyStickersForWeapon(client, weapon, stickerIdx, true);
-        }
-        ClutchMirrorSkinToViewModels(client, weapon);
-        if (stickerIdx >= 0) {
-            ClutchSyncViewModelStickersFromWeapon(client, weapon, stickerIdx);
-            ClutchScheduleStickerReapplyPasses(client, weapon, stickerIdx);
-            DataPack stickerPack = new DataPack();
-            stickerPack.WriteCell(GetClientUserId(client));
-            stickerPack.WriteCell(EntIndexToEntRef(weapon));
-            stickerPack.WriteCell(stickerIdx);
-            CreateTimer(0.2, Timer_SyncViewModelStickers, stickerPack, TIMER_FLAG_NO_MAPCHANGE);
         }
     }
     if (isKnife && ClutchClientHasGlovesLoaded(client)) {
@@ -2051,8 +2043,12 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
     }
 }
 
-void ClutchResetStickerDemoAttributes(CAttributeList demoAttrs) {
-    demoAttrs.DestroyAllAttributes();
+void ClutchClearStickerSlotAttributes(CAttributeList attrList, int slot) {
+    int idAttr = 113 + slot * 4;
+    attrList.SetOrAddAttributeValue(idAttr, 0.0);
+    attrList.SetOrAddAttributeValue(idAttr + 1, 0.0);
+    attrList.SetOrAddAttributeValue(idAttr + 2, 0.0);
+    attrList.SetOrAddAttributeValue(idAttr + 3, 0.0);
 }
 
 void ClutchWriteStickerCacheToEntity(int client, int entity, int idx, int teamSlot) {
@@ -2069,7 +2065,12 @@ void ClutchWriteStickerCacheToEntity(int client, int entity, int idx, int teamSl
     int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
 
     CAttributeList demoAttrs = itemView.NetworkedDynamicAttributesForDemos;
-    ClutchResetStickerDemoAttributes(demoAttrs);
+    CAttributeList staticAttrs = itemView.AttributeList;
+
+    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+        ClutchClearStickerSlotAttributes(demoAttrs, s);
+        ClutchClearStickerSlotAttributes(staticAttrs, s);
+    }
 
     for (int s = 0; s < applyMax; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
@@ -2078,6 +2079,7 @@ void ClutchWriteStickerCacheToEntity(int client, int entity, int idx, int teamSl
         }
         float wear = g_fStickerWears[client][teamSlot][idx][s];
         ClutchWriteStickerSlotAttributes(demoAttrs, s, stickerId, wear);
+        ClutchWriteStickerSlotAttributes(staticAttrs, s, stickerId, wear);
     }
 
     ClutchNetworkUpdateWeaponSkin(entity);
@@ -2129,24 +2131,6 @@ void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
         ClutchEnsureEconItemInitialized(client, predicted);
         ClutchWriteStickerCacheToEntity(client, predicted, idx, teamSlot);
     }
-}
-
-public Action Timer_SyncViewModelStickers(Handle timer, DataPack pack) {
-    pack.Reset();
-    int userid = pack.ReadCell();
-    int weaponRef = pack.ReadCell();
-    int idx = pack.ReadCell();
-    delete pack;
-
-    int client = GetClientOfUserId(userid);
-    int weapon = EntRefToEntIndex(weaponRef);
-    if (client <= 0 || !IsClientInGame(client) || weapon == -1 || !IsValidEntity(weapon)) {
-        return Plugin_Stop;
-    }
-
-    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
-    ClutchMaybeForceStickerFullUpdate(client, true);
-    return Plugin_Stop;
 }
 
 int ClutchIndexFromDefIndex(int defIndex) {
@@ -2344,6 +2328,39 @@ bool ClutchWeaponHasStickerCache(int client, int idx) {
     return false;
 }
 
+int ClutchReadStickerIdAtSlot(CEconItemView view, int slot) {
+    if (view == view_as<CEconItemView>(0)) {
+        return 0;
+    }
+
+    int id = view.GetStickerAttributeBySlotIndex(slot, EStickerAttribute_ID, 0);
+    if (id != 0) {
+        return id;
+    }
+
+    int idAttr = 113 + slot * 4;
+    CAttributeList staticAttrs = view.AttributeList;
+    if (staticAttrs != view_as<CAttributeList>(0)) {
+        CEconItemAttribute attr = staticAttrs.GetAttributeByDefIndex(idAttr);
+        if (attr != view_as<CEconItemAttribute>(0)) {
+            id = attr.Value;
+            if (id != 0) {
+                return id;
+            }
+        }
+    }
+
+    CAttributeList demoAttrs = view.NetworkedDynamicAttributesForDemos;
+    if (demoAttrs != view_as<CAttributeList>(0)) {
+        CEconItemAttribute attr = demoAttrs.GetAttributeByDefIndex(idAttr);
+        if (attr != view_as<CEconItemAttribute>(0)) {
+            return attr.Value;
+        }
+    }
+
+    return 0;
+}
+
 bool ClutchEntityHasAppliedStickers(int entity, int maxSlots) {
     if (entity <= 0 || !IsValidEntity(entity) || maxSlots <= 0) {
         return false;
@@ -2355,7 +2372,7 @@ bool ClutchEntityHasAppliedStickers(int entity, int maxSlots) {
     }
 
     for (int s = 0; s < maxSlots; s++) {
-        if (view.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0) != 0) {
+        if (ClutchReadStickerIdAtSlot(view, s) != 0) {
             return true;
         }
     }
@@ -2368,17 +2385,22 @@ bool ClutchWeaponNeedsStickerSync(int client, int entity, int idx) {
         return false;
     }
 
-    if (ClutchWeaponHasStickerCache(client, idx)) {
-        return true;
+    if (!ClutchWeaponHasStickerCache(client, idx)) {
+        if (entity <= 0 || !IsValidEntity(entity)) {
+            return false;
+        }
+
+        int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
+        int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+        return ClutchEntityHasAppliedStickers(entity, applyMax);
     }
 
     if (entity <= 0 || !IsValidEntity(entity)) {
-        return false;
+        return true;
     }
 
-    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
-    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
-    return ClutchEntityHasAppliedStickers(entity, applyMax);
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    return !ClutchEntityStickersMatchCache(client, entity, idx, teamSlot);
 }
 
 bool ClutchEnsureEconItemInitialized(int client, int entity) {
@@ -2540,7 +2562,12 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx, bool force = f
     if (!hasCached && hasApplied && g_bStickerDbSynced[client]) {
         CEconItemView itemView = PTaH_GetEconItemViewFromEconEntity(entity);
         if (itemView != view_as<CEconItemView>(0)) {
-            ClutchResetStickerDemoAttributes(itemView.NetworkedDynamicAttributesForDemos);
+            CAttributeList demoAttrs = itemView.NetworkedDynamicAttributesForDemos;
+            CAttributeList staticAttrs = itemView.AttributeList;
+            for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+                ClutchClearStickerSlotAttributes(demoAttrs, s);
+                ClutchClearStickerSlotAttributes(staticAttrs, s);
+            }
             ClutchNetworkUpdateWeaponSkin(entity);
         }
         return true;
@@ -2565,7 +2592,7 @@ bool ClutchEntityStickersMatchCache(int client, int entity, int idx, int teamSlo
 
     for (int s = 0; s < applyMax; s++) {
         int cached = g_iStickerSlots[client][teamSlot][idx][s];
-        int applied = view.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0);
+        int applied = ClutchReadStickerIdAtSlot(view, s);
         if (cached != applied) {
             return false;
         }
@@ -2582,7 +2609,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
     bool updated = ClutchApplyStickersToEntity(client, weapon, idx, force);
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 
-    if (updated || force || ClutchWeaponHasStickerCache(client, idx)) {
+    if (updated) {
         ClutchMaybeForceStickerFullUpdate(client, force || updated);
     }
 
@@ -2600,7 +2627,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
         CEconItemView verifyView = PTaH_GetEconItemViewFromEconEntity(weapon);
         for (int s = 0; s < CLUTCH_SITE_STICKER_SLOTS; s++) {
             int cached = g_iStickerSlots[client][ClutchStickerTeamSlot(GetClientTeam(client))][idx][s];
-            int applied = verifyView.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0);
+            int applied = ClutchReadStickerIdAtSlot(verifyView, s);
             LogMessage(
                 "[Clutch] sticker slot %d cached=%d applied=%d for %N",
                 s,
@@ -2610,42 +2637,6 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
             );
         }
     }
-}
-
-void ClutchScheduleStickerReapplyPasses(int client, int weapon, int idx) {
-    if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
-        return;
-    }
-
-    int userid = GetClientUserId(client);
-    for (int i = 0; i < STICKER_REAPPLY_PASS_COUNT; i++) {
-        DataPack pack = new DataPack();
-        pack.WriteCell(userid);
-        pack.WriteCell(EntIndexToEntRef(weapon));
-        pack.WriteCell(idx);
-        CreateTimer(g_fStickerReapplyDelays[i], Timer_StickerReapplyPass, pack, TIMER_FLAG_NO_MAPCHANGE);
-    }
-}
-
-public Action Timer_StickerReapplyPass(Handle timer, DataPack pack) {
-    pack.Reset();
-    int userid = pack.ReadCell();
-    int weaponRef = pack.ReadCell();
-    int idx = pack.ReadCell();
-    delete pack;
-
-    int client = GetClientOfUserId(userid);
-    int weapon = EntRefToEntIndex(weaponRef);
-    if (client <= 0 || !IsClientInGame(client) || weapon == -1 || !IsValidEntity(weapon)) {
-        return Plugin_Stop;
-    }
-
-    if (!ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
-        return Plugin_Stop;
-    }
-
-    ClutchApplyStickersForWeapon(client, weapon, idx, false);
-    return Plugin_Stop;
 }
 
 void ClutchReapplyStickersOnPlayerWeapons(int client) {
@@ -2663,9 +2654,6 @@ void ClutchReapplyStickersOnPlayerWeapons(int client) {
         int idx = ClutchIndexFromWeaponEntity(client, weapon);
         if (idx >= 0 && ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
             ClutchApplyStickersForWeapon(client, weapon, idx, true);
-            if (ClutchWeaponHasStickerCache(client, idx)) {
-                ClutchRefreshWeaponSlot(client, idx);
-            }
         }
     }
 }

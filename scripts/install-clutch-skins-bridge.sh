@@ -242,9 +242,14 @@ ensure_clutch_stickers_sqlite "${SM}" || true
 echo ""
 echo ">>> Disable csgo_weaponstickers auto-apply"
 bash "${REPO_ROOT}/scripts/disable-weaponstickers-autoapply.sh"
-if [[ ! -f "${SM}/plugins/csgo_weaponstickers.smx" ]]; then
-  echo "WARN: csgo_weaponstickers.smx missing — run: bash scripts/install-csgo-weaponstickers.sh"
-  echo "      Without it, stickers use PTaH attrs only (often 2 visible slots on AWP)."
+WS_SMX="${SM}/plugins/csgo_weaponstickers.smx"
+WS_DISABLED_DIR="${SM}/plugins/disabled"
+mkdir -p "${WS_DISABLED_DIR}"
+if [[ -f "${WS_SMX}" ]]; then
+  mv -f "${WS_SMX}" "${WS_DISABLED_DIR}/csgo_weaponstickers.smx"
+  echo "Moved csgo_weaponstickers.smx → plugins/disabled/ (bridge owns sticker apply)."
+elif [[ -f "${WS_DISABLED_DIR}/csgo_weaponstickers.smx" ]]; then
+  echo "csgo_weaponstickers.smx already in plugins/disabled/."
 fi
 
 if [[ -f "${REPO_ROOT}/.env" ]]; then

@@ -89,11 +89,11 @@ send_plugin() {
 }
 
 send_cmd "exec sourcemod/csgo_weaponstickers.cfg" 0.5
+send_cmd "sm plugins unload csgo_weaponstickers" 0.5
 
 # weapons.smx must reload BEFORE bridge so patched natives register first
 send_cmd "sm plugins reload weapons" 1.2
 send_cmd "sm plugins info weapons" 0.5
-send_plugin "csgo_weaponstickers"
 send_cmd "sm plugins unload z_clutch_skins_bridge" 0.8
 send_cmd "sm plugins unload z_clutch_gloves" 0.5
 send_cmd "sm plugins load z_clutch_gloves" 1.0
