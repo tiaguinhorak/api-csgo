@@ -24,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.45"
+#define PLUGIN_VERSION "3.8.47"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -75,6 +75,9 @@ int g_iTeamGlovePaint[MAXPLAYERS + 1][2];
 float g_fTeamGloveWear[MAXPLAYERS + 1][2];
 Handle g_hRefreshTimer = null;
 bool g_bPendingWebLoadout[MAXPLAYERS + 1];
+StringMap g_hOfflineWebSyncPending = null;
+
+void ClutchApplyWebLoadoutForClient(int client);
 
 int g_CachedPaintkit[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 float g_CachedWear[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
@@ -250,6 +253,7 @@ public void OnPluginStart() {
     RegAdminCmd("sm_reloadclutchskins", Command_ReloadSkins, ADMFLAG_ROOT, "Re-apply clutch skins from weapons DB");
     RegAdminCmd("sm_clutch_applyskins", Command_ApplySkins, ADMFLAG_ROOT, "Re-apply clutch skins to all players");
     RegServerCmd("sm_clutch_loadout_pending", Command_LoadoutPending, "Stage web loadout from DB (api-csgo player-sync)");
+    RegServerCmd("sm_clutch_web_sync", Command_WebSync, "Apply site loadout+stickers now (api-csgo player-sync)");
     RegServerCmd("sm_clutch_refresh_stickers", Command_RefreshStickers, "Re-read stickers DB and re-apply (api-csgo sticker-sync)");
 
     AddCommandListener(ClutchBlockWsChatForPlayers, "say");
@@ -278,6 +282,13 @@ public void OnPluginStart() {
 #endif
     CreateTimer(1.0, Timer_RecheckPluginNatives, _, TIMER_FLAG_NO_MAPCHANGE);
     CreateTimer(3.0, Timer_RecheckPluginNatives, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public void OnPluginEnd() {
+    if (g_hOfflineWebSyncPending != null) {
+        delete g_hOfflineWebSyncPending;
+        g_hOfflineWebSyncPending = null;
+    }
 }
 
 public Action Timer_RecheckPluginNatives(Handle timer) {
@@ -934,6 +945,75 @@ int FindClientBySteam2(const char[] steam) {
     return 0;
 }
 
+void ClutchMarkOfflineWebSyncPending(const char[] steam) {
+    if (steam[0] == '\0') {
+        return;
+    }
+
+    if (g_hOfflineWebSyncPending == null) {
+        g_hOfflineWebSyncPending = new StringMap();
+    }
+
+    g_hOfflineWebSyncPending.SetValue(steam, 1, true);
+
+    char alt[32];
+    strcopy(alt, sizeof(alt), steam);
+    if (alt[6] == '0') {
+        alt[6] = '1';
+    } else if (alt[6] == '1') {
+        alt[6] = '0';
+    }
+    g_hOfflineWebSyncPending.SetValue(alt, 1, true);
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Queued offline web sync for %s (apply on join)", steam);
+    }
+}
+
+bool ClutchConsumeOfflineWebSyncPending(int client, const char[] steam) {
+    if (client <= 0 || steam[0] == '\0' || g_hOfflineWebSyncPending == null) {
+        return false;
+    }
+
+    int dummy;
+    if (!g_hOfflineWebSyncPending.GetValue(steam, dummy)) {
+        char alt[32];
+        strcopy(alt, sizeof(alt), steam);
+        if (alt[6] == '0') {
+            alt[6] = '1';
+        } else if (alt[6] == '1') {
+            alt[6] = '0';
+        }
+        if (!g_hOfflineWebSyncPending.GetValue(alt, dummy)) {
+            return false;
+        }
+        g_hOfflineWebSyncPending.Remove(alt);
+    }
+
+    g_hOfflineWebSyncPending.Remove(steam);
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    CreateTimer(0.5, Timer_OfflineWebSyncApply, pack, TIMER_FLAG_NO_MAPCHANGE);
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Applying queued offline web sync for %N", client);
+    }
+    return true;
+}
+
+public Action Timer_OfflineWebSyncApply(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        ClutchApplyWebLoadoutForClient(client);
+    }
+    return Plugin_Stop;
+}
+
 /**
  * CS server console splits STEAM_0:0:123 into three args — join into full Steam2.
  */
@@ -982,8 +1062,8 @@ public Action Command_LoadoutPending(int args) {
         int client = FindClientBySteam2(steam);
         if (client > 0) {
             ClutchStageWebLoadout(client);
-        } else if (g_cvDebug.BoolValue) {
-            LogMessage("[Clutch] loadout_pending: %s not in game", steam);
+        } else {
+            ClutchMarkOfflineWebSyncPending(steam);
         }
     } else {
         for (int i = 1; i <= MaxClients; i++) {
@@ -1003,13 +1083,48 @@ public Action Command_RefreshStickers(int args) {
         int client = FindClientBySteam2(steam);
         if (client > 0) {
             ClutchRefreshStickersForClient(client);
-        } else if (g_cvDebug.BoolValue) {
-            LogMessage("[Clutch] refresh_stickers: %s not in game", steam);
+        } else {
+            ClutchMarkOfflineWebSyncPending(steam);
         }
     } else {
         for (int i = 1; i <= MaxClients; i++) {
             if (IsClientInGame(i) && !IsFakeClient(i)) {
                 ClutchRefreshStickersForClient(i);
+            }
+        }
+    }
+    return Plugin_Handled;
+}
+
+void ClutchApplyWebLoadoutForClient(int client) {
+    if (client <= 0 || IsFakeClient(client) || !IsClientInGame(client)) {
+        return;
+    }
+
+    g_bPendingWebLoadout[client] = false;
+    ClutchBeginForcedSync(client);
+    ClutchRefreshStickersForClient(client);
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Web sync apply for %N (skins+gloves+stickers)", client);
+    }
+}
+
+public Action Command_WebSync(int args) {
+    if (args >= 1) {
+        char steam[32];
+        ClutchReadSteamIdFromCmdArgs(args, steam, sizeof(steam));
+
+        int client = FindClientBySteam2(steam);
+        if (client > 0) {
+            ClutchApplyWebLoadoutForClient(client);
+        } else {
+            ClutchMarkOfflineWebSyncPending(steam);
+        }
+    } else {
+        for (int i = 1; i <= MaxClients; i++) {
+            if (IsClientInGame(i) && !IsFakeClient(i)) {
+                ClutchApplyWebLoadoutForClient(i);
             }
         }
     }
@@ -1202,6 +1317,9 @@ public void OnClientAuthorized(int client, const char[] authString) {
 #endif
     g_fLastApplyTime[client] = 0.0;
     if (g_bMatchLoadoutSynced[client]) {
+        return;
+    }
+    if (ClutchConsumeOfflineWebSyncPending(client, authString)) {
         return;
     }
     CreateTimer(0.4, Timer_ApplySkinsOnSpawn, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);

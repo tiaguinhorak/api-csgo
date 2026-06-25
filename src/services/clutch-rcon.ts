@@ -138,6 +138,72 @@ export async function stageClutchLoadoutInGame(steamId?: string): Promise<boolea
   return ok;
 }
 
+export type WebLoadoutApplyResult = {
+  commandSent: boolean;
+  playerInGame: boolean;
+};
+
+function steam2Variants(steamId: string): string[] {
+  const trimmed = steamId.trim();
+  const variants = [trimmed];
+  if (trimmed.startsWith('STEAM_0:')) {
+    variants.push(`STEAM_1:${trimmed.slice(8)}`);
+  } else if (trimmed.startsWith('STEAM_1:')) {
+    variants.push(`STEAM_0:${trimmed.slice(8)}`);
+  }
+  return variants;
+}
+
+async function isPlayerInGameServer(steamId: string): Promise<boolean> {
+  const target = resolveRconTarget();
+  if (!target) {
+    return false;
+  }
+
+  try {
+    const status = await rconService.sendCommand(
+      target.host,
+      target.port,
+      target.password,
+      'status',
+    );
+    for (const variant of steam2Variants(steamId)) {
+      if (status.includes(variant)) {
+        return true;
+      }
+    }
+    return false;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[clutch-rcon] status check failed:', message);
+    return false;
+  }
+}
+
+export function resolveWebLoadoutApplyMode(result: WebLoadoutApplyResult): 'immediate' | 'deferred_join' | 'db_only' {
+  if (!result.commandSent) {
+    return 'db_only';
+  }
+  if (result.playerInGame) {
+    return 'immediate';
+  }
+  return 'deferred_join';
+}
+
+/** Site equip / push-loadout — apply skins+gloves+stickers immediately (even mid-match). */
+export async function applyWebLoadoutInGame(steamId?: string): Promise<WebLoadoutApplyResult> {
+  const trimmed = steamId?.trim();
+  const playerInGame = trimmed ? await isPlayerInGameServer(trimmed) : false;
+  const command = trimmed
+    ? `sm_clutch_web_sync "${trimmed}"`
+    : 'sm_clutch_web_sync';
+  const commandSent = await sendRconOrScreen(command);
+  if (!commandSent) {
+    console.warn('[clutch-rcon] web sync skipped (no RCON/screen)');
+  }
+  return { commandSent, playerInGame };
+}
+
 export async function reloadClutchSkinsInGame(): Promise<boolean> {
   const target = resolveRconTarget();
   if (!target) {

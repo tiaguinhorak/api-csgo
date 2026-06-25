@@ -6,7 +6,7 @@ import {
   buildWsAllowlistSet,
   loadWsWeaponsAllowlist,
 } from '../services/ws-weapons-config';
-import { reloadClutchSkinsInGame, reloadWeaponsPluginInGame, stageClutchLoadoutInGame } from '../services/clutch-rcon';
+import { reloadClutchSkinsInGame, reloadWeaponsPluginInGame, applyWebLoadoutInGame, resolveWebLoadoutApplyMode } from '../services/clutch-rcon';
 import { syncWeaponsCfgFromSite } from '../services/sync-weapons-cfg-file';
 
 const router = Router();
@@ -82,12 +82,13 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       clearWeaponIds: body.clearWeaponIds,
       clearGloveTeam: body.clearGloveTeam,
     });
-    const rconReload = await stageClutchLoadoutInGame(result.steamId);
+    const applyResult = await applyWebLoadoutInGame(result.steamId);
 
     return res.json({
       ok: true,
       mode: 'db',
-      applyMode: 'staged',
+      applyMode: resolveWebLoadoutApplyMode(applyResult),
+      playerInGame: applyResult.playerInGame,
       steamId: result.steamId,
       steamIds: result.steamIds,
       weapons: weapons.length,
@@ -95,7 +96,7 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       columns: result.columns,
       updated: result.updated,
       gloves: result.gloves,
-      rconReload,
+      rconReload: applyResult.commandSent,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'sync failed';
