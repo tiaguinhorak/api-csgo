@@ -99,13 +99,15 @@ export class SshService {
   }
 
   async stopServer(conn: ServerConnection, screenSession: string): Promise<string> {
-    const killCmd = `screen -S ${screenSession} -X quit`;
+    const killCmd =
+      `for s in $(screen -ls 2>/dev/null | grep -F ".${screenSession}" | awk '{print $1}'); do ` +
+      `screen -S "$s" -X quit || true; done`;
     const { stdout, stderr } = await this.execCommand(conn, killCmd);
     return stderr || stdout || 'Server stopped';
   }
 
   async serverStatus(conn: ServerConnection, screenSession: string): Promise<'running' | 'stopped'> {
-    const checkCmd = `screen -list | grep ${screenSession}`;
+    const checkCmd = `screen -ls 2>/dev/null | grep -F ".${screenSession}" || true`;
     const { stdout } = await this.execCommand(conn, checkCmd);
     return stdout.includes(screenSession) ? 'running' : 'stopped';
   }

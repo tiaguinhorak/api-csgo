@@ -84,10 +84,15 @@ router.post('/:id/rcon', async (req: Request, res: Response) => {
 
 router.patch('/:id', (req: Request, res: Response) => {
   try {
-    const { name, pool } = req.body || {};
-    const patch: { name?: string; pool?: 'ranked' | 'warmup' | 'public' } = {};
+    const { name, pool, screenSession } = req.body || {};
+    const patch: {
+      name?: string;
+      pool?: 'ranked' | 'warmup' | 'public';
+      screenSession?: string;
+    } = {};
     if (typeof name === 'string') patch.name = name;
     if (pool === 'ranked' || pool === 'warmup' || pool === 'public') patch.pool = pool;
+    if (typeof screenSession === 'string') patch.screenSession = screenSession;
     if (Object.keys(patch).length === 0) {
       return res.status(400).json({ error: 'No valid fields to update' });
     }

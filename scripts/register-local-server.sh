@@ -28,6 +28,7 @@ RCON_PW="${CSGO_RCON_PASSWORD:-}"
 CSGO_DIR="${CSGO_SERVER_DIR:-/home/csgo/server}"
 NAME="${SERVER_NAME:-${CLUTCH_SERVER_NAME}}"
 POOL="${CSGO_SERVER_POOL:-${CLUTCH_SERVER_POOL}}"
+SCREEN="${CLUTCH_CS_SCREEN:-csgo-clutch-#1}"
 
 if [[ -z "${AUTH_KEY}" || -z "${RCON_PW}" ]]; then
   echo "WARN: skip register (need API_KEY or CSGO_SKINS_SYNC_KEY + CSGO_RCON_PASSWORD)"
@@ -61,9 +62,27 @@ for (const s of list) {
   done <<< "${STALE_IDS}"
 fi
 
-if echo "${LIST_JSON}" | grep -q "\"host\":\"${HOST}\"" && \
-   echo "${LIST_JSON}" | grep -q "\"port\":${PORT_GAME}"; then
-  echo "Server already in api-csgo (${HOST}:${PORT_GAME})"
+EXISTING_ID="$(echo "${LIST_JSON}" | node -e "
+const host = process.argv[1];
+const port = Number(process.argv[2]);
+let list = [];
+try { list = JSON.parse(require('fs').readFileSync(0, 'utf8')); } catch { process.exit(0); }
+if (!Array.isArray(list)) list = [list];
+for (const s of list) {
+  if (s && s.host === host && s.port === port) {
+    console.log(s.id);
+    break;
+  }
+}
+" "${HOST}" "${PORT_GAME}" 2>/dev/null || true)"
+
+if [[ -n "${EXISTING_ID}" ]]; then
+  PATCH_BODY="$(node -e "console.log(JSON.stringify({ screenSession: process.argv[1] }))" "${SCREEN}")"
+  curl -sf -X PATCH "http://127.0.0.1:${API_PORT}/api/servers/${EXISTING_ID}" \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: ${AUTH_KEY}" \
+    -d "${PATCH_BODY}" >/dev/null 2>&1 || true
+  echo "Server already in api-csgo (${HOST}:${PORT_GAME}) id=${EXISTING_ID} screen=${SCREEN}"
   exit 0
 fi
 
@@ -76,10 +95,11 @@ const b = {
   rconPassword: process.argv[5],
   csgoDir: process.argv[6],
   pool: process.argv[7],
+  screenSession: process.argv[8],
   tickrate: 128,
 };
 console.log(JSON.stringify(b));
-" "${NAME}" "${HOST}" "${PORT_GAME}" "${RCON_PORT}" "${RCON_PW}" "${CSGO_DIR}" "${POOL}")"
+" "${NAME}" "${HOST}" "${PORT_GAME}" "${RCON_PORT}" "${RCON_PW}" "${CSGO_DIR}" "${POOL}" "${SCREEN}")"
 
 RESP="$(curl -sf -X POST "http://127.0.0.1:${API_PORT}/api/servers" \
   -H "Content-Type: application/json" \
@@ -87,7 +107,7 @@ RESP="$(curl -sf -X POST "http://127.0.0.1:${API_PORT}/api/servers" \
   -d "${BODY}" 2>/dev/null || echo '{}')"
 
 if echo "${RESP}" | grep -q '"id"'; then
-  echo "Registered: ${NAME} pool=${POOL} ${HOST}:${PORT_GAME}"
+  echo "Registered: ${NAME} pool=${POOL} ${HOST}:${PORT_GAME} screen=${SCREEN}"
 else
   echo "WARN: register failed — ${RESP}"
 fi

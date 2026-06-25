@@ -5,11 +5,18 @@ import { rconService } from './rcon';
 import { config } from '../config';
 import { stateStore } from './state-store';
 import { resolveRconPort } from '../utils/rcon-port';
+import { resolveRconConnectHost, resolveSshConnectionHost } from '../utils/server-connection';
 
 class ServerManager {
   private servers = stateStore.servers;
 
   registerServer(dto: CreateServerDTO): GameServer {
+    const envScreen = process.env.CLUTCH_CS_SCREEN?.trim();
+    const screenSession =
+      dto.screenSession?.trim() ||
+      envScreen ||
+      `csgo-${dto.name.toLowerCase().replace(/\s+/g, '-')}`;
+
     const server: GameServer = {
       id: uuidv4(),
       name: dto.name,
@@ -21,7 +28,7 @@ class ServerManager {
       rconPort: dto.rconPort ?? dto.port ?? 27015,
       rconPassword: dto.rconPassword,
       csgoDir: dto.csgoDir,
-      screenSession: `csgo-${dto.name.toLowerCase().replace(/\s+/g, '-')}`,
+      screenSession,
       status: 'offline',
       port: dto.port ?? 27015,
       tickrate: dto.tickrate || config.csgo.defaultTickrate,
@@ -82,12 +89,16 @@ class ServerManager {
 
   private getSshConnection(server: GameServer) {
     return {
-      host: server.host,
+      host: resolveSshConnectionHost(server),
       port: server.sshPort,
       username: server.sshUser,
       privateKey: server.sshKey,
       password: server.sshPassword,
     };
+  }
+
+  private getRconHost(server: GameServer): string {
+    return resolveRconConnectHost(server);
   }
 
   async startServer(id: string, map: string = 'de_dust2', serverPassword?: string): Promise<GameServer> {
@@ -106,7 +117,11 @@ class ServerManager {
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 1000));
       try {
-        await rconService.getStatus(server.host, resolveRconPort(server), server.rconPassword);
+        await rconService.getStatus(
+          this.getRconHost(server),
+          resolveRconPort(server),
+          server.rconPassword,
+        );
         server.status = 'online';
         stateStore.persist();
         return server;
@@ -148,7 +163,11 @@ class ServerManager {
       if (running === 'running') {
         // Test RCON connection
         try {
-          await rconService.getStatus(server.host, resolveRconPort(server), server.rconPassword);
+          await rconService.getStatus(
+            this.getRconHost(server),
+            resolveRconPort(server),
+            server.rconPassword,
+          );
           server.status = server.currentMatchId ? 'busy' : 'online';
         } catch {
           server.status = 'offline';
@@ -194,7 +213,12 @@ class ServerManager {
     const server = this.servers.get(id);
     if (!server) throw new Error('Server not found');
 
-    return rconService.sendCommand(server.host, resolveRconPort(server), server.rconPassword, command);
+    return rconService.sendCommand(
+      this.getRconHost(server),
+      resolveRconPort(server),
+      server.rconPassword,
+      command,
+    );
   }
 
   removeServer(id: string): void {
@@ -204,7 +228,7 @@ class ServerManager {
 
   updateServer(
     id: string,
-    patch: { name?: string; pool?: GameServer['pool'] },
+    patch: { name?: string; pool?: GameServer['pool']; screenSession?: string },
   ): GameServer {
     const server = this.servers.get(id);
     if (!server) throw new Error('Server not found');
@@ -215,6 +239,11 @@ class ServerManager {
     }
     if (patch.pool !== undefined) {
       server.pool = patch.pool;
+    }
+    if (patch.screenSession !== undefined) {
+      const trimmed = patch.screenSession.trim();
+      if (!trimmed) throw new Error('screenSession is required');
+      server.screenSession = trimmed;
     }
     stateStore.persist();
     return server;

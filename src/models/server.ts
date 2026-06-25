@@ -28,6 +28,7 @@ export interface CreateServerDTO {
   rconPort?: number;
   rconPassword: string;
   csgoDir: string;
+  screenSession?: string;
   port?: number;
   tickrate?: number;
   pool?: 'ranked' | 'warmup' | 'public';
