@@ -177,26 +177,47 @@ export async function syncPlayerStickersToDb(
 
   const tx = db.transaction(() => {
     for (const targetSteam of steamIds) {
-      if (replacePlayerState) {
-        db.prepare(`DELETE FROM ${clutchTable} WHERE steamid = ?`).run(targetSteam);
-        // Always purge legacy rows — stale weaponstickers1 confuses CS_SetWeaponSticker / old tooling.
-        db.prepare(`DELETE FROM ${legacyTable} WHERE steamid = ?`).run(targetSteam);
+      const activeKeys = new Set<string>();
+
+      for (const entry of entries) {
+        const team = entry.team === 'CT' ? 'CT' : 'T';
+        activeKeys.add(`${entry.weaponIndex}:${team}`);
       }
 
-      const legacyStatements = buildStickerLoadoutSql(tablePrefix, targetSteam, entries);
-      const clutchStatements = buildClutchStickerLoadoutSql(tablePrefix, targetSteam, entries);
+      const legacyStatements = entries.flatMap((entry) =>
+        buildStickerLoadoutSql(tablePrefix, targetSteam, [entry]),
+      );
+      const clutchStatements = entries.flatMap((entry) =>
+        buildClutchStickerLoadoutSql(tablePrefix, targetSteam, [entry]),
+      );
       clutchStmtCount += clutchStatements.length;
       for (const sql of clutchStatements) {
         db.exec(sql);
         updated += 1;
       }
-      // Legacy weaponstickers1 is unused (bridge reads clutch_weaponstickers only).
       if (process.env.CLUTCH_SYNC_LEGACY_STICKERS === '1') {
         legacyStmtCount += legacyStatements.length;
         for (const sql of legacyStatements) {
           db.exec(sql);
           updated += 1;
         }
+      }
+
+      if (replacePlayerState) {
+        const existing = db
+          .prepare(`SELECT weaponindex, team FROM ${clutchTable} WHERE steamid = ?`)
+          .all(targetSteam) as Array<{ weaponindex: number; team: string }>;
+        const deleteClutch = db.prepare(
+          `DELETE FROM ${clutchTable} WHERE steamid = ? AND weaponindex = ? AND team = ?`,
+        );
+        for (const row of existing) {
+          const key = `${row.weaponindex}:${row.team}`;
+          if (!activeKeys.has(key)) {
+            deleteClutch.run(targetSteam, row.weaponindex, row.team);
+          }
+        }
+        // Bridge reads clutch_weaponstickers only — purge stale legacy rows.
+        db.prepare(`DELETE FROM ${legacyTable} WHERE steamid = ?`).run(targetSteam);
       }
     }
   });

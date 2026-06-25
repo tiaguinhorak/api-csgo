@@ -24,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.49"
+#define PLUGIN_VERSION "3.8.50"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -95,6 +95,7 @@ bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
 float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
 bool g_bStickerDbSynced[MAXPLAYERS + 1];
+int g_iStickerQueryGen[MAXPLAYERS + 1];
 float g_fViewModelStickerDelays[STICKER_VIEWMODEL_PASS_COUNT] = {0.15, 0.45, 1.0};
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
@@ -1098,11 +1099,26 @@ void ClutchApplyWebLoadoutForClient(int client) {
 
     g_bPendingWebLoadout[client] = false;
     ClutchBeginForcedSync(client);
-    ClutchRefreshStickersForClient(client);
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    CreateTimer(0.35, Timer_WebSyncStickerRefresh, pack, TIMER_FLAG_NO_MAPCHANGE);
 
     if (g_cvDebug.BoolValue) {
         LogMessage("[Clutch] Web sync apply for %N (skins+gloves+stickers)", client);
     }
+}
+
+public Action Timer_WebSyncStickerRefresh(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        ClutchRefreshStickersForClient(client);
+    }
+    return Plugin_Stop;
 }
 
 public Action Command_WebSync(int args) {
@@ -1136,10 +1152,34 @@ void ClutchRefreshStickersForClient(int client) {
         return;
     }
 
-    // api-csgo writes stickers via WAL — reconnect so we read the latest SQLite snapshot.
-    ConnectStickersDatabase();
     g_bStickerDbSynced[client] = false;
-    QueryPlayerStickers(client, steamId, 0);
+
+    if (g_hStickersDb == null) {
+        ConnectStickersDatabase();
+        ScheduleStickersQueryRetry(client, steamId, 0, 0.5);
+        return;
+    }
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteString(steamId);
+    pack.WriteCell(0);
+    CreateTimer(0.25, Timer_DelayedStickerDbRefresh, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_DelayedStickerDbRefresh(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    char steamId[32];
+    pack.ReadString(steamId, sizeof(steamId));
+    int altAttempt = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        QueryPlayerStickers(client, steamId, altAttempt);
+    }
+    return Plugin_Stop;
 }
 
 bool ClutchIsBlockedWsChatToken(const char[] token) {
@@ -1291,6 +1331,7 @@ public void OnClientDisconnect(int client) {
     }
     ClutchClearStickerCache(client);
     g_bStickerDbSynced[client] = false;
+    g_iStickerQueryGen[client] = 0;
 }
 
 public void OnClientPutInServer(int client) {
@@ -3631,6 +3672,7 @@ void QueryPlayerStickers(int client, const char[] steamId, int altAttempt) {
     pack.WriteCell(GetClientUserId(client));
     pack.WriteString(steamId);
     pack.WriteCell(altAttempt);
+    pack.WriteCell(++g_iStickerQueryGen[client]);
 
     char query[512];
     Format(
@@ -3741,10 +3783,18 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
     char steamId[32];
     pack.ReadString(steamId, sizeof(steamId));
     int altAttempt = pack.ReadCell();
+    int queryGen = pack.ReadCell();
     delete pack;
 
     int client = GetClientOfUserId(userid);
     if (client <= 0 || !IsClientInGame(client)) {
+        return;
+    }
+
+    if (queryGen != g_iStickerQueryGen[client]) {
+        if (g_cvDebug.BoolValue) {
+            LogMessage("[Clutch] Ignored stale sticker query (gen %d, current %d) for %N", queryGen, g_iStickerQueryGen[client], client);
+        }
         return;
     }
 
@@ -3806,7 +3856,6 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
             g_sResolvedStickersDbPath
         );
         ClutchClearStickerCache(client);
-        ClutchSyncLegacyStickerTableForClient(client);
         ClutchReapplyStickersOnPlayerWeapons(client, true);
         g_bStickerDbSynced[client] = true;
         return;
@@ -3814,7 +3863,6 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
 
     g_bStickerDbSynced[client] = true;
     ClutchPurgeLegacyStickerRowsForSteam(steamId);
-    ClutchSyncLegacyStickerTableForClient(client);
     ClutchReapplyStickersOnPlayerWeapons(client, true);
 }
 
