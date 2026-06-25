@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.33"
+#define PLUGIN_VERSION "3.8.34"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_REAPPLY_PASS_COUNT 1
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -1961,11 +1961,19 @@ void SetClutchWeaponProps(
 
     ClutchNetworkUpdateWeaponSkin(weapon);
     if (!isKnife) {
-        ClutchMirrorSkinToViewModels(client, weapon);
         int stickerIdx = ClutchIndexFromWeaponEntity(client, weapon);
         if (stickerIdx >= 0) {
             ClutchApplyStickersForWeapon(client, weapon, stickerIdx);
+        }
+        ClutchMirrorSkinToViewModels(client, weapon);
+        if (stickerIdx >= 0) {
+            ClutchSyncViewModelStickersFromWeapon(client, weapon, stickerIdx);
             ClutchScheduleStickerReapplyPasses(client, weapon, stickerIdx);
+            DataPack stickerPack = new DataPack();
+            stickerPack.WriteCell(GetClientUserId(client));
+            stickerPack.WriteCell(EntIndexToEntRef(weapon));
+            stickerPack.WriteCell(stickerIdx);
+            CreateTimer(0.2, Timer_SyncViewModelStickers, stickerPack, TIMER_FLAG_NO_MAPCHANGE);
         }
     }
     if (isKnife && ClutchClientHasGlovesLoaded(client)) {
@@ -2006,16 +2014,11 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
         return;
     }
 
-    int idx = ClutchIndexFromWeaponEntity(client, weapon);
-
     if (HasEntProp(client, Prop_Data, "m_hViewModel")) {
         for (int slot = 0; slot <= 1; slot++) {
             int viewModel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", slot);
             if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
                 ClutchCopyWeaponSkinProps(weapon, viewModel);
-                if (idx >= 0) {
-                    ClutchForceApplyStickersToEntity(client, viewModel, idx);
-                }
             }
         }
     }
@@ -2043,10 +2046,115 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
         }
 
         ClutchCopyWeaponSkinProps(weapon, predicted);
-        if (idx >= 0) {
-            ClutchForceApplyStickersToEntity(client, predicted, idx);
+    }
+}
+
+void ClutchCopyStickerAttrsFromEntity(int client, int source, int target, int idx) {
+    if (
+        client <= 0
+        || source <= 0
+        || target <= 0
+        || idx < 0
+        || !IsValidEntity(source)
+        || !IsValidEntity(target)
+        || !IsPaintableWeaponEntity(source)
+        || !IsPaintableWeaponEntity(target)
+    ) {
+        return;
+    }
+
+    CEconItemView srcView = PTaH_GetEconItemViewFromEconEntity(source);
+    CEconItemView tgtView = PTaH_GetEconItemViewFromEconEntity(target);
+    if (srcView == view_as<CEconItemView>(0) || tgtView == view_as<CEconItemView>(0)) {
+        return;
+    }
+
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    int applyMax = ClutchSupportedStickerSlotsForIndex(idx);
+    if (applyMax > CLUTCH_SITE_STICKER_SLOTS) {
+        applyMax = CLUTCH_SITE_STICKER_SLOTS;
+    }
+
+    CAttributeList tgtDemo = tgtView.NetworkedDynamicAttributesForDemos;
+    CAttributeList tgtStatic = tgtView.AttributeList;
+
+    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+        ClutchClearStickerSlotAttributes(tgtDemo, s);
+        ClutchClearStickerSlotAttributes(tgtStatic, s);
+    }
+
+    for (int s = 0; s < applyMax; s++) {
+        int stickerId = srcView.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0);
+        if (stickerId <= 0) {
+            stickerId = g_iStickerSlots[client][teamSlot][idx][s];
+        }
+        if (stickerId <= 0) {
+            continue;
+        }
+        float wear = g_fStickerWears[client][teamSlot][idx][s];
+        ClutchWriteStickerSlotAttributes(tgtDemo, s, stickerId, wear);
+        ClutchWriteStickerSlotAttributes(tgtStatic, s, stickerId, wear);
+    }
+
+    ClutchNetworkUpdateWeaponSkin(target);
+}
+
+void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
+    if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
+        return;
+    }
+
+    if (HasEntProp(client, Prop_Data, "m_hViewModel")) {
+        for (int slot = 0; slot <= 1; slot++) {
+            int viewModel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", slot);
+            if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
+                ClutchCopyStickerAttrsFromEntity(client, weapon, viewModel, idx);
+            }
         }
     }
+
+    int predicted = -1;
+    while ((predicted = FindEntityByClassname(predicted, "predicted_viewmodel")) != -1) {
+        if (!IsValidEntity(predicted)) {
+            continue;
+        }
+
+        int owner = GetEntPropEnt(predicted, Prop_Send, "m_hOwner");
+        if (owner != client) {
+            continue;
+        }
+
+        if (HasEntProp(predicted, Prop_Send, "m_hWeapon")) {
+            int linkedWeapon = GetEntPropEnt(predicted, Prop_Send, "m_hWeapon");
+            if (linkedWeapon != weapon) {
+                continue;
+            }
+        }
+
+        if (!IsPaintableWeaponEntity(predicted)) {
+            continue;
+        }
+
+        ClutchCopyStickerAttrsFromEntity(client, weapon, predicted, idx);
+    }
+}
+
+public Action Timer_SyncViewModelStickers(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int weaponRef = pack.ReadCell();
+    int idx = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    int weapon = EntRefToEntIndex(weaponRef);
+    if (client <= 0 || !IsClientInGame(client) || weapon == -1 || !IsValidEntity(weapon)) {
+        return Plugin_Stop;
+    }
+
+    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
+    ClutchMaybeForceStickerFullUpdate(client);
+    return Plugin_Stop;
 }
 
 int ClutchIndexFromDefIndex(int defIndex) {
@@ -2368,49 +2476,12 @@ bool ClutchEntityStickersMatchCache(int client, int entity, int idx, int teamSlo
 }
 
 void ClutchMirrorStickersToViewModels(int client, int weapon, int idx) {
-    if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
-        return;
-    }
-
-    if (HasEntProp(client, Prop_Data, "m_hViewModel")) {
-        for (int slot = 0; slot <= 1; slot++) {
-            int viewModel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", slot);
-            if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
-                ClutchForceApplyStickersToEntity(client, viewModel, idx);
-            }
-        }
-    }
-
-    int predicted = -1;
-    while ((predicted = FindEntityByClassname(predicted, "predicted_viewmodel")) != -1) {
-        if (!IsValidEntity(predicted)) {
-            continue;
-        }
-
-        int owner = GetEntPropEnt(predicted, Prop_Send, "m_hOwner");
-        if (owner != client) {
-            continue;
-        }
-
-        if (HasEntProp(predicted, Prop_Send, "m_hWeapon")) {
-            int linkedWeapon = GetEntPropEnt(predicted, Prop_Send, "m_hWeapon");
-            if (linkedWeapon != weapon) {
-                continue;
-            }
-        }
-
-        if (!IsPaintableWeaponEntity(predicted)) {
-            continue;
-        }
-
-        ClutchForceApplyStickersToEntity(client, predicted, idx);
-    }
+    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 }
 
 void ClutchApplyStickersForWeapon(int client, int weapon, int idx) {
     bool updated = ClutchApplyStickersToEntity(client, weapon, idx);
-    // Always refresh view models — skin mirror copies paint without sticker attrs (FP view).
-    ClutchMirrorStickersToViewModels(client, weapon, idx);
+    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 
     if (updated || ClutchWeaponHasStickerCache(client, idx)) {
         ClutchMaybeForceStickerFullUpdate(client);
