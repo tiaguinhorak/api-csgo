@@ -90,8 +90,8 @@ float g_fLastWeaponRegive[MAXPLAYERS + 1][CLUTCH_WEAPON_SLOTS];
 int g_iReapplyGen[MAXPLAYERS + 1];
 bool g_bAllowWeaponRegive[MAXPLAYERS + 1];
 bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
-float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35, 1.0, 2.0};
-float g_fStickerReapplyDelays[STICKER_REAPPLY_PASS_COUNT] = {0.15, 0.45, 0.9};
+float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
+float g_fStickerReapplyDelays[STICKER_REAPPLY_PASS_COUNT] = {0.15};
 float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
