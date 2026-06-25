@@ -13,3 +13,10 @@ stock bool ClutchGetClientSteam2(int client, char[] steamId, int maxlen) {
     }
     return GetClientAuthId(client, AuthId_Steam2, steamId, maxlen, false);
 }
+
+stock bool ClutchGetClientSteam3(int client, char[] steamId, int maxlen) {
+    if (GetClientAuthId(client, AuthId_Steam3, steamId, maxlen, true)) {
+        return true;
+    }
+    return GetClientAuthId(client, AuthId_Steam3, steamId, maxlen, false);
+}

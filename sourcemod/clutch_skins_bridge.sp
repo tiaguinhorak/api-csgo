@@ -24,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.38"
+#define PLUGIN_VERSION "3.8.40"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_REAPPLY_PASS_COUNT 2
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -2201,7 +2201,7 @@ void ClutchSyncLegacyStickerTableForClient(int client) {
     }
 
     char steamId[32];
-    if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
+    if (!ClutchGetClientSteam3(client, steamId, sizeof(steamId))) {
         return;
     }
 
@@ -2579,14 +2579,7 @@ void ClutchMirrorStickersToViewModels(int client, int weapon, int idx) {
 }
 
 void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = false) {
-    bool updated = false;
-
-    if (ClutchWeaponStickersNativeReady()) {
-        updated = ClutchApplyStickersViaNative(client, weapon, idx, force);
-    } else {
-        updated = ClutchApplyStickersToEntity(client, weapon, idx, force);
-    }
-
+    bool updated = ClutchApplyStickersToEntity(client, weapon, idx, force);
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 
     if (updated || force || ClutchWeaponHasStickerCache(client, idx)) {
@@ -2670,6 +2663,9 @@ void ClutchReapplyStickersOnPlayerWeapons(int client) {
         int idx = ClutchIndexFromWeaponEntity(client, weapon);
         if (idx >= 0 && ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
             ClutchApplyStickersForWeapon(client, weapon, idx, true);
+            if (ClutchWeaponHasStickerCache(client, idx)) {
+                ClutchRefreshWeaponSlot(client, idx);
+            }
         }
     }
 }
