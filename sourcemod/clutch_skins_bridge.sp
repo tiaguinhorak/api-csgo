@@ -25,9 +25,10 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.55"
+#define PLUGIN_VERSION "3.8.56"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
+#define RESPAWN_VISUAL_PASS_COUNT 2
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
@@ -102,6 +103,7 @@ float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
 bool g_bStickerDbSynced[MAXPLAYERS + 1];
 int g_iStickerQueryGen[MAXPLAYERS + 1];
 float g_fViewModelStickerDelays[STICKER_VIEWMODEL_PASS_COUNT] = {0.15, 0.45, 1.0};
+float g_fRespawnVisualDelays[RESPAWN_VISUAL_PASS_COUNT] = {0.45, 1.0};
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -917,6 +919,31 @@ void ClutchPrintInventoryOnlyMessage(int client) {
     );
 }
 
+/** Re-apply gloves/skins/stickers from in-memory cache only — no DB query. */
+void ClutchApplyCachedLoadoutVisuals(int client) {
+    if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
+        return;
+    }
+
+#if defined _clutch_gloves_included_
+    ClutchGlovesApplyClientSafe(client);
+#endif
+    ApplyAllCachedWeaponsToClient(client, true, false);
+}
+
+void ClutchScheduleRespawnCachedVisuals(int client) {
+    if (client <= 0 || IsFakeClient(client)) {
+        return;
+    }
+
+    int userid = GetClientUserId(client);
+    for (int i = 0; i < RESPAWN_VISUAL_PASS_COUNT; i++) {
+        DataPack pack = new DataPack();
+        pack.WriteCell(userid);
+        CreateTimer(g_fRespawnVisualDelays[i], Timer_RespawnCachedVisuals, pack, TIMER_FLAG_NO_MAPCHANGE);
+    }
+}
+
 public Action ClutchBlockWsConsoleForPlayers(int client, const char[] command, int argc) {
     if (client <= 0 || IsFakeClient(client)) {
         return Plugin_Continue;
@@ -1445,7 +1472,7 @@ public Action Timer_ApplyWeaponsAfterGloves(Handle timer, DataPack pack) {
 
     int client = GetClientOfUserId(userid);
     if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
-        ApplyClientSkins(client, true);
+        ApplyAllCachedWeaponsToClient(client, true, false);
     }
     return Plugin_Stop;
 }
@@ -1600,9 +1627,7 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
             pack.WriteCell(GetClientUserId(client));
             CreateTimer(0.4, Timer_AdminRespawnApply, pack, TIMER_FLAG_NO_MAPCHANGE);
         } else {
-            DataPack pack = new DataPack();
-            pack.WriteCell(GetClientUserId(client));
-            CreateTimer(0.55, Timer_SpawnMissingVisualsOnly, pack, TIMER_FLAG_NO_MAPCHANGE);
+            ClutchScheduleRespawnCachedVisuals(client);
         }
         return;
     }
@@ -1622,35 +1647,15 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     ClutchScheduleConnectLoadout(client);
 }
 
-public Action Timer_SpawnMissingVisualsOnly(Handle timer, DataPack pack) {
+public Action Timer_RespawnCachedVisuals(Handle timer, DataPack pack) {
     pack.Reset();
     int userid = pack.ReadCell();
     delete pack;
 
     int client = GetClientOfUserId(userid);
-    if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
-        return Plugin_Stop;
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client) && IsPlayerAlive(client)) {
+        ClutchApplyCachedLoadoutVisuals(client);
     }
-
-    int size = GetEntPropArraySize(client, Prop_Send, "m_hMyWeapons");
-    for (int i = 0; i < size; i++) {
-        int weapon = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
-        if (weapon == -1 || !IsValidEntity(weapon)) {
-            continue;
-        }
-
-        int idx = ClutchIndexFromWeaponEntity(client, weapon);
-        if (idx < 0) {
-            continue;
-        }
-
-        bool isKnife = IsMeleeWeaponKey(g_ClutchWeaponKeys[idx]);
-        ApplyCachedSkinToEntity(client, weapon, idx, isKnife, false);
-        if (!isKnife && ClutchWeaponHasStickerCache(client, idx)) {
-            ClutchApplyStickersForWeapon(client, weapon, idx, false);
-        }
-    }
-
     return Plugin_Stop;
 }
 

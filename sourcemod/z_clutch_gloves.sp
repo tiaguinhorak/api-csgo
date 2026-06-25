@@ -7,8 +7,9 @@
 #include <sdkhooks>
 #include <clutch_steam>
 
-#define PLUGIN_VERSION "1.4.5"
+#define PLUGIN_VERSION "1.4.6"
 #define GLOVE_THINK_TICK_MOD 8
+#define GLOVE_SPAWN_PASS_COUNT 2
 
 ConVar g_cvDb;
 ConVar g_cvTablePrefix;
@@ -28,6 +29,7 @@ float g_fWear[MAXPLAYERS + 1][4];
 bool g_bThinkHooked[MAXPLAYERS + 1];
 bool g_bMatchGlovesApplied[MAXPLAYERS + 1];
 bool g_bRefreshInFlight[MAXPLAYERS + 1];
+float g_fGloveSpawnDelays[GLOVE_SPAWN_PASS_COUNT] = {0.0, 0.45};
 
 public Plugin myinfo = {
     name = "Clutch Gloves",
@@ -89,7 +91,7 @@ public void OnPluginStart() {
 
     AutoExecConfig(true, "clutch_gloves");
 
-    HookEvent("player_spawn", Event_PlayerSpawn, EventHookMode_Pre);
+    HookEvent("player_spawn", Event_PlayerSpawn, EventHookMode_Post);
     HookEvent("player_death", Event_PlayerDeath, EventHookMode_Post);
     HookEvent("cs_win_panel_match", Event_MatchOver, EventHookMode_Post);
     RegAdminCmd("sm_clutch_gloves_refresh", Command_Refresh, ADMFLAG_ROOT, "Re-read gloves DB into cache (visual apply on spawn)");
@@ -214,7 +216,28 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
         return;
     }
 
-    GivePlayerGloves(client);
+    int userid = GetClientUserId(client);
+    for (int i = 0; i < GLOVE_SPAWN_PASS_COUNT; i++) {
+        if (g_fGloveSpawnDelays[i] <= 0.0) {
+            GivePlayerGloves(client);
+        } else {
+            DataPack pack = new DataPack();
+            pack.WriteCell(userid);
+            CreateTimer(g_fGloveSpawnDelays[i], Timer_GloveSpawnPass, pack, TIMER_FLAG_NO_MAPCHANGE);
+        }
+    }
+}
+
+public Action Timer_GloveSpawnPass(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client) && IsPlayerAlive(client)) {
+        GivePlayerGloves(client);
+    }
+    return Plugin_Stop;
 }
 
 public void Event_MatchOver(Event event, const char[] name, bool dontBroadcast) {
