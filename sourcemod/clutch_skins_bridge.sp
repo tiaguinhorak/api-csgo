@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.58"
+#define PLUGIN_VERSION "3.8.59"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define RESPAWN_VISUAL_PASS_COUNT 2
@@ -2413,7 +2413,12 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
     if (HasEntProp(client, Prop_Data, "m_hViewModel")) {
         for (int slot = 0; slot <= 1; slot++) {
             int viewModel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", slot);
-            if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
+            if (
+                viewModel != -1
+                && IsValidEntity(viewModel)
+                && IsPaintableWeaponEntity(viewModel)
+                && ClutchViewModelMatchesWeapon(client, viewModel, weapon)
+            ) {
                 ClutchCopyWeaponSkinProps(weapon, viewModel);
             }
         }
@@ -2435,6 +2440,8 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
             if (linkedWeapon != weapon) {
                 continue;
             }
+        } else if (!ClutchViewModelMatchesWeapon(client, predicted, weapon)) {
+            continue;
         }
 
         if (!IsPaintableWeaponEntity(predicted)) {
@@ -2557,7 +2564,12 @@ void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
     if (HasEntProp(client, Prop_Data, "m_hViewModel")) {
         for (int slot = 0; slot <= 1; slot++) {
             int viewModel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", slot);
-            if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
+            if (
+                viewModel != -1
+                && IsValidEntity(viewModel)
+                && IsPaintableWeaponEntity(viewModel)
+                && ClutchViewModelMatchesWeapon(client, viewModel, weapon)
+            ) {
                 ClutchCopyWeaponSkinProps(weapon, viewModel);
                 ClutchEnsureEconItemInitialized(client, viewModel);
                 ClutchWriteStickerCacheToEntity(client, viewModel, idx, teamSlot);
@@ -2581,6 +2593,8 @@ void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
             if (linkedWeapon != weapon) {
                 continue;
             }
+        } else if (!ClutchViewModelMatchesWeapon(client, predicted, weapon)) {
+            continue;
         }
 
         if (!IsPaintableWeaponEntity(predicted)) {
@@ -2627,6 +2641,22 @@ int ClutchIndexFromWeaponEntity(int client, int weapon) {
 
 int ClutchStickerTeamSlot(int team) {
     return team == CS_TEAM_CT ? 1 : 0;
+}
+
+bool ClutchViewModelMatchesWeapon(int client, int viewModel, int weapon) {
+    if (viewModel <= 0 || weapon <= 0 || !IsValidEntity(viewModel) || !IsValidEntity(weapon)) {
+        return false;
+    }
+
+    if (HasEntProp(viewModel, Prop_Send, "m_hWeapon")) {
+        int linkedWeapon = GetEntPropEnt(viewModel, Prop_Send, "m_hWeapon");
+        if (linkedWeapon == weapon) {
+            return true;
+        }
+    }
+
+    int activeWeapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+  return activeWeapon == weapon;
 }
 
 bool ClutchWeaponStickersNativeReady() {
@@ -3129,6 +3159,9 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
     if (!needsApply) {
         return;
     }
+
+    ClutchEnsureEconItemInitialized(client, weapon);
+    ClutchWriteStickerCacheToEntity(client, weapon, idx, teamSlot);
 
     bool updated = ClutchApplyStickersToEntity(client, weapon, idx, force);
     bool nativeUpdated = false;
