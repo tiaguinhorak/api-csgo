@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.32"
+#define PLUGIN_VERSION "3.8.33"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_REAPPLY_PASS_COUNT 1
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -2014,7 +2014,7 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
             if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
                 ClutchCopyWeaponSkinProps(weapon, viewModel);
                 if (idx >= 0) {
-                    ClutchApplyStickersToEntity(client, viewModel, idx);
+                    ClutchForceApplyStickersToEntity(client, viewModel, idx);
                 }
             }
         }
@@ -2044,7 +2044,7 @@ void ClutchMirrorSkinToViewModels(int client, int weapon) {
 
         ClutchCopyWeaponSkinProps(weapon, predicted);
         if (idx >= 0) {
-            ClutchApplyStickersToEntity(client, predicted, idx);
+            ClutchForceApplyStickersToEntity(client, predicted, idx);
         }
     }
 }
@@ -2328,6 +2328,25 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
     return true;
 }
 
+void ClutchForceApplyStickersToEntity(int client, int entity, int idx) {
+    if (
+        client <= 0
+        || entity <= 0
+        || idx < 0
+        || idx >= CLUTCH_WEAPON_SLOTS
+        || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])
+        || !IsPaintableWeaponEntity(entity)
+        || !ClutchWeaponHasStickerCache(client, idx)
+    ) {
+        return;
+    }
+
+    ClutchEnsureEconItemInitialized(client, entity);
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    ClutchApplyStickerAttrsToEntity(client, entity, idx, teamSlot);
+    ClutchNetworkUpdateWeaponSkin(entity);
+}
+
 bool ClutchEntityStickersMatchCache(int client, int entity, int idx, int teamSlot) {
     CEconItemView view = PTaH_GetEconItemViewFromEconEntity(entity);
     if (view == view_as<CEconItemView>(0)) {
@@ -2357,7 +2376,7 @@ void ClutchMirrorStickersToViewModels(int client, int weapon, int idx) {
         for (int slot = 0; slot <= 1; slot++) {
             int viewModel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", slot);
             if (viewModel != -1 && IsValidEntity(viewModel) && IsPaintableWeaponEntity(viewModel)) {
-                ClutchApplyStickersToEntity(client, viewModel, idx);
+                ClutchForceApplyStickersToEntity(client, viewModel, idx);
             }
         }
     }
@@ -2384,39 +2403,41 @@ void ClutchMirrorStickersToViewModels(int client, int weapon, int idx) {
             continue;
         }
 
-        ClutchApplyStickersToEntity(client, predicted, idx);
+        ClutchForceApplyStickersToEntity(client, predicted, idx);
     }
 }
 
 void ClutchApplyStickersForWeapon(int client, int weapon, int idx) {
     bool updated = ClutchApplyStickersToEntity(client, weapon, idx);
-    if (updated) {
-        ClutchMirrorStickersToViewModels(client, weapon, idx);
-        ClutchMaybeForceStickerFullUpdate(client);
+    // Always refresh view models — skin mirror copies paint without sticker attrs (FP view).
+    ClutchMirrorStickersToViewModels(client, weapon, idx);
 
-        if (g_cvDebug.BoolValue) {
-            char classname[64];
-            GetEntityClassname(weapon, classname, sizeof(classname));
-            int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);
+    if (updated || ClutchWeaponHasStickerCache(client, idx)) {
+        ClutchMaybeForceStickerFullUpdate(client);
+    }
+
+    if (updated && g_cvDebug.BoolValue) {
+        char classname[64];
+        GetEntityClassname(weapon, classname, sizeof(classname));
+        int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);
+        LogMessage(
+            "[Clutch] Applied stickers on %s (idx %d, maxSlots %d) for %N",
+            classname,
+            idx,
+            maxSlots,
+            client
+        );
+        CEconItemView verifyView = PTaH_GetEconItemViewFromEconEntity(weapon);
+        for (int s = 0; s < CLUTCH_SITE_STICKER_SLOTS; s++) {
+            int cached = g_iStickerSlots[client][ClutchStickerTeamSlot(GetClientTeam(client))][idx][s];
+            int applied = verifyView.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0);
             LogMessage(
-                "[Clutch] Applied stickers on %s (idx %d, maxSlots %d) for %N",
-                classname,
-                idx,
-                maxSlots,
+                "[Clutch] sticker slot %d cached=%d applied=%d for %N",
+                s,
+                cached,
+                applied,
                 client
             );
-            CEconItemView verifyView = PTaH_GetEconItemViewFromEconEntity(weapon);
-            for (int s = 0; s < CLUTCH_SITE_STICKER_SLOTS; s++) {
-                int cached = g_iStickerSlots[client][ClutchStickerTeamSlot(GetClientTeam(client))][idx][s];
-                int applied = verifyView.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0);
-                LogMessage(
-                    "[Clutch] sticker slot %d cached=%d applied=%d for %N",
-                    s,
-                    cached,
-                    applied,
-                    client
-                );
-            }
         }
     }
 }
