@@ -19,10 +19,10 @@ else
   echo "api-csgo/.env already exists — not overwritten"
 fi
 
-if [[ -n "${SITE_ROOT}" && -f "${SITE_ROOT}/.env.local.example" ]]; then
+if [[ -n "${SITE_ROOT}" && -f "${SITE_ROOT}/env.local.example" ]]; then
   if [[ ! -f "${SITE_ROOT}/.env" ]]; then
-    cp "${SITE_ROOT}/.env.local.example" "${SITE_ROOT}/.env"
-    echo "Created site/.env from .env.local.example — EDIT DATABASE_URL and STEAM_API_KEY"
+    cp "${SITE_ROOT}/env.local.example" "${SITE_ROOT}/.env"
+    echo "Created site/.env from env.local.example — EDIT DATABASE_URL and STEAM_API_KEY"
   else
     echo "site/.env already exists — not overwritten"
   fi

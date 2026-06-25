@@ -69,7 +69,7 @@ Anota o path do SQLite (padrão WSL):
 **Windows (PowerShell)** — na pasta `api-csgo`:
 
 ```powershell
-Copy-Item .env.local.example .env
+Copy-Item env.local.example .env
 # Edite .env — WEAPONS_DB_PATH deve apontar ao SQLite do WSL se CS roda no WSL:
 # WEAPONS_DB_PATH=\\wsl$\Ubuntu\home\csgo\server\csgo\addons\sourcemod\data\sqlite\sourcemod-local.sq3
 
@@ -93,7 +93,7 @@ npm install && npm run build && npm run pm2:start
 Na pasta `site`:
 
 ```powershell
-Copy-Item .env.local.example .env
+Copy-Item env.local.example .env
 # DATABASE_URL = Postgres da VPS (mesmo de produção)
 # CSGO_API_URL=http://127.0.0.1:3001
 # CSGO_SKINS_SYNC_KEY = igual api-csgo

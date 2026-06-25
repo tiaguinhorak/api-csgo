@@ -16,7 +16,7 @@ if (-not (Test-Path $ApiEnv)) {
 }
 
 if (Test-Path $SiteRoot) {
-  $SiteEnvLocal = Join-Path $SiteRoot ".env.local.example"
+  $SiteEnvLocal = Join-Path $SiteRoot "env.local.example"
   $SiteEnv = Join-Path $SiteRoot ".env"
   if (-not (Test-Path $SiteEnv) -and (Test-Path $SiteEnvLocal)) {
     Copy-Item $SiteEnvLocal $SiteEnv
