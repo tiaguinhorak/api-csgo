@@ -57,6 +57,12 @@ else
     echo "  2) Windows firewall: allow inbound TCP ${SITE_PORT}"
     echo "  3) Same LAN: VPS must reach ${SITE_HOST}:${SITE_PORT}"
     echo "  4) Remove CLUTCH_SITE_RESOLVE_IP from .env (only for https + domain)"
+    if clutch_site_host_is_private_lan "${SITE_HOST}"; then
+      echo ""
+      echo "Ranked/public game VPS cannot use LAN URL — run:"
+      echo "  bash scripts/fix-ranked-site-url.sh"
+      echo "  npm run pm2:restart"
+    fi
   else
     echo "Production checklist:"
     echo "  - Domain DNS must resolve (or set CLUTCH_SITE_RESOLVE_IP for https)"

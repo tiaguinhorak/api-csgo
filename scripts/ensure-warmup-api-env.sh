@@ -40,7 +40,11 @@ fi
 
 bash "${REPO_ROOT}/scripts/ensure-clutch-site-env.sh"
 
-set_kv_if_missing "CLUTCH_SITE_FALLBACK_URL" "http://192.168.100.6:3000"
+if [[ "${WARMUP_VPS:-0}" == "1" || "${CSGO_SERVER_POOL:-}" == "warmup" ]]; then
+  set_kv_if_missing "CLUTCH_SITE_FALLBACK_URL" "http://192.168.100.6:3000"
+else
+  echo "Ranked/public VPS — skip CLUTCH_SITE_FALLBACK_URL (use fix-ranked-site-url.sh if URL is LAN)"
+fi
 
 # shellcheck source=lib/parse-site-url.sh
 source "${REPO_ROOT}/scripts/lib/parse-site-url.sh"
@@ -54,6 +58,11 @@ fix_warmup_site_url_if_dns_broken() {
   local site_url="${CLUTCH_SITE_URL:-https://clutchclube.com.br}"
   local fallback="${CLUTCH_SITE_FALLBACK_URL:-http://192.168.100.6:3000}"
   parse_clutch_site_url "${site_url}"
+
+  if clutch_site_host_is_private_lan "${SITE_HOST}"; then
+    echo "WARN: CLUTCH_SITE_URL is LAN — warmup only; ranked VPS: bash scripts/fix-ranked-site-url.sh"
+    return 0
+  fi
 
   if clutch_site_host_is_ip "${SITE_HOST}"; then
     return 0
@@ -91,6 +100,12 @@ fix_warmup_site_url_if_dns_broken() {
 }
 
 fix_warmup_site_url_if_dns_broken
+
+if [[ "${WARMUP_VPS:-0}" == "1" || "${CSGO_SERVER_POOL:-}" == "warmup" ]]; then
+  : # warmup-only LAN fallback already handled
+else
+  bash "${REPO_ROOT}/scripts/fix-ranked-site-url.sh" || true
+fi
 
 if ! grep -qE '^CSGO_SKINS_SYNC_KEY=' "${ENV_FILE}"; then
   echo "ERROR: CSGO_SKINS_SYNC_KEY missing in .env (must match site/.env)" >&2

@@ -35,6 +35,24 @@ if [[ -z "${CLUTCH_SITE_URL:-}" && -z "${SITE_ORIGIN:-}" ]]; then
   set -a && source .env && set +a
 fi
 
+# shellcheck source=lib/parse-site-url.sh
+source "${REPO_ROOT}/scripts/lib/parse-site-url.sh"
+
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+  parse_clutch_site_url "${CLUTCH_SITE_URL:-}"
+  if clutch_site_host_is_private_lan "${SITE_HOST}"; then
+    echo ""
+    echo "ERROR: CLUTCH_SITE_URL=${CLUTCH_SITE_URL} is LAN/localhost."
+    echo "Ranked VPS cannot reach your PC — run: bash scripts/fix-ranked-site-url.sh"
+    bash "${SCRIPT_DIR}/fix-ranked-site-url.sh"
+    set -a && source .env && set +a
+  fi
+fi
+
 STICKERS_DB="${STICKERS_DB_PATH:-}"
 if [[ -z "${STICKERS_DB}" ]]; then
   WEAPONS_DB="${WEAPONS_DB_PATH:-/home/csgo/server/csgo/addons/sourcemod/data/sqlite/sourcemod-local.sq3}"

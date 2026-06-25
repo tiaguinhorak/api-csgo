@@ -38,6 +38,16 @@ clutch_site_host_is_ip() {
   [[ "${h}" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || [[ "${h}" =~ ^\[.*\]$ ]]
 }
 
+clutch_site_host_is_private_lan() {
+  local h="${1:-}"
+  [[ "${h}" == localhost ]] && return 0
+  [[ "${h}" =~ ^127\. ]] && return 0
+  [[ "${h}" =~ ^192\.168\. ]] && return 0
+  [[ "${h}" =~ ^10\. ]] && return 0
+  [[ "${h}" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] && return 0
+  return 1
+}
+
 should_use_site_resolve() {
   local resolve_ip="${CLUTCH_SITE_RESOLVE_IP:-${RESOLVED_SITE_IP:-}}"
   [[ -n "${resolve_ip}" ]] \
