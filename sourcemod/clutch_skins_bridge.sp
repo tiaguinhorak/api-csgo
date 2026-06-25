@@ -24,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.48"
+#define PLUGIN_VERSION "3.8.49"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -2253,7 +2253,7 @@ public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 #if defined _csgo_weaponstickers_included_
     if (ClutchWeaponStickersNativeReady()) {
-        ClutchApplyStickersViaNative(client, weapon, idx, false);
+        ClutchApplyStickersViaNative(client, weapon, idx, true);
     }
 #endif
     g_fLastStickerForceUpdate[client] = 0.0;
@@ -2480,10 +2480,13 @@ bool ClutchApplyStickersViaNative(int client, int weapon, int idx, bool force = 
 
     for (int s = 0; s < applyMax; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
+        float wear = g_fStickerWears[client][teamSlot][idx][s];
         if (stickerId <= 0) {
+            if (force) {
+                CS_SetWeaponSticker(client, weapon, s, 0, 0.0, 0.0);
+            }
             continue;
         }
-        float wear = g_fStickerWears[client][teamSlot][idx][s];
         CS_SetWeaponSticker(client, weapon, s, stickerId, wear, 0.0);
         any = true;
     }
@@ -2817,7 +2820,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 #if defined _csgo_weaponstickers_included_
     if (ClutchWeaponStickersNativeReady() && hasCache) {
-        ClutchApplyStickersViaNative(client, weapon, idx, false);
+        ClutchApplyStickersViaNative(client, weapon, idx, force);
     }
 #endif
 
