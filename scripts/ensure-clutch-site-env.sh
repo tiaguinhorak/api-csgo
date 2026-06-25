@@ -7,8 +7,13 @@ ENV_FILE="${REPO_ROOT}/.env"
 DEFAULT_SITE_URL="${CLUTCH_SITE_URL:-https://clutchclube.com.br}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
-  echo "ERROR: ${ENV_FILE} not found" >&2
-  exit 1
+  if [[ -f "${REPO_ROOT}/.env.example" ]]; then
+    cp "${REPO_ROOT}/.env.example" "${ENV_FILE}"
+    echo "Created ${ENV_FILE} from .env.example — review CSGO_SKINS_SYNC_KEY before sync."
+  else
+    echo "ERROR: ${ENV_FILE} not found" >&2
+    exit 1
+  fi
 fi
 
 missing=0

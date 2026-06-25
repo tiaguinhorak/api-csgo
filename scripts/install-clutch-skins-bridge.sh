@@ -239,6 +239,18 @@ echo ""
 echo ">>> Disable csgo_weaponstickers auto-apply"
 bash "${REPO_ROOT}/scripts/disable-weaponstickers-autoapply.sh"
 
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${REPO_ROOT}/.env"
+  set +a
+fi
+if [[ "${WARMUP_VPS:-0}" == "1" || "${CSGO_SERVER_POOL:-}" == "warmup" ]]; then
+  echo ""
+  echo ">>> Warmup bridge cfg (defer_live=0, once_per_match=0)"
+  bash "${REPO_ROOT}/scripts/ensure-warmup-bridge-cfg.sh" || true
+fi
+
 WEAPONS_SP="${SM}/scripting/weapons.sp"
 if [[ -f "${WEAPONS_SP}" ]]; then
   echo ""

@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.28"
+#define PLUGIN_VERSION "3.8.29"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_REAPPLY_PASS_COUNT 1
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -818,7 +818,7 @@ public Action Command_ApplySkins(int client, int args) {
             ClutchBeginForcedSync(i);
         }
     }
-    ReplyToCommand(client, "[Clutch] Skins reaplicados. Luvas atualizam no proximo spawn.");
+    ReplyToCommand(client, "[Clutch] Skins reaplicados. Entre no servidor (vivo) para ver luvas/skins.");
     return Plugin_Handled;
 }
 
@@ -1222,6 +1222,10 @@ public Action Timer_ApplySkinsOnSpawn(Handle timer, any userid) {
 #endif
     ApplyClientSkins(client, true);
     return Plugin_Stop;
+}
+
+public void OnMapStart() {
+    ClutchResetMatchLoadoutFlags();
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
@@ -3058,6 +3062,9 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
     if (allowRegive) {
         g_bAllowWeaponRegive[client] = false;
     }
+    if (g_cvOncePerMatch.BoolValue && any) {
+        g_bMatchLoadoutSynced[client] = true;
+    }
     ScheduleForceReapply(client, force, allowRegive);
     return true;
 }
@@ -4087,15 +4094,6 @@ void ApplyClientSkins(int client, bool force) {
         return;
     }
     g_fLastApplyTime[client] = now;
-
-    if (
-        force
-        && !g_bAllowWeaponRegive[client]
-        && g_cvOncePerMatch.BoolValue
-        && IsPlayerAlive(client)
-    ) {
-        g_bMatchLoadoutSynced[client] = true;
-    }
 
     char steamId[32];
     if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {

@@ -6,6 +6,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# Create .env from example + required keys before fetch (warmup VPS often missing this).
+if [[ -f "${REPO_ROOT}/scripts/ensure-warmup-api-env.sh" ]]; then
+  bash "${REPO_ROOT}/scripts/ensure-warmup-api-env.sh" || true
+elif [[ -f "${REPO_ROOT}/scripts/ensure-clutch-site-env.sh" ]]; then
+  bash "${REPO_ROOT}/scripts/ensure-clutch-site-env.sh" || true
+fi
+
 if [[ ! -f dist/services/weapons-db-sync.js ]]; then
   echo "ERROR: dist missing — run: npm install && npm run build" >&2
   exit 1

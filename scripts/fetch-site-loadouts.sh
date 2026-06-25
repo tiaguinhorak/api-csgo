@@ -15,17 +15,17 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-SITE_URL="${CLUTCH_SITE_URL:-${SITE_ORIGIN:-}}"
+SITE_URL="${CLUTCH_SITE_URL:-${SITE_ORIGIN:-https://clutchclube.com.br}}"
 SYNC_KEY="${CSGO_SKINS_SYNC_KEY:-}"
 OUT_FILE="${1:-/tmp/clutch-site-loadouts.json}"
 
-if [[ -z "${SITE_URL}" ]]; then
-  echo "ERROR: set CLUTCH_SITE_URL or SITE_ORIGIN in .env" >&2
+if [[ -z "${SYNC_KEY}" ]]; then
+  echo "ERROR: CSGO_SKINS_SYNC_KEY not set in .env (must match site/.env)" >&2
   exit 1
 fi
-if [[ -z "${SYNC_KEY}" ]]; then
-  echo "ERROR: CSGO_SKINS_SYNC_KEY not set" >&2
-  exit 1
+
+if [[ "${CLUTCH_SITE_URL:-}" == "" && "${SITE_ORIGIN:-}" == "" ]]; then
+  echo "NOTE: using default CLUTCH_SITE_URL=${SITE_URL}"
 fi
 
 SITE_URL="${SITE_URL%/}"
