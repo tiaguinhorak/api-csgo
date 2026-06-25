@@ -24,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.41"
+#define PLUGIN_VERSION "3.8.42"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
 #define GLOVE_THINK_TICK_MOD 8
@@ -1284,7 +1284,7 @@ public Action Timer_DelayedStickerReapply(Handle timer, DataPack pack) {
 
     int client = GetClientOfUserId(userid);
     if (client > 0 && IsClientInGame(client) && IsPlayerAlive(client)) {
-        ClutchReapplyStickersOnPlayerWeapons(client);
+        ClutchReapplyStickersOnPlayerWeapons(client, true);
     }
     return Plugin_Stop;
 }
@@ -2639,7 +2639,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
     }
 }
 
-void ClutchReapplyStickersOnPlayerWeapons(int client) {
+void ClutchReapplyStickersOnPlayerWeapons(int client, bool force = false) {
     if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
         return;
     }
@@ -2652,8 +2652,18 @@ void ClutchReapplyStickersOnPlayerWeapons(int client) {
         }
 
         int idx = ClutchIndexFromWeaponEntity(client, weapon);
-        if (idx >= 0 && ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
-            ClutchApplyStickersForWeapon(client, weapon, idx, true);
+        if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+            continue;
+        }
+
+        if (force) {
+            int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
+            int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+            if (ClutchWeaponHasStickerCache(client, idx) || ClutchEntityHasAppliedStickers(weapon, applyMax)) {
+                ClutchApplyStickersForWeapon(client, weapon, idx, true);
+            }
+        } else if (ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
+            ClutchApplyStickersForWeapon(client, weapon, idx, false);
         }
     }
 }
@@ -2957,7 +2967,7 @@ void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = fa
         ApplyCachedSkinToEntity(client, weapon, i, IsMeleeWeaponKey(weaponKey), force, allowRegive);
     }
 
-    ClutchReapplyStickersOnPlayerWeapons(client);
+    ClutchReapplyStickersOnPlayerWeapons(client, force);
     ClutchBridgeUpdateClientModel(client);
 }
 
@@ -3579,14 +3589,14 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         );
         ClutchClearStickerCache(client);
         ClutchSyncLegacyStickerTableForClient(client);
-        ClutchReapplyStickersOnPlayerWeapons(client);
+        ClutchReapplyStickersOnPlayerWeapons(client, true);
         g_bStickerDbSynced[client] = true;
         return;
     }
 
     g_bStickerDbSynced[client] = true;
     ClutchSyncLegacyStickerTableForClient(client);
-    ClutchReapplyStickersOnPlayerWeapons(client);
+    ClutchReapplyStickersOnPlayerWeapons(client, true);
 }
 
 public void T_LegacyStickersCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
@@ -3660,7 +3670,7 @@ public void T_LegacyStickersCallback(Database database, DBResultSet results, con
     }
 
     LogMessage("[Clutch] Applied stickers from legacy %s for %N (TR only — save CT stickers on site)", g_sLegacyStickersTable, client);
-    ClutchReapplyStickersOnPlayerWeapons(client);
+    ClutchReapplyStickersOnPlayerWeapons(client, true);
 }
 
 public void T_ApplyFromDbCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {

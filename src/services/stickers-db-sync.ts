@@ -179,16 +179,25 @@ export async function syncPlayerStickersToDb(
     for (const targetSteam of steamIds) {
       if (replacePlayerState) {
         db.prepare(`DELETE FROM ${clutchTable} WHERE steamid = ?`).run(targetSteam);
-        db.prepare(`DELETE FROM ${legacyTable} WHERE steamid = ?`).run(targetSteam);
+        if (process.env.CLUTCH_SYNC_LEGACY_STICKERS === '1') {
+          db.prepare(`DELETE FROM ${legacyTable} WHERE steamid = ?`).run(targetSteam);
+        }
       }
 
       const legacyStatements = buildStickerLoadoutSql(tablePrefix, targetSteam, entries);
       const clutchStatements = buildClutchStickerLoadoutSql(tablePrefix, targetSteam, entries);
-      legacyStmtCount += legacyStatements.length;
       clutchStmtCount += clutchStatements.length;
-      for (const sql of [...legacyStatements, ...clutchStatements]) {
+      for (const sql of clutchStatements) {
         db.exec(sql);
         updated += 1;
+      }
+      // Legacy weaponstickers1 is unused (bridge reads clutch_weaponstickers only).
+      if (process.env.CLUTCH_SYNC_LEGACY_STICKERS === '1') {
+        legacyStmtCount += legacyStatements.length;
+        for (const sql of legacyStatements) {
+          db.exec(sql);
+          updated += 1;
+        }
       }
     }
   });

@@ -68,6 +68,11 @@ fi
 echo ""
 bash "${REPO_ROOT}/scripts/sync-team-loadouts-from-site.sh"
 
+echo ""
+echo ">>> sync stickers from site (clutch_weaponstickers)"
+bash "${REPO_ROOT}/scripts/sync-stickers-from-site.sh" || \
+  echo "WARN: sticker sync failed — check CLUTCH_SITE_URL and CSGO_SKINS_SYNC_KEY"
+
 DB_PATH="${WEAPONS_DB_PATH:-/home/csgo/server/csgo/addons/sourcemod/data/sqlite/sourcemod-local.sq3}"
 echo ""
 echo "=== Next steps ==="
