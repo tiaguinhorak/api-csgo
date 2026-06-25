@@ -2186,7 +2186,13 @@ void ClutchExecStickerSql(const char[] query) {
     if (g_hStickersDb == null || query[0] == '\0') {
         return;
     }
-    g_hStickersDb.Execute(query, DBPrio_High);
+    g_hStickersDb.Query(T_ClutchExecStickerSqlCallback, query, 0, DBPrio_High);
+}
+
+public void T_ClutchExecStickerSqlCallback(Database database, DBResultSet results, const char[] error, any data) {
+    if (results == null && error[0] != '\0') {
+        LogError("[Clutch] sticker mirror SQL failed: %s", error);
+    }
 }
 
 void ClutchSyncLegacyStickerTableForClient(int client) {
