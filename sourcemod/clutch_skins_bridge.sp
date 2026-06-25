@@ -23,9 +23,9 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.25"
+#define PLUGIN_VERSION "3.8.27"
 #define CLUTCH_SITE_STICKER_SLOTS 4
-#define STICKER_REAPPLY_PASS_COUNT 3
+#define STICKER_REAPPLY_PASS_COUNT 1
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
@@ -34,7 +34,7 @@
 #define CLUTCH_KNIFE_CLASS_LEN 64
 #define ENTITY_APPLY_COOLDOWN 1.5
 #define WEAPON_REGIVE_COOLDOWN 10.0
-#define REAPPLY_PASS_COUNT 3
+#define REAPPLY_PASS_COUNT 1
 #define SPAWN_APPLY_AFTER_GLOVES_DELAY 1.25
 #define SPAWN_GLOVE_DB_REFRESH_DELAY 0.75
 #define FORCE_WEAPONS_AFTER_GLOVES_DELAY 1.0
@@ -1030,7 +1030,8 @@ bool ClutchRoutineFullApplyBlocked(int client, bool force) {
 
 void ClutchBeginForcedSync(int client) {
     g_bMatchLoadoutSynced[client] = false;
-    g_bAllowWeaponRegive[client] = true;
+    // Never auto-give guns from site loadout — only apply paint on weapons the player already has.
+    g_bAllowWeaponRegive[client] = false;
 #if defined _clutch_gloves_included_
     ClutchGlovesRefreshClientSafe(client);
     CreateTimer(0.25, Timer_ApplyGlovesAfterRefresh, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
@@ -1157,7 +1158,7 @@ public Action Timer_ApplyEquippedWeapon(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
-    ApplyCachedSkinToEntity(client, weapon, idx, isKnife, true);
+    ApplyCachedSkinToEntity(client, weapon, idx, isKnife, false);
     return Plugin_Stop;
 }
 
@@ -1464,7 +1465,7 @@ bool ApplyCachedSkinToEntity(int client, int entity, int idx, bool isKnife, bool
     }
     g_fLastEntityApply[client][idx] = now;
 
-    if (!isKnife && allowRegive && ClutchClientHasGlovesLoaded(client)) {
+    if (!isKnife && allowRegive && g_bAllowWeaponRegive[client] && ClutchClientHasGlovesLoaded(client)) {
         if (GetGameTime() - g_fLastWeaponRegive[client][idx] < WEAPON_REGIVE_COOLDOWN) {
             // fall through to SetClutchWeaponProps
         } else if (ClutchRefreshWeaponSlot(client, idx)) {
@@ -2607,9 +2608,6 @@ void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = fa
 
         int weapon = FindPlayerWeapon(client, weaponKey);
         if (weapon == -1) {
-            if (force && allowRegive) {
-                ClutchGiveCachedWeapon(client, i);
-            }
             continue;
         }
 
@@ -2661,12 +2659,10 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
-    bool allowRegive = force;
+    bool allowRegive = g_bAllowWeaponRegive[client];
 #if defined _weapons_included_
-    if (!skipWeaponsReload) {
-        RefreshWeaponsReloadNativeFlag();
-        TryReloadWeaponsPluginData(client);
-    }
+    // Never ReloadClientData here — weapons.smx gives guns from kgns columns (auto-buy).
+    (void)allowRegive;
 #endif
     ApplyAllCachedWeaponsToClient(client, force, allowRegive);
     ScheduleForceReapply(client, force, allowRegive);
@@ -2982,12 +2978,10 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
 
         int weapon = FindPlayerWeapon(client, weaponId);
         if (weapon != -1) {
-            ApplyCachedSkinToEntity(client, weapon, idx, false, true, force);
-        } else if (force) {
-            ClutchGiveCachedWeapon(client, idx);
+            ApplyCachedSkinToEntity(client, weapon, idx, false, true, false);
         } else if (g_cvDebug.BoolValue) {
             LogMessage(
-                "[Clutch] Cached %s paintkit %d for %N (pick up weapon to apply)",
+                "[Clutch] Cached %s paintkit %d for %N (buy/pick up weapon to apply)",
                 weaponId,
                 paintkit,
                 client
@@ -3001,12 +2995,6 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
 
     if (knifePaintkit > 0 && knifeClass[0] != '\0') {
         strcopy(g_CachedKnifeClass[client], CLUTCH_KNIFE_CLASS_LEN, knifeClass);
-#if defined _weapons_included_
-        if (force) {
-            RefreshWeaponsReloadNativeFlag();
-            TryReloadWeaponsPluginData(client);
-        }
-#endif
         ClutchSetClientKnife(client, knifeClass);
 
         int knifeWeapon = FindPlayerWeapon(client, knifeClass);

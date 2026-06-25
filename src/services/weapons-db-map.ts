@@ -484,13 +484,8 @@ export function buildPlayerLoadoutSql(
 
     if (!w.paintkit || w.paintkit <= 0) continue;
 
-    // Per-side paintkits live in clutch_team_loadout, but kgns weapons.smx still gives
-    // and re-skins the live weapon/knife. If we cleared the kgns row for knives and
-    // shared weapons, kgns hands out a vanilla item (knife=0) and overwrites the
-    // bridge's fallback paint — so write every equipped weapon to the kgns row too.
-    // Bridge refines per-side from clutch_team_loadout; knife index uses T side first.
-
-
+    // Guns: clutch_team_loadout only. Writing kgns gun columns makes weapons.smx give items on reload.
+    if (!isMeleeWeaponId(w.weaponId)) continue;
 
     const column = weaponIdToDbColumn(w.weaponId);
 

@@ -73,12 +73,6 @@ send_rcon_cmd() {
 
 FULL_SCREEN="$(resolve_screen_session || true)"
 
-if send_rcon_cmd "sm plugins reload weapons"; then
-  :
-elif [[ -n "${FULL_SCREEN}" ]]; then
-  send_screen_cmd "${FULL_SCREEN}" "sm plugins reload weapons" 1.2
-fi
-
 if send_rcon_cmd "sm_clutch_gloves_refresh"; then
   :
 elif [[ -n "${FULL_SCREEN}" ]]; then
