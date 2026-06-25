@@ -179,9 +179,8 @@ export async function syncPlayerStickersToDb(
     for (const targetSteam of steamIds) {
       if (replacePlayerState) {
         db.prepare(`DELETE FROM ${clutchTable} WHERE steamid = ?`).run(targetSteam);
-        if (process.env.CLUTCH_SYNC_LEGACY_STICKERS === '1') {
-          db.prepare(`DELETE FROM ${legacyTable} WHERE steamid = ?`).run(targetSteam);
-        }
+        // Always purge legacy rows — stale weaponstickers1 confuses CS_SetWeaponSticker / old tooling.
+        db.prepare(`DELETE FROM ${legacyTable} WHERE steamid = ?`).run(targetSteam);
       }
 
       const legacyStatements = buildStickerLoadoutSql(tablePrefix, targetSteam, entries);

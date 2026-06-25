@@ -24,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.44"
+#define PLUGIN_VERSION "3.8.45"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -1026,6 +1026,9 @@ void ClutchRefreshStickersForClient(int client) {
         return;
     }
 
+    // api-csgo writes stickers via WAL — reconnect so we read the latest SQLite snapshot.
+    ConnectStickersDatabase();
+    g_bStickerDbSynced[client] = false;
     QueryPlayerStickers(client, steamId, 0);
 }
 
@@ -2137,7 +2140,7 @@ public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 #if defined _csgo_weaponstickers_included_
     if (ClutchWeaponStickersNativeReady()) {
-        ClutchApplyStickersViaNative(client, weapon, idx, true);
+        ClutchApplyStickersViaNative(client, weapon, idx, false);
     }
 #endif
     g_fLastStickerForceUpdate[client] = 0.0;
@@ -2234,6 +2237,25 @@ void ClutchExecStickerSql(const char[] query) {
         return;
     }
     g_hStickersDb.Query(T_ClutchExecStickerSqlCallback, query, 0, DBPrio_High);
+}
+
+void ClutchPurgeLegacyStickerRowsForSteam(const char[] steamId) {
+    if (g_hStickersDb == null || steamId[0] == '\0') {
+        return;
+    }
+
+    char escaped[64];
+    g_hStickersDb.Escape(steamId, escaped, sizeof(escaped));
+
+    char query[192];
+    Format(
+        query,
+        sizeof(query),
+        "DELETE FROM %s WHERE steamid='%s'",
+        g_sLegacyStickersTable,
+        escaped
+    );
+    ClutchExecStickerSql(query);
 }
 
 public void T_ClutchExecStickerSqlCallback(Database database, DBResultSet results, const char[] error, any data) {
@@ -2682,7 +2704,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 #if defined _csgo_weaponstickers_included_
     if (ClutchWeaponStickersNativeReady() && hasCache) {
-        ClutchApplyStickersViaNative(client, weapon, idx, true);
+        ClutchApplyStickersViaNative(client, weapon, idx, false);
     }
 #endif
 
@@ -3675,6 +3697,7 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
     }
 
     g_bStickerDbSynced[client] = true;
+    ClutchPurgeLegacyStickerRowsForSteam(steamId);
     ClutchSyncLegacyStickerTableForClient(client);
     ClutchReapplyStickersOnPlayerWeapons(client, true);
 }
