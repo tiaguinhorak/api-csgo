@@ -148,6 +148,7 @@ function migrateLegacyStickersToClutch(
 export async function syncPlayerStickersToDb(
   steamId: string,
   entries: StickerSyncEntry[],
+  options?: { replacePlayerState?: boolean },
 ): Promise<{
   steamId: string;
   steamIds: string[];
@@ -172,8 +173,15 @@ export async function syncPlayerStickersToDb(
   let clutchStmtCount = 0;
   let legacyStmtCount = 0;
 
+  const replacePlayerState = options?.replacePlayerState ?? false;
+
   const tx = db.transaction(() => {
     for (const targetSteam of steamIds) {
+      if (replacePlayerState) {
+        db.prepare(`DELETE FROM ${clutchTable} WHERE steamid = ?`).run(targetSteam);
+        db.prepare(`DELETE FROM ${legacyTable} WHERE steamid = ?`).run(targetSteam);
+      }
+
       const legacyStatements = buildStickerLoadoutSql(tablePrefix, targetSteam, entries);
       const clutchStatements = buildClutchStickerLoadoutSql(tablePrefix, targetSteam, entries);
       legacyStmtCount += legacyStatements.length;
@@ -186,7 +194,10 @@ export async function syncPlayerStickersToDb(
   });
   tx();
 
-  let migrated = migrateLegacyStickersToClutch(db, tablePrefix, steamIds);
+  let migrated = 0;
+  if (!replacePlayerState) {
+    migrated = migrateLegacyStickersToClutch(db, tablePrefix, steamIds);
+  }
 
   db.pragma('wal_checkpoint(TRUNCATE)');
 

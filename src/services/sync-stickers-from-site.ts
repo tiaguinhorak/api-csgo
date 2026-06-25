@@ -88,7 +88,7 @@ export async function syncAllStickersFromSite(): Promise<{
       continue;
     }
     try {
-      await syncPlayerStickersToDb(row.steamId, row.entries);
+      await syncPlayerStickersToDb(row.steamId, row.entries, { replacePlayerState: true });
       synced += 1;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'sticker sync failed';

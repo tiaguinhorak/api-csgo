@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.29"
+#define PLUGIN_VERSION "3.8.31"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_REAPPLY_PASS_COUNT 1
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -244,6 +244,7 @@ public void OnPluginStart() {
     RegAdminCmd("sm_reloadclutchskins", Command_ReloadSkins, ADMFLAG_ROOT, "Re-apply clutch skins from weapons DB");
     RegAdminCmd("sm_clutch_applyskins", Command_ApplySkins, ADMFLAG_ROOT, "Re-apply clutch skins to all players");
     RegServerCmd("sm_clutch_loadout_pending", Command_LoadoutPending, "Stage web loadout from DB (api-csgo player-sync)");
+    RegServerCmd("sm_clutch_refresh_stickers", Command_RefreshStickers, "Re-read stickers DB and re-apply (api-csgo sticker-sync)");
 
     AddCommandListener(ClutchBlockWsChatForPlayers, "say");
     AddCommandListener(ClutchBlockWsChatForPlayers, "say_team");
@@ -947,6 +948,41 @@ public Action Command_LoadoutPending(int args) {
         }
     }
     return Plugin_Handled;
+}
+
+public Action Command_RefreshStickers(int args) {
+    if (args >= 1) {
+        char steam[32];
+        GetCmdArg(1, steam, sizeof(steam));
+        TrimString(steam);
+
+        int client = FindClientBySteam2(steam);
+        if (client > 0) {
+            ClutchRefreshStickersForClient(client);
+        } else if (g_cvDebug.BoolValue) {
+            LogMessage("[Clutch] refresh_stickers: %s not in game", steam);
+        }
+    } else {
+        for (int i = 1; i <= MaxClients; i++) {
+            if (IsClientInGame(i) && !IsFakeClient(i)) {
+                ClutchRefreshStickersForClient(i);
+            }
+        }
+    }
+    return Plugin_Handled;
+}
+
+void ClutchRefreshStickersForClient(int client) {
+    if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client)) {
+        return;
+    }
+
+    char steamId[32];
+    if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
+        return;
+    }
+
+    QueryPlayerStickers(client, steamId, 0);
 }
 
 bool ClutchIsBlockedWsChatToken(const char[] token) {
@@ -2028,6 +2064,43 @@ bool ClutchWeaponHasStickerCache(int client, int idx) {
     return false;
 }
 
+bool ClutchEntityHasAppliedStickers(int entity, int maxSlots) {
+    if (entity <= 0 || !IsValidEntity(entity) || maxSlots <= 0) {
+        return false;
+    }
+
+    CEconItemView view = PTaH_GetEconItemViewFromEconEntity(entity);
+    if (view == view_as<CEconItemView>(0)) {
+        return false;
+    }
+
+    for (int s = 0; s < maxSlots; s++) {
+        if (view.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0) != 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ClutchWeaponNeedsStickerSync(int client, int entity, int idx) {
+    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+        return false;
+    }
+
+    if (ClutchWeaponHasStickerCache(client, idx)) {
+        return true;
+    }
+
+    if (entity <= 0 || !IsValidEntity(entity)) {
+        return false;
+    }
+
+    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
+    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+    return ClutchEntityHasAppliedStickers(entity, applyMax);
+}
+
 bool ClutchEnsureEconItemInitialized(int client, int entity) {
     if (client <= 0 || entity <= 0 || !IsValidEntity(entity)) {
         return false;
@@ -2062,6 +2135,10 @@ int ClutchSupportedStickerSlotsForIndex(int idx) {
         return CLUTCH_SITE_STICKER_SLOTS;
     }
 
+    if (IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+        return 0;
+    }
+
     int defIndex = g_ClutchWeaponDefIndex[idx];
     if (defIndex <= 0) {
         return CLUTCH_SITE_STICKER_SLOTS;
@@ -2074,6 +2151,20 @@ int ClutchSupportedStickerSlotsForIndex(int idx) {
 
     int supported = itemDef.GetNumSupportedStickerSlots();
     if (supported <= 0) {
+        return CLUTCH_SITE_STICKER_SLOTS;
+    }
+
+    // CS:GO Legacy rifles/pistols/snipers support 4 sticker slots; PTaH often reports 3.
+    if (supported < CLUTCH_SITE_STICKER_SLOTS) {
+        if (g_cvDebug.BoolValue) {
+            LogMessage(
+                "[Clutch] PTaH reports %d sticker slots for %s (def %d) — using %d (CS:GO standard)",
+                supported,
+                g_ClutchWeaponKeys[idx],
+                defIndex,
+                CLUTCH_SITE_STICKER_SLOTS
+            );
+        }
         return CLUTCH_SITE_STICKER_SLOTS;
     }
 
@@ -2165,26 +2256,21 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
         || idx >= CLUTCH_WEAPON_SLOTS
         || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])
         || !IsPaintableWeaponEntity(entity)
-        || !ClutchWeaponHasStickerCache(client, idx)
     ) {
         return false;
     }
 
-    ClutchEnsureEconItemInitialized(client, entity);
-
     int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
-    bool hasCache = false;
+    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
+    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+    bool hasCached = ClutchWeaponHasStickerCache(client, idx);
+    bool hasApplied = ClutchEntityHasAppliedStickers(entity, applyMax);
 
-    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
-        if (g_iStickerSlots[client][teamSlot][idx][s] != 0) {
-            hasCache = true;
-            break;
-        }
-    }
-
-    if (!hasCache) {
+    if (!hasCached && !hasApplied) {
         return false;
     }
+
+    ClutchEnsureEconItemInitialized(client, entity);
 
     // Skip re-apply (and ForceFullUpdate) when the weapon already shows the cached
     // stickers — avoids the apply storm that makes stickers flicker / disappear.
@@ -2267,7 +2353,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx) {
             GetEntityClassname(weapon, classname, sizeof(classname));
             int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);
             LogMessage(
-                "[Clutch] Applied stickers on %s (idx %d, engineMaxSlots %d) for %N",
+                "[Clutch] Applied stickers on %s (idx %d, maxSlots %d) for %N",
                 classname,
                 idx,
                 maxSlots,
@@ -2277,15 +2363,13 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx) {
             for (int s = 0; s < CLUTCH_SITE_STICKER_SLOTS; s++) {
                 int cached = g_iStickerSlots[client][ClutchStickerTeamSlot(GetClientTeam(client))][idx][s];
                 int applied = verifyView.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0);
-                if (cached != 0 || applied != 0) {
-                    LogMessage(
-                        "[Clutch] sticker slot %d cached=%d applied=%d for %N",
-                        s,
-                        cached,
-                        applied,
-                        client
-                    );
-                }
+                LogMessage(
+                    "[Clutch] sticker slot %d cached=%d applied=%d for %N",
+                    s,
+                    cached,
+                    applied,
+                    client
+                );
             }
         }
     }
@@ -2319,7 +2403,7 @@ public Action Timer_StickerReapplyPass(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
-    if (!ClutchWeaponHasStickerCache(client, idx)) {
+    if (!ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
         return Plugin_Stop;
     }
 
@@ -2340,7 +2424,7 @@ void ClutchReapplyStickersOnPlayerWeapons(int client) {
         }
 
         int idx = ClutchIndexFromWeaponEntity(client, weapon);
-        if (idx >= 0 && ClutchWeaponHasStickerCache(client, idx)) {
+        if (idx >= 0 && ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
             ClutchApplyStickersForWeapon(client, weapon, idx);
         }
     }
@@ -3227,25 +3311,6 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         char teamLabel[4];
         results.FetchString(1, teamLabel, sizeof(teamLabel));
         int teamSlot = StrEqual(teamLabel, "CT", false) ? 1 : 0;
-        int idx = ClutchIndexFromDefIndex(defIndex);
-        if (idx >= 0) {
-            int existingCount = ClutchCountCachedStickerSlots(client, teamSlot, idx);
-            int newCount = ClutchCountStickerSlotsInRow(results, 2);
-            if (existingCount > newCount) {
-                if (g_cvDebug.BoolValue) {
-                    LogMessage(
-                        "[Clutch] Skipping stale sticker row %s defindex %d (%s) — cached %d slots, row has %d",
-                        teamLabel,
-                        defIndex,
-                        g_ClutchWeaponKeys[idx],
-                        existingCount,
-                        newCount
-                    );
-                }
-                continue;
-            }
-        }
-
         ClutchCacheStickerRowForTeam(client, defIndex, teamSlot, results, 2, 8);
 
         if (g_cvDebug.BoolValue) {
@@ -3284,6 +3349,8 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
             steamId,
             g_sResolvedStickersDbPath
         );
+        ClutchClearStickerCache(client);
+        ClutchReapplyStickersOnPlayerWeapons(client);
         return;
     }
 

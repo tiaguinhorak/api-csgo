@@ -167,3 +167,16 @@ export async function reloadClutchSkinsInGame(): Promise<boolean> {
     return viaScreen;
   }
 }
+
+/** Re-read sticker rows from SQLite and re-apply on held weapons (lighter than full applyskins). */
+export async function refreshPlayerStickersInGame(steamId?: string): Promise<boolean> {
+  const trimmed = steamId?.trim();
+  const command = trimmed
+    ? `sm_clutch_refresh_stickers ${trimmed}`
+    : 'sm_clutch_refresh_stickers';
+  const ok = await sendRconOrScreen(command);
+  if (!ok) {
+    console.warn('[clutch-rcon] sticker refresh skipped (no RCON/screen)');
+  }
+  return ok;
+}

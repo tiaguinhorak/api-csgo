@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { syncAllStickersFromSite } from '../services/sync-stickers-from-site';
 import { syncPlayerStickersToDb } from '../services/stickers-db-sync';
+import { refreshPlayerStickersInGame } from '../services/clutch-rcon';
 import type { StickerSyncEntry } from '../services/stickers-db-map';
 
 const router = Router();
@@ -17,7 +18,10 @@ router.post('/player-sync', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await syncPlayerStickersToDb(body.steamId, body.entries);
+    const result = await syncPlayerStickersToDb(body.steamId, body.entries, {
+      replacePlayerState: true,
+    });
+    const rconReload = await refreshPlayerStickersInGame(result.steamId);
     return res.json({
       ok: true,
       mode: 'db',
@@ -30,6 +34,7 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       legacyTable: result.legacyTable,
       clutchRows: result.clutchRows,
       legacyRows: result.legacyRows,
+      rconReload,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'sticker sync failed';
