@@ -24,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.36"
+#define PLUGIN_VERSION "3.8.37"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_REAPPLY_PASS_COUNT 2
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -2239,12 +2239,7 @@ void ClutchSyncLegacyStickerTableForClient(int client) {
         Format(
             query,
             sizeof(query),
-            "INSERT INTO %s (steamid, weaponindex, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5, last_seen) "
-            "VALUES ('%s', %d, %d, %d, %d, %d, %d, %d, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %d) "
-            "ON CONFLICT(steamid, weaponindex) DO UPDATE SET "
-            "slot0=excluded.slot0, slot1=excluded.slot1, slot2=excluded.slot2, slot3=excluded.slot3, slot4=excluded.slot4, slot5=excluded.slot5, "
-            "wear0=excluded.wear0, wear1=excluded.wear1, wear2=excluded.wear2, wear3=excluded.wear3, wear4=excluded.wear4, wear5=excluded.wear5, "
-            "last_seen=excluded.last_seen",
+            "INSERT INTO %s (steamid, weaponindex, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5, last_seen) VALUES ('%s', %d, %d, %d, %d, %d, %d, %d, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %d) ON CONFLICT(steamid, weaponindex) DO UPDATE SET slot0=excluded.slot0, slot1=excluded.slot1, slot2=excluded.slot2, slot3=excluded.slot3, slot4=excluded.slot4, slot5=excluded.slot5, wear0=excluded.wear0, wear1=excluded.wear1, wear2=excluded.wear2, wear3=excluded.wear3, wear4=excluded.wear4, wear5=excluded.wear5, last_seen=excluded.last_seen",
             g_sLegacyStickersTable,
             escaped,
             defIndex,
