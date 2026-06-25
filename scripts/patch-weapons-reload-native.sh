@@ -87,6 +87,67 @@ patch_weapons_admin_only_cmds() {
 
 patch_weapons_admin_only_cmds
 
+patch_weapons_player_guard() {
+  if grep -q 'CLUTCH_WS_PLAYER_GUARD' "${WEAPONS_SP}"; then
+    echo "weapons.sp already has Clutch player guard on !ws handlers"
+    return 0
+  fi
+
+  echo "Patching weapons.sp — block !ws menu for non-admins inside command handlers..."
+  awk '
+    BEGIN { guard_ws = 0; guard_knife = 0; guard_seed = 0; guard_tag = 0; guard_lang = 0 }
+    /^public Action CommandWeaponSkins/ {
+      print
+      print "\t// CLUTCH_WS_PLAYER_GUARD"
+      print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
+      print "\t\treturn Plugin_Handled;"
+      print "\t}"
+      guard_ws = 1
+      next
+    }
+    /^public Action CommandKnife/ {
+      print
+      print "\t// CLUTCH_WS_PLAYER_GUARD"
+      print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
+      print "\t\treturn Plugin_Handled;"
+      print "\t}"
+      guard_knife = 1
+      next
+    }
+    /^public Action CommandSeedMenu/ {
+      print
+      print "\t// CLUTCH_WS_PLAYER_GUARD"
+      print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
+      print "\t\treturn Plugin_Handled;"
+      print "\t}"
+      guard_seed = 1
+      next
+    }
+    /^public Action CommandNameTag/ {
+      print
+      print "\t// CLUTCH_WS_PLAYER_GUARD"
+      print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
+      print "\t\treturn Plugin_Handled;"
+      print "\t}"
+      guard_tag = 1
+      next
+    }
+    /^public Action CommandWSLang/ {
+      print
+      print "\t// CLUTCH_WS_PLAYER_GUARD"
+      print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
+      print "\t\treturn Plugin_Handled;"
+      print "\t}"
+      guard_lang = 1
+      next
+    }
+    { print }
+  ' "${WEAPONS_SP}" > "${WEAPONS_SP}.patched"
+  mv -f "${WEAPONS_SP}.patched" "${WEAPONS_SP}"
+}
+
+patch_weapons_player_guard
+
 if ! grep -q 'CreateNative("Weapons_ReloadClientData"' "${WEAPONS_SP}"; then
   echo "Patching weapons.sp AskPluginLoad2 (ReloadClientData + RefreshWeapon natives)..."
   awk '

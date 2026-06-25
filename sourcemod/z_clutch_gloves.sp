@@ -7,7 +7,7 @@
 #include <sdkhooks>
 #include <clutch_steam>
 
-#define PLUGIN_VERSION "1.4.3"
+#define PLUGIN_VERSION "1.4.4"
 #define GLOVE_THINK_TICK_MOD 8
 
 ConVar g_cvDb;
@@ -27,6 +27,7 @@ int g_iPaint[MAXPLAYERS + 1][4];
 float g_fWear[MAXPLAYERS + 1][4];
 bool g_bThinkHooked[MAXPLAYERS + 1];
 bool g_bMatchGlovesApplied[MAXPLAYERS + 1];
+bool g_bRefreshInFlight[MAXPLAYERS + 1];
 
 public Plugin myinfo = {
     name = "Clutch Gloves",
@@ -131,6 +132,7 @@ public void OnConfigsExecuted() {
 public void OnClientDisconnect(int client) {
     DisableGloveThink(client);
     g_bMatchGlovesApplied[client] = false;
+    g_bRefreshInFlight[client] = false;
     for (int team = 0; team < 4; team++) {
         g_iGroup[client][team] = 0;
         g_iPaint[client][team] = 0;
@@ -146,10 +148,7 @@ public void OnClientPostAdminCheck(int client) {
 }
 
 public void OnClientAuthorized(int client, const char[] authString) {
-    if (IsFakeClient(client)) {
-        return;
-    }
-    RefreshClientFromDatabase(client, 0);
+    // PostAdminCheck handles first DB read — avoid duplicate queries on connect.
 }
 
 void ConnectDatabase() {
@@ -313,10 +312,16 @@ void RefreshClientFromDatabase(int client, int altAttempt) {
         return;
     }
 
+    if (g_bRefreshInFlight[client]) {
+        return;
+    }
+
     char steamId[32];
     if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
         return;
     }
+
+    g_bRefreshInFlight[client] = true;
 
     char escaped[64];
     g_hDb.Escape(steamId, escaped, sizeof(escaped));
@@ -350,6 +355,8 @@ public void OnQueryGloves(Database database, DBResultSet results, const char[] e
         return;
     }
 
+    g_bRefreshInFlight[client] = false;
+
     if (results == null) {
         LogError("[ClutchGloves] query failed: %s", error);
         return;
@@ -380,7 +387,7 @@ public void OnQueryGloves(Database database, DBResultSet results, const char[] e
     }
     if (IsPlayerAlive(client) && !g_bMatchGlovesApplied[client]) {
         GivePlayerGloves(client);
-    } else if (!IsPlayerAlive(client)) {
+    } else if (!IsPlayerAlive(client) && g_cvDebug.BoolValue) {
         LogMessage("[ClutchGloves] Cache updated for %N — visual apply on next spawn", client);
     }
 }
