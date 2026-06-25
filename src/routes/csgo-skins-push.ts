@@ -87,7 +87,7 @@ router.post('/player-sync', async (req: Request, res: Response) => {
     return res.json({
       ok: true,
       mode: 'db',
-      applyMode: resolveWebLoadoutApplyMode(applyResult),
+      applyMode: await resolveWebLoadoutApplyMode(applyResult),
       playerInGame: applyResult.playerInGame,
       steamId: result.steamId,
       steamIds: result.steamIds,

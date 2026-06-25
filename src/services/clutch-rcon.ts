@@ -138,6 +138,8 @@ export async function stageClutchLoadoutInGame(steamId?: string): Promise<boolea
   return ok;
 }
 
+export type WebLoadoutApplyMode = 'immediate' | 'staged' | 'deferred_join' | 'db_only';
+
 export type WebLoadoutApplyResult = {
   commandSent: boolean;
   playerInGame: boolean;
@@ -180,26 +182,60 @@ async function isPlayerInGameServer(steamId: string): Promise<boolean> {
   }
 }
 
-export function resolveWebLoadoutApplyMode(result: WebLoadoutApplyResult): 'immediate' | 'deferred_join' | 'db_only' {
+async function getServerWarmupState(): Promise<'warmup' | 'live' | 'unknown'> {
+  const target = resolveRconTarget();
+  if (!target) {
+    return 'unknown';
+  }
+
+  try {
+    const out = await rconService.sendCommand(
+      target.host,
+      target.port,
+      target.password,
+      'mp_warmup_period',
+    );
+    if (/mp_warmup_period\s*=\s*1/i.test(out)) {
+      return 'warmup';
+    }
+    if (/mp_warmup_period\s*=\s*0/i.test(out)) {
+      return 'live';
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[clutch-rcon] mp_warmup_period check failed:', message);
+  }
+
+  return 'unknown';
+}
+
+export async function resolveWebLoadoutApplyMode(
+  result: WebLoadoutApplyResult,
+): Promise<WebLoadoutApplyMode> {
   if (!result.commandSent) {
     return 'db_only';
   }
-  if (result.playerInGame) {
+  if (!result.playerInGame) {
+    return 'deferred_join';
+  }
+
+  const warmup = await getServerWarmupState();
+  if (warmup === 'warmup') {
     return 'immediate';
   }
-  return 'deferred_join';
+  return 'staged';
 }
 
-/** Site equip / push-loadout — apply skins+gloves+stickers immediately (even mid-match). */
+/** Site equip / push-loadout — stage or apply via loadout_pending (no mid-match apply for players). */
 export async function applyWebLoadoutInGame(steamId?: string): Promise<WebLoadoutApplyResult> {
   const trimmed = steamId?.trim();
   const playerInGame = trimmed ? await isPlayerInGameServer(trimmed) : false;
   const command = trimmed
-    ? `sm_clutch_web_sync "${trimmed}"`
-    : 'sm_clutch_web_sync';
+    ? `sm_clutch_loadout_pending "${trimmed}"`
+    : 'sm_clutch_loadout_pending';
   const commandSent = await sendRconOrScreen(command);
   if (!commandSent) {
-    console.warn('[clutch-rcon] web sync skipped (no RCON/screen)');
+    console.warn('[clutch-rcon] loadout stage skipped (no RCON/screen)');
   }
   return { commandSent, playerInGame };
 }
