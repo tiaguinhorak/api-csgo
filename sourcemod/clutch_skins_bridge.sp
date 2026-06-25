@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.52"
+#define PLUGIN_VERSION "3.8.53"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -96,6 +96,8 @@ bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
 bool g_bConnectApplyScheduled[MAXPLAYERS + 1];
 bool g_bInitialSyncPending[MAXPLAYERS + 1];
 int g_iForcedSyncWeaponGen[MAXPLAYERS + 1];
+float g_fLastWsBlockMsg[MAXPLAYERS + 1];
+bool g_bWarmupEndVisualsDone = false;
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
 float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
 bool g_bStickerDbSynced[MAXPLAYERS + 1];
@@ -903,6 +905,29 @@ void ClutchRegisterWsCommandBlocks() {
     }
 }
 
+void ClutchPrintInventoryOnlyMessage(int client) {
+    float now = GetGameTime();
+    if ((now - g_fLastWsBlockMsg[client]) < 0.35) {
+        return;
+    }
+    g_fLastWsBlockMsg[client] = now;
+    PrintToChat(
+        client,
+        " \x04ClutchClube\x01: Equipe skins, luvas e stickers no \x04site\x01 ( invent\xe1rio )."
+    );
+}
+
+void ClutchApplyCachedLoadoutVisuals(int client) {
+    if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
+        return;
+    }
+
+#if defined _clutch_gloves_included_
+    ClutchGlovesApplyClientSafe(client);
+#endif
+    ApplyAllCachedWeaponsToClient(client, true, false);
+}
+
 public Action ClutchBlockWsConsoleForPlayers(int client, const char[] command, int argc) {
     if (client <= 0 || IsFakeClient(client)) {
         return Plugin_Continue;
@@ -912,7 +937,7 @@ public Action ClutchBlockWsConsoleForPlayers(int client, const char[] command, i
         return Plugin_Continue;
     }
 
-    PrintToChat(client, " [Clutch] Equipe skins pelo inventario no site.");
+    ClutchPrintInventoryOnlyMessage(client);
     return Plugin_Handled;
 }
 
@@ -1341,7 +1366,6 @@ public Action ClutchBlockWsChatForPlayers(int client, const char[] command, int 
         return Plugin_Continue;
     }
 
-    PrintToChat(client, " [Clutch] Equipe skins pelo inventario no site.");
     return Plugin_Handled;
 }
 
@@ -1375,7 +1399,11 @@ void ClutchBeginForcedSync(int client) {
 #if defined _clutch_gloves_included_
     g_iForcedSyncWeaponGen[client]++;
     int gen = g_iForcedSyncWeaponGen[client];
-    ClutchGlovesRefreshClientSafe(client);
+    if (ClutchGlovesIsClientUsingSafe(client)) {
+        ClutchGlovesApplyClientSafe(client);
+    } else {
+        ClutchGlovesRefreshClientSafe(client);
+    }
 
     DataPack fallback = new DataPack();
     fallback.WriteCell(GetClientUserId(client));
@@ -1452,6 +1480,7 @@ public void OnClientDisconnect(int client) {
     g_bConnectApplyScheduled[client] = false;
     g_bInitialSyncPending[client] = false;
     g_iForcedSyncWeaponGen[client] = 0;
+    g_fLastWsBlockMsg[client] = 0.0;
     g_iReapplyGen[client] = 0;
     g_CachedKnifeClass[client][0] = '\0';
     ClutchDisableGloveThink(client);
@@ -1551,6 +1580,10 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
             DataPack pack = new DataPack();
             pack.WriteCell(GetClientUserId(client));
             CreateTimer(0.4, Timer_AdminRespawnApply, pack, TIMER_FLAG_NO_MAPCHANGE);
+        } else {
+            DataPack pack = new DataPack();
+            pack.WriteCell(GetClientUserId(client));
+            CreateTimer(0.45, Timer_RespawnCachedVisuals, pack, TIMER_FLAG_NO_MAPCHANGE);
         }
         return;
     }
@@ -1570,6 +1603,18 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     ClutchScheduleConnectLoadout(client);
 }
 
+public Action Timer_RespawnCachedVisuals(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        ClutchApplyCachedLoadoutVisuals(client);
+    }
+    return Plugin_Stop;
+}
+
 public Action Timer_AdminRespawnApply(Handle timer, DataPack pack) {
     pack.Reset();
     int userid = pack.ReadCell();
@@ -1583,11 +1628,40 @@ public Action Timer_AdminRespawnApply(Handle timer, DataPack pack) {
 }
 
 public void OnMapStart() {
+    g_bWarmupEndVisualsDone = false;
     ClutchResetMatchLoadoutFlags();
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
+    if (GameRules_GetProp("m_bWarmupPeriod", view_as<int>(Prop_Send))) {
+        return;
+    }
+
+    if (g_cvOncePerMatch.BoolValue) {
+        if (!g_bWarmupEndVisualsDone) {
+            g_bWarmupEndVisualsDone = true;
+            CreateTimer(1.5, Timer_WarmupEndCachedVisuals, _, TIMER_FLAG_NO_MAPCHANGE);
+        }
+        return;
+    }
+
     CreateTimer(3.0, Timer_RoundStartApply, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_WarmupEndCachedVisuals(Handle timer) {
+    for (int client = 1; client <= MaxClients; client++) {
+        if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
+            continue;
+        }
+        if (!g_bMatchLoadoutSynced[client]) {
+            continue;
+        }
+        if (ClutchClientIsSkinAdmin(client)) {
+            continue;
+        }
+        ClutchApplyCachedLoadoutVisuals(client);
+    }
+    return Plugin_Stop;
 }
 
 public Action Timer_RoundStartApply(Handle timer) {

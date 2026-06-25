@@ -7,7 +7,7 @@
 #include <sdkhooks>
 #include <clutch_steam>
 
-#define PLUGIN_VERSION "1.4.4"
+#define PLUGIN_VERSION "1.4.5"
 #define GLOVE_THINK_TICK_MOD 8
 
 ConVar g_cvDb;
@@ -90,6 +90,7 @@ public void OnPluginStart() {
     AutoExecConfig(true, "clutch_gloves");
 
     HookEvent("player_spawn", Event_PlayerSpawn, EventHookMode_Pre);
+    HookEvent("player_death", Event_PlayerDeath, EventHookMode_Post);
     HookEvent("cs_win_panel_match", Event_MatchOver, EventHookMode_Post);
     RegAdminCmd("sm_clutch_gloves_refresh", Command_Refresh, ADMFLAG_ROOT, "Re-read gloves DB into cache (visual apply on spawn)");
     RegAdminCmd("sm_clutch_gloves_apply", Command_Apply, ADMFLAG_ROOT, "Apply gloves from cache (no DB)");
@@ -144,6 +145,9 @@ public void OnClientPostAdminCheck(int client) {
     if (IsFakeClient(client)) {
         return;
     }
+    if (g_iPaint[client][CS_TEAM_T] > 0 || g_iPaint[client][CS_TEAM_CT] > 0) {
+        return;
+    }
     RefreshClientFromDatabase(client, 0);
 }
 
@@ -196,12 +200,17 @@ public void OnEnsureTable(Database database, DBResultSet results, const char[] e
     }
 }
 
-public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
+public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
     int client = GetClientOfUserId(event.GetInt("userid"));
     if (client <= 0 || IsFakeClient(client)) {
         return;
     }
-    if (g_bMatchGlovesApplied[client]) {
+    g_bMatchGlovesApplied[client] = false;
+}
+
+public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client <= 0 || IsFakeClient(client)) {
         return;
     }
 
