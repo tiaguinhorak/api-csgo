@@ -16,4 +16,6 @@ sm_weaponstickers_inactive_days "0"
 EOF
 
 echo "Written ${CFG}"
-echo "In server console: exec sourcemod/csgo_weaponstickers.cfg"
+echo "Reload in-game via screen (not bash):"
+echo "  cd ~/api-csgo && bash scripts/reload-clutch-skins-ingame.sh"
+echo "Or attach screen and run: exec sourcemod/csgo_weaponstickers.cfg"
