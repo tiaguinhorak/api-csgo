@@ -100,3 +100,14 @@ clutch_resolve_site_ip() {
 clutch_effective_resolve_ip() {
   echo "${CLUTCH_SITE_RESOLVE_IP:-${RESOLVED_SITE_IP:-}}"
 }
+
+# Warmup/hub VPS may pull from LAN dev site; ranked VPS must never auto-switch to LAN.
+clutch_is_warmup_pool() {
+  [[ "${WARMUP_VPS:-0}" == "1" || "${CSGO_SERVER_POOL:-}" == "warmup" ]]
+}
+
+clutch_is_ranked_pool() {
+  [[ "${CSGO_SERVER_POOL:-}" == "ranked" ]] \
+    || [[ "${SERVER_PROFILE:-}" == "ranked" ]] \
+    || [[ "${CLUTCH_CS_SCREEN:-}" == *"clutch"* ]]
+}

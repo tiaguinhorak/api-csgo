@@ -9,6 +9,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# shellcheck source=lib/parse-site-url.sh
+source "${REPO_ROOT}/scripts/lib/parse-site-url.sh"
+
 if [[ -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -61,9 +64,8 @@ if [[ -z "${FULL_SCREEN}" ]]; then
   exit 1
 fi
 
-# Warmup: always re-sync DB from the site before reload so kgns weapons/gloves
-# tables hold the latest loadout (otherwise kgns serves stale/vanilla items).
-if [[ "${WARMUP_VPS:-0}" == "1" && -f "${REPO_ROOT}/scripts/sync-team-loadouts-warmup.sh" ]]; then
+# Warmup only: re-sync DB from site before reload.
+if clutch_is_warmup_pool && -f "${REPO_ROOT}/scripts/sync-team-loadouts-warmup.sh" ]]; then
   echo ">>> Warmup: syncing loadouts from site before reload..."
   bash "${REPO_ROOT}/scripts/sync-team-loadouts-warmup.sh" || \
     echo "WARN: sync-team-loadouts-warmup.sh failed — kgns table may be stale." >&2
@@ -107,14 +109,14 @@ send_cmd "sm plugins reload z_clutch_skins_bridge" 1.0
 send_cmd "sm plugins info z_clutch_skins_bridge" 0.5
 send_plugin "clutch_platform_gate"
 
-if [[ "${WARMUP_VPS:-0}" != "1" ]] && plugin_file_exists "clutch_match_tracker"; then
+if clutch_is_warmup_pool && plugin_file_exists "clutch_match_tracker"; then
   send_plugin "clutch_match_tracker"
 fi
 
 send_cmd "clutch_gloves_debug 1" 0.3
 send_cmd "clutch_skins_debug 1" 0.3
 
-if [[ "${WARMUP_VPS:-0}" == "1" ]]; then
+if clutch_is_warmup_pool; then
   echo "Warmup: applying skins after plugin reload..."
   send_cmd "sm_clutch_gloves_refresh" 1.0
   send_cmd "sm_clutch_gloves_apply" 0.8
@@ -123,7 +125,7 @@ fi
 
 echo ""
 echo "Plugins reloaded. Connect in-game FIRST (Steam auth must be ready, not auth-pending)."
-if [[ "${WARMUP_VPS:-0}" != "1" ]]; then
+if ! clutch_is_warmup_pool; then
   echo "Then in server console:"
   echo "  sm_clutch_gloves_refresh"
   echo "  sm_clutch_applyskins"

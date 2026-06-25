@@ -95,7 +95,7 @@ fetch_loadouts_from_url() {
 
 if ! fetch_loadouts_from_url "${SITE_URL}" "primary ${SITE_URL}"; then
   FALLBACK_URL="${CLUTCH_SITE_FALLBACK_URL:-${CLUTCH_SITE_LAN_URL:-}}"
-  if [[ -n "${FALLBACK_URL}" ]]; then
+  if clutch_is_warmup_pool && [[ -n "${FALLBACK_URL}" ]]; then
     echo ""
     echo ">>> Retrying with CLUTCH_SITE_FALLBACK_URL=${FALLBACK_URL}"
     if fetch_loadouts_from_url "${FALLBACK_URL}" "fallback ${FALLBACK_URL}"; then
@@ -104,10 +104,14 @@ if ! fetch_loadouts_from_url "${SITE_URL}" "primary ${SITE_URL}"; then
   fi
 
   echo "" >&2
+  if clutch_is_ranked_pool || ! clutch_is_warmup_pool; then
+    echo "Ranked VPS cannot reach LAN dev site. Until clutchclube.com.br is live:" >&2
+    echo "  On dev PC: bash scripts/push-stickers-dev-to-vps.sh" >&2
+    echo "  Fix .env:  bash scripts/fix-ranked-site-url.sh && npm run pm2:restart" >&2
+  fi
   echo "DNS/sync fixes:" >&2
   echo "  1) Install dig: sudo apt install dnsutils" >&2
   echo "  2) Add to .env: CLUTCH_SITE_RESOLVE_IP=<site A record IP>" >&2
-  echo "  3) Or LAN dev site: CLUTCH_SITE_FALLBACK_URL=http://192.168.100.6:3000" >&2
-  echo "  4) Or point primary: CLUTCH_SITE_URL=http://192.168.100.6:3000" >&2
+  echo "  3) Warmup only: CLUTCH_SITE_FALLBACK_URL=http://192.168.100.6:3000" >&2
   exit 1
 fi
