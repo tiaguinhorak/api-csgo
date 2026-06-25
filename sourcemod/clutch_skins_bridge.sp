@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.31"
+#define PLUGIN_VERSION "3.8.32"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_REAPPLY_PASS_COUNT 1
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -93,6 +93,7 @@ bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
 float g_fStickerReapplyDelays[STICKER_REAPPLY_PASS_COUNT] = {0.15};
 float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
+bool g_bStickerDbSynced[MAXPLAYERS + 1];
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -320,6 +321,22 @@ public void OnConfigsExecuted() {
     UpdateRefreshTimer();
 
     ConnectStickersDatabase();
+    CreateTimer(1.5, Timer_ResyncOnlinePlayerStickers, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ResyncOnlinePlayerStickers(Handle timer) {
+    for (int client = 1; client <= MaxClients; client++) {
+        if (!IsClientInGame(client) || IsFakeClient(client)) {
+            continue;
+        }
+        char steamId[32];
+        if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
+            continue;
+        }
+        g_bStickerDbSynced[client] = false;
+        QueryPlayerStickers(client, steamId, 0);
+    }
+    return Plugin_Stop;
 }
 
 void UpdateRefreshTimer() {
@@ -883,6 +900,9 @@ bool ClutchIsLiveMatch() {
 int FindClientBySteam2(const char[] steam) {
     char clientSteam[32];
     char alt[32];
+    char lookup[32];
+    strcopy(lookup, sizeof(lookup), steam);
+    TrimString(lookup);
 
     for (int i = 1; i <= MaxClients; i++) {
         if (!IsClientInGame(i) || IsFakeClient(i)) {
@@ -891,11 +911,11 @@ int FindClientBySteam2(const char[] steam) {
         if (!ClutchGetClientSteam2(i, clientSteam, sizeof(clientSteam))) {
             continue;
         }
-        if (StrEqual(clientSteam, steam, false)) {
+        if (StrEqual(clientSteam, lookup, false)) {
             return i;
         }
 
-        strcopy(alt, sizeof(alt), steam);
+        strcopy(alt, sizeof(alt), lookup);
         if (alt[6] == '0') {
             alt[6] = '1';
         } else if (alt[6] == '1') {
@@ -907,6 +927,27 @@ int FindClientBySteam2(const char[] steam) {
     }
 
     return 0;
+}
+
+/**
+ * CS server console splits STEAM_0:0:123 into three args — join into full Steam2.
+ */
+void ClutchReadSteamIdFromCmdArgs(int args, char[] out, int maxlen) {
+    if (args <= 0) {
+        out[0] = '\0';
+        return;
+    }
+
+    GetCmdArg(1, out, maxlen);
+    TrimString(out);
+
+    if (args >= 2) {
+        char piece[16];
+        for (int i = 2; i <= args; i++) {
+            GetCmdArg(i, piece, sizeof(piece));
+            Format(out, maxlen, "%s:%s", out, piece);
+        }
+    }
 }
 
 void ClutchStageWebLoadout(int client) {
@@ -931,8 +972,7 @@ void ClutchStageWebLoadout(int client) {
 public Action Command_LoadoutPending(int args) {
     if (args >= 1) {
         char steam[32];
-        GetCmdArg(1, steam, sizeof(steam));
-        TrimString(steam);
+        ClutchReadSteamIdFromCmdArgs(args, steam, sizeof(steam));
 
         int client = FindClientBySteam2(steam);
         if (client > 0) {
@@ -953,8 +993,7 @@ public Action Command_LoadoutPending(int args) {
 public Action Command_RefreshStickers(int args) {
     if (args >= 1) {
         char steam[32];
-        GetCmdArg(1, steam, sizeof(steam));
-        TrimString(steam);
+        ClutchReadSteamIdFromCmdArgs(args, steam, sizeof(steam));
 
         int client = FindClientBySteam2(steam);
         if (client > 0) {
@@ -1133,6 +1172,7 @@ public void OnClientDisconnect(int client) {
         g_CachedTag[client][i][0] = '\0';
     }
     ClutchClearStickerCache(client);
+    g_bStickerDbSynced[client] = false;
 }
 
 public void OnClientPutInServer(int client) {
@@ -2038,6 +2078,7 @@ int ClutchStickerTeamSlot(int team) {
 }
 
 void ClutchClearStickerCache(int client) {
+    g_bStickerDbSynced[client] = false;
     for (int t = 0; t < 2; t++) {
         for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
             for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
@@ -2267,6 +2308,11 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
     bool hasApplied = ClutchEntityHasAppliedStickers(entity, applyMax);
 
     if (!hasCached && !hasApplied) {
+        return false;
+    }
+
+    // DB not loaded yet (plugin reload) — do not wipe stickers still on the weapon.
+    if (!hasCached && hasApplied && !g_bStickerDbSynced[client]) {
         return false;
     }
 
@@ -3351,9 +3397,11 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         );
         ClutchClearStickerCache(client);
         ClutchReapplyStickersOnPlayerWeapons(client);
+        g_bStickerDbSynced[client] = true;
         return;
     }
 
+    g_bStickerDbSynced[client] = true;
     ClutchReapplyStickersOnPlayerWeapons(client);
 }
 

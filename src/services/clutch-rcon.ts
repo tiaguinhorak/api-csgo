@@ -129,7 +129,7 @@ export async function reloadWeaponsPluginInGame(): Promise<boolean> {
 export async function stageClutchLoadoutInGame(steamId?: string): Promise<boolean> {
   const trimmed = steamId?.trim();
   const command = trimmed
-    ? `sm_clutch_loadout_pending ${trimmed}`
+    ? `sm_clutch_loadout_pending "${trimmed}"`
     : 'sm_clutch_loadout_pending';
   const ok = await sendRconOrScreen(command);
   if (!ok) {
@@ -172,7 +172,7 @@ export async function reloadClutchSkinsInGame(): Promise<boolean> {
 export async function refreshPlayerStickersInGame(steamId?: string): Promise<boolean> {
   const trimmed = steamId?.trim();
   const command = trimmed
-    ? `sm_clutch_refresh_stickers ${trimmed}`
+    ? `sm_clutch_refresh_stickers "${trimmed}"`
     : 'sm_clutch_refresh_stickers';
   const ok = await sendRconOrScreen(command);
   if (!ok) {
