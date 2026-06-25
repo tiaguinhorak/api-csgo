@@ -484,9 +484,9 @@ export function buildPlayerLoadoutSql(
 
     if (!w.paintkit || w.paintkit <= 0) continue;
 
-    // Guns: clutch_team_loadout only. Writing kgns gun columns makes weapons.smx give items on reload.
-    if (!isMeleeWeaponId(w.weaponId)) continue;
-
+    // Write paint for every equipped weapon to the kgns row so weapons.smx re-skins
+    // (not vanilla-overwrites) the live weapon. kgns does NOT give rifles, so this does
+    // not auto-buy — the bridge's ClutchGiveCachedWeapon (the real auto-give) is removed.
     const column = weaponIdToDbColumn(w.weaponId);
 
     if (!column) continue;

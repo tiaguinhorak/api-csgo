@@ -23,7 +23,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.27"
+#define PLUGIN_VERSION "3.8.28"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_REAPPLY_PASS_COUNT 1
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -2169,20 +2169,47 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx) {
     ClutchEnsureEconItemInitialized(client, entity);
 
     int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
-    bool updated = false;
+    bool hasCache = false;
 
     for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
         if (g_iStickerSlots[client][teamSlot][idx][s] != 0) {
-            updated = true;
+            hasCache = true;
             break;
         }
     }
 
-    if (updated) {
-        ClutchApplyStickerAttrsToEntity(client, entity, idx, teamSlot);
+    if (!hasCache) {
+        return false;
     }
 
-    return updated;
+    // Skip re-apply (and ForceFullUpdate) when the weapon already shows the cached
+    // stickers — avoids the apply storm that makes stickers flicker / disappear.
+    if (ClutchEntityStickersMatchCache(client, entity, idx, teamSlot)) {
+        return false;
+    }
+
+    ClutchApplyStickerAttrsToEntity(client, entity, idx, teamSlot);
+    return true;
+}
+
+bool ClutchEntityStickersMatchCache(int client, int entity, int idx, int teamSlot) {
+    CEconItemView view = PTaH_GetEconItemViewFromEconEntity(entity);
+    if (view == view_as<CEconItemView>(0)) {
+        return false;
+    }
+
+    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
+    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+
+    for (int s = 0; s < applyMax; s++) {
+        int cached = g_iStickerSlots[client][teamSlot][idx][s];
+        int applied = view.GetStickerAttributeBySlotIndex(s, EStickerAttribute_ID, 0);
+        if (cached != applied) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 void ClutchMirrorStickersToViewModels(int client, int weapon, int idx) {
@@ -2651,7 +2678,7 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
     pack.Reset();
     int userid = pack.ReadCell();
     bool force = pack.ReadCell() == 1;
-    pack.ReadCell();
+    bool skipWeaponsReload = pack.ReadCell() == 1;
     delete pack;
 
     int client = GetClientOfUserId(userid);
@@ -2660,7 +2687,14 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
     }
 
     bool allowRegive = g_bAllowWeaponRegive[client];
-    // Never ReloadClientData here — weapons.smx gives guns from kgns columns (auto-buy).
+#if defined _weapons_included_
+    // ReloadClientData only refreshes kgns in-memory skin data from the DB (GetPlayerData);
+    // it does NOT give weapons. Needed so kgns re-skins with fresh data instead of stale skins.
+    if (!skipWeaponsReload) {
+        RefreshWeaponsReloadNativeFlag();
+        TryReloadWeaponsPluginData(client);
+    }
+#endif
     ApplyAllCachedWeaponsToClient(client, force, allowRegive);
     ScheduleForceReapply(client, force, allowRegive);
     return Plugin_Stop;
@@ -2992,6 +3026,12 @@ bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
 
     if (knifePaintkit > 0 && knifeClass[0] != '\0') {
         strcopy(g_CachedKnifeClass[client], CLUTCH_KNIFE_CLASS_LEN, knifeClass);
+#if defined _weapons_included_
+        if (force) {
+            RefreshWeaponsReloadNativeFlag();
+            TryReloadWeaponsPluginData(client);
+        }
+#endif
         ClutchSetClientKnife(client, knifeClass);
 
         int knifeWeapon = FindPlayerWeapon(client, knifeClass);
