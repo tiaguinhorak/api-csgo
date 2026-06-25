@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.54"
+#define PLUGIN_VERSION "3.8.55"
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -2440,8 +2440,7 @@ void ClutchWriteStickerCacheToEntity(int client, int entity, int idx, int teamSl
         return;
     }
 
-    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
-    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+    int slotCount = ClutchSiteStickerSlotCount(idx);
 
     CAttributeList demoAttrs = itemView.NetworkedDynamicAttributesForDemos;
     CAttributeList staticAttrs = itemView.AttributeList;
@@ -2451,7 +2450,7 @@ void ClutchWriteStickerCacheToEntity(int client, int entity, int idx, int teamSl
         ClutchClearStickerSlotAttributes(staticAttrs, s);
     }
 
-    for (int s = 0; s < applyMax; s++) {
+    for (int s = 0; s < slotCount; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
         if (stickerId <= 0) {
             continue;
@@ -2504,16 +2503,13 @@ public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
     }
 
     ClutchEnsureEconItemInitialized(client, weapon);
-    ClutchApplyStickersToEntity(client, weapon, idx, true);
+    ClutchApplyStickersToEntity(client, weapon, idx, false);
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 #if defined _csgo_weaponstickers_included_
     if (ClutchWeaponStickersNativeReady()) {
-        ClutchApplyStickersViaNative(client, weapon, idx, true);
+        ClutchApplyStickersViaNative(client, weapon, idx, false);
     }
 #endif
-    g_fLastStickerForceUpdate[client] = 0.0;
-    ClutchMaybeForceStickerFullUpdate(client, true);
-    ClutchBridgeUpdateClientModel(client);
     return Plugin_Stop;
 }
 
@@ -2729,11 +2725,10 @@ bool ClutchApplyStickersViaNative(int client, int weapon, int idx, bool force = 
     ClutchSyncLegacyStickerTableForClient(client);
     ClutchEnsureEconItemInitialized(client, weapon);
 
-    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
-    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+    int slotCount = ClutchSiteStickerSlotCount(idx);
     bool any = false;
 
-    for (int s = 0; s < applyMax; s++) {
+    for (int s = 0; s < slotCount; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
         float wear = g_fStickerWears[client][teamSlot][idx][s];
         if (stickerId <= 0) {
@@ -2749,7 +2744,7 @@ bool ClutchApplyStickersViaNative(int client, int weapon, int idx, bool force = 
     if (any && g_cvDebug.BoolValue) {
         char classname[64];
         GetEntityClassname(weapon, classname, sizeof(classname));
-        LogMessage("[Clutch] SDK stickers on %s (idx %d, slots %d) for %N", classname, idx, applyMax, client);
+        LogMessage("[Clutch] SDK stickers on %s (idx %d, slots %d) for %N", classname, idx, slotCount, client);
     }
 
     return any;
@@ -2846,9 +2841,8 @@ bool ClutchWeaponNeedsStickerSync(int client, int entity, int idx) {
             return false;
         }
 
-        int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
-        int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
-        return ClutchEntityHasAppliedStickers(entity, applyMax);
+        int slotCount = ClutchSiteStickerSlotCount(idx);
+        return ClutchEntityHasAppliedStickers(entity, slotCount);
     }
 
     if (entity <= 0 || !IsValidEntity(entity)) {
@@ -2888,49 +2882,15 @@ bool ClutchEnsureEconItemInitialized(int client, int entity) {
     return true;
 }
 
-int ClutchSupportedStickerSlotsForIndex(int idx) {
-    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS) {
-        return CLUTCH_SITE_STICKER_SLOTS;
-    }
-
-    if (IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+int ClutchSiteStickerSlotCount(int idx) {
+    if (idx < 0 || idx >= CLUTCH_WEAPON_SLOTS || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
         return 0;
     }
+    return CLUTCH_SITE_STICKER_SLOTS;
+}
 
-    int defIndex = g_ClutchWeaponDefIndex[idx];
-    if (defIndex <= 0) {
-        return CLUTCH_SITE_STICKER_SLOTS;
-    }
-
-    CEconItemDefinition itemDef = PTaH_GetItemDefinitionByDefIndex(defIndex);
-    if (itemDef == view_as<CEconItemDefinition>(0)) {
-        return CLUTCH_SITE_STICKER_SLOTS;
-    }
-
-    int supported = itemDef.GetNumSupportedStickerSlots();
-    if (supported <= 0) {
-        return CLUTCH_SITE_STICKER_SLOTS;
-    }
-
-    // CS:GO Legacy rifles/pistols/snipers support 4 sticker slots; PTaH often reports 3.
-    if (supported < CLUTCH_SITE_STICKER_SLOTS) {
-        if (g_cvDebug.BoolValue) {
-            LogMessage(
-                "[Clutch] PTaH reports %d sticker slots for %s (def %d) — using %d (CS:GO standard)",
-                supported,
-                g_ClutchWeaponKeys[idx],
-                defIndex,
-                CLUTCH_SITE_STICKER_SLOTS
-            );
-        }
-        return CLUTCH_SITE_STICKER_SLOTS;
-    }
-
-    if (supported > CLUTCH_STICKER_SLOTS) {
-        supported = CLUTCH_STICKER_SLOTS;
-    }
-
-    return supported;
+int ClutchSupportedStickerSlotsForIndex(int idx) {
+    return ClutchSiteStickerSlotCount(idx);
 }
 
 void ClutchWriteStickerSlotAttributes(CAttributeList attrList, int slot, int stickerId, float wear) {
@@ -2952,19 +2912,6 @@ void ClutchWriteStickerSlotAttributes(CAttributeList attrList, int slot, int sti
 }
 
 void ClutchApplyStickerAttrsToEntity(int client, int entity, int idx, int teamSlot) {
-    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
-    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
-
-    if (g_cvDebug.BoolValue && engineMax < CLUTCH_SITE_STICKER_SLOTS) {
-        LogMessage(
-            "[Clutch] engine reports %d sticker slots for %s — applying %d of %d site slots",
-            engineMax,
-            g_ClutchWeaponKeys[idx],
-            applyMax,
-            CLUTCH_SITE_STICKER_SLOTS
-        );
-    }
-
     ClutchWriteStickerCacheToEntity(client, entity, idx, teamSlot);
 }
 
@@ -2995,10 +2942,9 @@ bool ClutchApplyStickersToEntity(int client, int entity, int idx, bool force = f
     }
 
     int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
-    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
-    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+    int slotCount = ClutchSiteStickerSlotCount(idx);
     bool hasCached = ClutchWeaponHasStickerCache(client, idx);
-    bool hasApplied = ClutchEntityHasAppliedStickers(entity, applyMax);
+    bool hasApplied = ClutchEntityHasAppliedStickers(entity, slotCount);
 
     if (!hasCached && !hasApplied) {
         return false;
@@ -3043,10 +2989,9 @@ bool ClutchEntityStickersMatchCache(int client, int entity, int idx, int teamSlo
         return false;
     }
 
-    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
-    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+    int slotCount = ClutchSiteStickerSlotCount(idx);
 
-    for (int s = 0; s < applyMax; s++) {
+    for (int s = 0; s < slotCount; s++) {
         int cached = g_iStickerSlots[client][teamSlot][idx][s];
         int applied = ClutchReadStickerIdAtSlot(view, s);
         if (cached != applied) {
@@ -3071,18 +3016,26 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
         return;
     }
 
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    bool needsApply = force || !ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot);
+    if (!needsApply) {
+        return;
+    }
+
     bool updated = ClutchApplyStickersToEntity(client, weapon, idx, force);
-    if (!updated) {
+    bool nativeUpdated = false;
+
+#if defined _csgo_weaponstickers_included_
+    if (ClutchWeaponStickersNativeReady() && hasCache && needsApply) {
+        nativeUpdated = ClutchApplyStickersViaNative(client, weapon, idx, force || updated);
+    }
+#endif
+
+    if (!updated && !nativeUpdated) {
         return;
     }
 
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
-#if defined _csgo_weaponstickers_included_
-    if (ClutchWeaponStickersNativeReady() && hasCache) {
-        ClutchApplyStickersViaNative(client, weapon, idx, force);
-    }
-#endif
-
     ClutchMaybeForceStickerFullUpdate(client, false);
     ClutchScheduleViewModelStickerPasses(client, weapon, idx);
 
@@ -3130,9 +3083,8 @@ void ClutchReapplyStickersOnPlayerWeapons(int client, bool force = false) {
         }
 
         if (force) {
-            int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
-            int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
-            if (ClutchWeaponHasStickerCache(client, idx) || ClutchEntityHasAppliedStickers(weapon, applyMax)) {
+            int slotCount = ClutchSiteStickerSlotCount(idx);
+            if (ClutchWeaponHasStickerCache(client, idx) || ClutchEntityHasAppliedStickers(weapon, slotCount)) {
                 ClutchApplyStickersForWeapon(client, weapon, idx, true);
             }
         } else if (ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
