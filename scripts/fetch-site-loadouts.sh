@@ -32,7 +32,7 @@ SITE_URL="${SITE_URL%/}"
 parse_clutch_site_url "${SITE_URL}"
 URL="${SITE_URL}/api/csgo/skins/equipped-loadouts"
 
-CURL_OPTS=( -sS --connect-timeout 15 -m 60
+CURL_OPTS=( -sS --connect-timeout 15 -m 60 --http1.1
   -H "x-skins-sync-key: ${SYNC_KEY}"
   -H "Accept: application/json"
   -o "${OUT_FILE}"
@@ -48,7 +48,28 @@ elif [[ -n "${CLUTCH_SITE_RESOLVE_IP:-}" ]] && clutch_site_host_is_ip "${SITE_HO
 fi
 
 HTTP_CODE="$(curl "${CURL_OPTS[@]}" "${URL}" 2>/tmp/clutch-site-loadouts-curl.err || echo "000")"
+# curl prints the -w code on its own line; keep only the last token (handles "000\n000").
+HTTP_CODE="$(printf '%s' "${HTTP_CODE}" | tr -d '[:space:]' | tail -c 3)"
 echo "HTTP ${HTTP_CODE} → ${OUT_FILE}"
+
+# Accept a valid payload even when curl reports a transfer-level failure (e.g. the
+# server resets the connection right after sending the body → http_code 000).
+body_is_valid_loadout() {
+  [[ -s "${OUT_FILE}" ]] || return 1
+  if command -v jq >/dev/null 2>&1; then
+    jq -e '.ok == true and (.loadouts | type == "array")' "${OUT_FILE}" >/dev/null 2>&1
+  else
+    grep -q '"ok":[[:space:]]*true' "${OUT_FILE}"
+  fi
+}
+
+if [[ "${HTTP_CODE}" != "200" ]]; then
+  if body_is_valid_loadout; then
+    echo "WARN: curl reported HTTP ${HTTP_CODE} but payload is valid — using it." >&2
+    echo "curl note: $(cat /tmp/clutch-site-loadouts-curl.err 2>/dev/null)" >&2
+    exit 0
+  fi
+fi
 
 if [[ "${HTTP_CODE}" == "000" ]]; then
   echo "curl error: $(cat /tmp/clutch-site-loadouts-curl.err 2>/dev/null)" >&2
