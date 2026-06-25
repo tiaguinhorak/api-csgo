@@ -87,60 +87,58 @@ patch_weapons_admin_only_cmds() {
 
 patch_weapons_admin_only_cmds
 
-patch_weapons_player_guard() {
-  if grep -q 'CLUTCH_WS_PLAYER_GUARD' "${WEAPONS_SP}"; then
-    echo "weapons.sp already has Clutch player guard on !ws handlers"
+unpatch_weapons_player_guard() {
+  if ! grep -q 'CLUTCH_WS_PLAYER_GUARD' "${WEAPONS_SP}"; then
     return 0
   fi
 
+  echo "Removing existing CLUTCH_WS_PLAYER_GUARD blocks from weapons.sp..."
+  awk '
+    /CLUTCH_WS_PLAYER_GUARD/ {
+      for (i = 0; i < 3; i++) {
+        if ((getline line) <= 0) {
+          break
+        }
+      }
+      next
+    }
+    { print }
+  ' "${WEAPONS_SP}" > "${WEAPONS_SP}.patched"
+  mv -f "${WEAPONS_SP}.patched" "${WEAPONS_SP}"
+}
+
+patch_weapons_player_guard() {
+  unpatch_weapons_player_guard
+
   echo "Patching weapons.sp — block !ws menu for non-admins inside command handlers..."
   awk '
-    BEGIN { guard_ws = 0; guard_knife = 0; guard_seed = 0; guard_tag = 0; guard_lang = 0 }
-    /^public Action CommandWeaponSkins/ {
-      print
+    function inject_guard() {
       print "\t// CLUTCH_WS_PLAYER_GUARD"
       print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
       print "\t\treturn Plugin_Handled;"
       print "\t}"
-      guard_ws = 1
-      next
     }
-    /^public Action CommandKnife/ {
+
+    function patch_command_header() {
+      if (match($0, /\{/)) {
+        print
+        inject_guard()
+        return
+      }
       print
-      print "\t// CLUTCH_WS_PLAYER_GUARD"
-      print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
-      print "\t\treturn Plugin_Handled;"
-      print "\t}"
-      guard_knife = 1
-      next
+      if ((getline line) > 0) {
+        print line
+        if (line ~ /\{/) {
+          inject_guard()
+        }
+      }
     }
-    /^public Action CommandSeedMenu/ {
-      print
-      print "\t// CLUTCH_WS_PLAYER_GUARD"
-      print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
-      print "\t\treturn Plugin_Handled;"
-      print "\t}"
-      guard_seed = 1
-      next
-    }
-    /^public Action CommandNameTag/ {
-      print
-      print "\t// CLUTCH_WS_PLAYER_GUARD"
-      print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
-      print "\t\treturn Plugin_Handled;"
-      print "\t}"
-      guard_tag = 1
-      next
-    }
-    /^public Action CommandWSLang/ {
-      print
-      print "\t// CLUTCH_WS_PLAYER_GUARD"
-      print "\tif (client > 0 && (GetUserFlagBits(client) & ADMFLAG_GENERIC) == 0) {"
-      print "\t\treturn Plugin_Handled;"
-      print "\t}"
-      guard_lang = 1
-      next
-    }
+
+    /^public Action:? CommandWeaponSkins/ { patch_command_header(); next }
+    /^public Action:? CommandKnife/ { patch_command_header(); next }
+    /^public Action:? CommandSeedMenu/ { patch_command_header(); next }
+    /^public Action:? CommandNameTag/ { patch_command_header(); next }
+    /^public Action:? CommandWSLang/ { patch_command_header(); next }
     { print }
   ' "${WEAPONS_SP}" > "${WEAPONS_SP}.patched"
   mv -f "${WEAPONS_SP}.patched" "${WEAPONS_SP}"
