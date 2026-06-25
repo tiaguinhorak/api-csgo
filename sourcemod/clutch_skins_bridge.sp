@@ -24,7 +24,7 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.37"
+#define PLUGIN_VERSION "3.8.38"
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define STICKER_REAPPLY_PASS_COUNT 2
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -2302,7 +2302,7 @@ bool ClutchApplyStickersViaNative(int client, int weapon, int idx, bool force = 
             continue;
         }
         float wear = g_fStickerWears[client][teamSlot][idx][s];
-        CS_SetWeaponSticker(client, weapon, s, stickerId, wear);
+        CS_SetWeaponSticker(client, weapon, s, stickerId, wear, 0.0);
         any = true;
     }
 
