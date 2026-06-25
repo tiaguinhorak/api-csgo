@@ -64,9 +64,10 @@ else
       echo "  npm run pm2:restart"
     fi
   else
-    echo "Production checklist:"
-    echo "  - Domain DNS must resolve (or set CLUTCH_SITE_RESOLVE_IP for https)"
-    echo "  - Or use local dev: CLUTCH_SITE_URL=http://YOUR_PC_LAN_IP:3000"
+  echo "Production checklist:"
+  echo "  - Domain DNS must resolve (or set CLUTCH_SITE_RESOLVE_IP for https)"
+  echo "  - Site not live yet? Push from dev PC:"
+  echo "      bash scripts/push-stickers-dev-to-vps.sh"
   fi
   echo ""
   echo "Test without sync: sm_cvar clutch_platform_gate_enabled 0  (server console)"

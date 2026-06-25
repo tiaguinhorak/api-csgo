@@ -68,6 +68,10 @@ fetch_stickers_from_url() {
 
   if [[ "${http_code}" == "000" ]]; then
     echo "curl error: $(cat /tmp/clutch-site-stickers-curl.err 2>/dev/null)" >&2
+    echo "" >&2
+    echo "Production site not live yet?" >&2
+    echo "  On your PC (site npm run dev): bash scripts/push-stickers-dev-to-vps.sh" >&2
+    echo "  Or copy JSON to VPS: bash scripts/import-stickers-json.sh file.json" >&2
     return 1
   fi
 
