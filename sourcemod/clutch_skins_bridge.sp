@@ -9,6 +9,7 @@
 #undef REQUIRE_PLUGIN
 #tryinclude <weapons>
 #tryinclude <clutch_gloves>
+#tryinclude <csgo_weaponstickers>
 #include <sdkhooks>
 #include <PTaH>
 
@@ -23,9 +24,9 @@
     bool g_bLoggedGlovesNativeMissing = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.35"
+#define PLUGIN_VERSION "3.8.36"
 #define CLUTCH_SITE_STICKER_SLOTS 4
-#define STICKER_REAPPLY_PASS_COUNT 3
+#define STICKER_REAPPLY_PASS_COUNT 2
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
 #define GLOVE_THINK_TICK_MOD 8
 #define APPLY_COOLDOWN_SECONDS 3.0
@@ -91,7 +92,7 @@ int g_iReapplyGen[MAXPLAYERS + 1];
 bool g_bAllowWeaponRegive[MAXPLAYERS + 1];
 bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
-float g_fStickerReapplyDelays[STICKER_REAPPLY_PASS_COUNT] = {0.12, 0.35, 0.7};
+float g_fStickerReapplyDelays[STICKER_REAPPLY_PASS_COUNT] = {0.2, 0.55};
 float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
 bool g_bStickerDbSynced[MAXPLAYERS + 1];
 
@@ -153,6 +154,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 #endif
     MarkNativeAsOptional("PTaH_GetItemDefinitionByDefIndex");
     MarkNativeAsOptional("CEconItemView.AttributeList.get");
+    MarkNativeAsOptional("CS_SetWeaponSticker");
     return APLRes_Success;
 }
 
@@ -2143,7 +2145,7 @@ public Action Timer_SyncViewModelStickers(Handle timer, DataPack pack) {
     }
 
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
-    ClutchMaybeForceStickerFullUpdate(client);
+    ClutchMaybeForceStickerFullUpdate(client, true);
     return Plugin_Stop;
 }
 
@@ -2173,6 +2175,144 @@ int ClutchIndexFromWeaponEntity(int client, int weapon) {
 
 int ClutchStickerTeamSlot(int team) {
     return team == CS_TEAM_CT ? 1 : 0;
+}
+
+bool ClutchWeaponStickersNativeReady() {
+    return LibraryExists("csgo_weaponstickers")
+        && GetFeatureStatus(FeatureType_Native, "CS_SetWeaponSticker") == FeatureStatus_Available;
+}
+
+void ClutchExecStickerSql(const char[] query) {
+    if (g_hStickersDb == null || query[0] == '\0') {
+        return;
+    }
+    g_hStickersDb.Execute(query, DBPrio_High);
+}
+
+void ClutchSyncLegacyStickerTableForClient(int client) {
+    if (g_hStickersDb == null || client <= 0 || !IsClientInGame(client)) {
+        return;
+    }
+
+    char steamId[32];
+    if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
+        return;
+    }
+
+    char escaped[64];
+    g_hStickersDb.Escape(steamId, escaped, sizeof(escaped));
+
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    int now = GetTime();
+
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        if (IsMeleeWeaponKey(g_ClutchWeaponKeys[i])) {
+            continue;
+        }
+
+        int defIndex = g_ClutchWeaponDefIndex[i];
+        if (defIndex <= 0) {
+            continue;
+        }
+
+        int s0 = g_iStickerSlots[client][teamSlot][i][0];
+        int s1 = g_iStickerSlots[client][teamSlot][i][1];
+        int s2 = g_iStickerSlots[client][teamSlot][i][2];
+        int s3 = g_iStickerSlots[client][teamSlot][i][3];
+        int s4 = g_iStickerSlots[client][teamSlot][i][4];
+        int s5 = g_iStickerSlots[client][teamSlot][i][5];
+
+        char query[640];
+        if (!s0 && !s1 && !s2 && !s3 && !s4 && !s5) {
+            Format(
+                query,
+                sizeof(query),
+                "DELETE FROM %s WHERE steamid='%s' AND weaponindex=%d",
+                g_sLegacyStickersTable,
+                escaped,
+                defIndex
+            );
+            ClutchExecStickerSql(query);
+            continue;
+        }
+
+        Format(
+            query,
+            sizeof(query),
+            "INSERT INTO %s (steamid, weaponindex, slot0, slot1, slot2, slot3, slot4, slot5, wear0, wear1, wear2, wear3, wear4, wear5, last_seen) "
+            "VALUES ('%s', %d, %d, %d, %d, %d, %d, %d, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %d) "
+            "ON CONFLICT(steamid, weaponindex) DO UPDATE SET "
+            "slot0=excluded.slot0, slot1=excluded.slot1, slot2=excluded.slot2, slot3=excluded.slot3, slot4=excluded.slot4, slot5=excluded.slot5, "
+            "wear0=excluded.wear0, wear1=excluded.wear1, wear2=excluded.wear2, wear3=excluded.wear3, wear4=excluded.wear4, wear5=excluded.wear5, "
+            "last_seen=excluded.last_seen",
+            g_sLegacyStickersTable,
+            escaped,
+            defIndex,
+            s0,
+            s1,
+            s2,
+            s3,
+            s4,
+            s5,
+            g_fStickerWears[client][teamSlot][i][0],
+            g_fStickerWears[client][teamSlot][i][1],
+            g_fStickerWears[client][teamSlot][i][2],
+            g_fStickerWears[client][teamSlot][i][3],
+            g_fStickerWears[client][teamSlot][i][4],
+            g_fStickerWears[client][teamSlot][i][5],
+            now
+        );
+        ClutchExecStickerSql(query);
+    }
+}
+
+bool ClutchApplyStickersViaNative(int client, int weapon, int idx, bool force = false) {
+#if !defined _csgo_weaponstickers_included_
+    return false;
+#else
+    if (
+        !ClutchWeaponStickersNativeReady()
+        || client <= 0
+        || weapon <= 0
+        || idx < 0
+        || idx >= CLUTCH_WEAPON_SLOTS
+        || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])
+        || !IsPaintableWeaponEntity(weapon)
+        || !ClutchWeaponHasStickerCache(client, idx)
+    ) {
+        return false;
+    }
+
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    if (!force && ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
+        return false;
+    }
+
+    ClutchSyncLegacyStickerTableForClient(client);
+    ClutchEnsureEconItemInitialized(client, weapon);
+
+    int engineMax = ClutchSupportedStickerSlotsForIndex(idx);
+    int applyMax = engineMax < CLUTCH_SITE_STICKER_SLOTS ? engineMax : CLUTCH_SITE_STICKER_SLOTS;
+    bool any = false;
+
+    for (int s = 0; s < applyMax; s++) {
+        int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
+        if (stickerId <= 0) {
+            continue;
+        }
+        float wear = g_fStickerWears[client][teamSlot][idx][s];
+        CS_SetWeaponSticker(client, weapon, s, stickerId, wear);
+        any = true;
+    }
+
+    if (any && g_cvDebug.BoolValue) {
+        char classname[64];
+        GetEntityClassname(weapon, classname, sizeof(classname));
+        LogMessage("[Clutch] SDK stickers on %s (idx %d, slots %d) for %N", classname, idx, applyMax, client);
+    }
+
+    return any;
+#endif
 }
 
 void ClutchClearStickerCache(int client) {
@@ -2438,7 +2578,14 @@ void ClutchMirrorStickersToViewModels(int client, int weapon, int idx) {
 }
 
 void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = false) {
-    bool updated = ClutchApplyStickersToEntity(client, weapon, idx, force);
+    bool updated = false;
+
+    if (ClutchWeaponStickersNativeReady()) {
+        updated = ClutchApplyStickersViaNative(client, weapon, idx, force);
+    } else {
+        updated = ClutchApplyStickersToEntity(client, weapon, idx, force);
+    }
+
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 
     if (updated || force || ClutchWeaponHasStickerCache(client, idx)) {
@@ -2503,7 +2650,7 @@ public Action Timer_StickerReapplyPass(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
-    ClutchApplyStickersForWeapon(client, weapon, idx, true);
+    ClutchApplyStickersForWeapon(client, weapon, idx, false);
     return Plugin_Stop;
 }
 
@@ -3446,12 +3593,14 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
             g_sResolvedStickersDbPath
         );
         ClutchClearStickerCache(client);
+        ClutchSyncLegacyStickerTableForClient(client);
         ClutchReapplyStickersOnPlayerWeapons(client);
         g_bStickerDbSynced[client] = true;
         return;
     }
 
     g_bStickerDbSynced[client] = true;
+    ClutchSyncLegacyStickerTableForClient(client);
     ClutchReapplyStickersOnPlayerWeapons(client);
 }
 

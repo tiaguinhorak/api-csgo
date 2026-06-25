@@ -90,6 +90,7 @@ cp -f "${SP_SRC}" "${SM}/scripting/clutch_skins_bridge.sp"
 INC_SRC="${REPO_ROOT}/sourcemod/include/weapons.inc"
 GLOVES_INC_SRC="${REPO_ROOT}/sourcemod/include/clutch_gloves.inc"
 STEAM_INC_SRC="${REPO_ROOT}/sourcemod/include/clutch_steam.inc"
+WS_INC_SRC="${REPO_ROOT}/sourcemod/include/csgo_weaponstickers.inc"
 GLOVES_SP_SRC="${REPO_ROOT}/sourcemod/z_clutch_gloves.sp"
 GLOVES_CFG_SRC="${REPO_ROOT}/sourcemod/clutch_gloves.cfg"
 if [[ -f "${INC_SRC}" ]]; then
@@ -100,6 +101,9 @@ if [[ -f "${GLOVES_INC_SRC}" ]]; then
 fi
 if [[ -f "${STEAM_INC_SRC}" ]]; then
   cp -f "${STEAM_INC_SRC}" "${SM}/scripting/include/clutch_steam.inc"
+fi
+if [[ -f "${WS_INC_SRC}" ]]; then
+  cp -f "${WS_INC_SRC}" "${SM}/scripting/include/csgo_weaponstickers.inc"
 fi
 if [[ -f "${GLOVES_SP_SRC}" ]]; then
   cp -f "${GLOVES_SP_SRC}" "${SM}/scripting/z_clutch_gloves.sp"
@@ -238,6 +242,10 @@ ensure_clutch_stickers_sqlite "${SM}" || true
 echo ""
 echo ">>> Disable csgo_weaponstickers auto-apply"
 bash "${REPO_ROOT}/scripts/disable-weaponstickers-autoapply.sh"
+if [[ ! -f "${SM}/plugins/csgo_weaponstickers.smx" ]]; then
+  echo "WARN: csgo_weaponstickers.smx missing — run: bash scripts/install-csgo-weaponstickers.sh"
+  echo "      Without it, stickers use PTaH attrs only (often 2 visible slots on AWP)."
+fi
 
 if [[ -f "${REPO_ROOT}/.env" ]]; then
   set -a
