@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.70"
+#define PLUGIN_VERSION "3.8.71"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -5310,11 +5310,16 @@ void ClutchDeriveAgentArmsPath(const char[] modelPath, char[] armsPath, int maxl
     strcopy(relative, sizeof(relative), modelPath);
     ReplaceString(relative, sizeof(relative), "models/player/custom_player/", "", false);
 
-    char folder[64];
-    char variantFile[64];
-    if (SplitString(relative, "/", folder, sizeof(folder), variantFile, sizeof(variantFile)) == -1) {
+    int slash = StrContains(relative, "/", false);
+    if (slash < 0) {
         return;
     }
+
+    char folder[64];
+    char variantFile[64];
+    strcopy(folder, sizeof(folder), relative);
+    folder[slash] = '\0';
+    strcopy(variantFile, sizeof(variantFile), relative[slash + 1]);
 
     char agentVariant[64];
     strcopy(agentVariant, sizeof(agentVariant), variantFile);
