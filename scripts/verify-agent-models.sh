@@ -32,9 +32,9 @@ count="$(find "${MODELS_ROOT}" -name '*.mdl' 2>/dev/null | wc -l | tr -d ' ')"
 echo "OK  custom_player folder exists (${count} .mdl files)"
 
 samples=(
-  "tm_professional/tm_professional_varf5.mdl"
-  "ctm_st6/ctm_st6_variantj.mdl"
-  "tm_phoenix/tm_phoenix.mdl"
+  "legacy/tm_professional_varf5.mdl"
+  "legacy/ctm_st6_variantj.mdl"
+  "legacy/tm_phoenix_variantg.mdl"
 )
 
 echo ""

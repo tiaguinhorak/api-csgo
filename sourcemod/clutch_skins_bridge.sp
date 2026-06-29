@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.73"
+#define PLUGIN_VERSION "3.8.74"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -5413,6 +5413,23 @@ bool ClutchResolveAgentModelPath(const char[] modelPath, char[] resolved, int ma
         strcopy(tail, sizeof(tail), modelPath);
         ReplaceString(tail, sizeof(tail), "models/player/custom_player/", "", false);
         Format(resolved, maxlen, "models/player/%s", tail);
+        if (ClutchAgentModelOnDisk(resolved)) {
+            return true;
+        }
+
+        char variantFile[PLATFORM_MAX_PATH];
+        int lastSlash = -1;
+        for (int i = 0; tail[i] != '\0'; i++) {
+            if (tail[i] == '/') {
+                lastSlash = i;
+            }
+        }
+        if (lastSlash >= 0) {
+            strcopy(variantFile, sizeof(variantFile), tail[lastSlash + 1]);
+        } else {
+            strcopy(variantFile, sizeof(variantFile), tail);
+        }
+        Format(resolved, maxlen, "models/player/custom_player/legacy/%s", variantFile);
         if (ClutchAgentModelOnDisk(resolved)) {
             return true;
         }
