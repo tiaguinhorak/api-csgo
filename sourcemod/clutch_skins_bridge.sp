@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.77"
+#define PLUGIN_VERSION "3.8.78"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define STICKER_SWEEP_PASS_COUNT 5
@@ -985,9 +985,7 @@ void ClutchRunCachedVisualPass(int client, bool forceStickers) {
 #endif
     ApplyAllCachedWeaponsToClient(client, true, false);
     if (forceStickers) {
-        ClutchReapplyStickersOnPlayerWeapons(client, true);
-        ClutchScheduleForcedViewModelStickerPasses(client);
-        ClutchMaybeForceStickerFullUpdate(client, true);
+        ClutchApplyStickersWhereNeeded(client);
     }
     ClutchApplyAgentModel(client);
 }
@@ -996,15 +994,20 @@ void ClutchApplyCachedLoadoutVisuals(int client) {
     ClutchRunCachedVisualPass(client, true);
 }
 
-void ClutchApplyAllCachedStickersForced(int client) {
+void ClutchApplyStickersWhereNeeded(int client) {
     if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
         return;
     }
 
-    ApplyAllCachedWeaponsToClient(client, true, false);
-    ClutchReapplyStickersOnPlayerWeapons(client, true);
-    ClutchScheduleForcedViewModelStickerPasses(client);
-    ClutchMaybeForceStickerFullUpdate(client, true);
+    ClutchReapplyStickersOnPlayerWeapons(client, false);
+    if (ClutchPlayerNeedsStickerSync(client)) {
+        ClutchScheduleForcedViewModelStickerPasses(client);
+        ClutchMaybeForceStickerFullUpdate(client, true);
+    }
+}
+
+void ClutchApplyAllCachedStickersForced(int client) {
+    ClutchApplyStickersWhereNeeded(client);
 }
 
 bool ClutchPlayerNeedsStickerSync(int client) {
@@ -1081,9 +1084,9 @@ public Action Timer_PostSyncStickerSweep(Handle timer, DataPack pack) {
         return Plugin_Stop;
     }
 
-  // Late weapon gives (kgns/loadout) — keep sweeping until all cached stickers match or last pass.
+  // Late weapon gives — only re-apply stickers that still mismatch cache.
     if (pass == STICKER_SWEEP_PASS_COUNT - 1 || ClutchPlayerNeedsStickerSync(client)) {
-        ClutchApplyAllCachedStickersForced(client);
+        ClutchApplyStickersWhereNeeded(client);
     }
 
     return Plugin_Stop;
@@ -2795,14 +2798,20 @@ void ClutchScheduleForcedViewModelStickerPasses(int client) {
         return;
     }
 
+    bool scheduled[CLUTCH_WEAPON_SLOTS];
+    for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
+        scheduled[i] = false;
+    }
+
     for (int idx = 0; idx < CLUTCH_WEAPON_SLOTS; idx++) {
         if (IsMeleeWeaponKey(g_ClutchWeaponKeys[idx]) || !ClutchWeaponHasStickerCache(client, idx)) {
             continue;
         }
 
         int weapon = FindPlayerWeapon(client, g_ClutchWeaponKeys[idx]);
-        if (weapon != -1) {
-            ClutchScheduleViewModelStickerPasses(client, weapon, idx, true);
+        if (weapon != -1 && !scheduled[idx]) {
+            scheduled[idx] = true;
+            ClutchScheduleViewModelStickerPasses(client, weapon, idx, false);
         }
     }
 
@@ -2818,7 +2827,10 @@ void ClutchScheduleForcedViewModelStickerPasses(int client) {
             continue;
         }
 
-        ClutchScheduleViewModelStickerPasses(client, weapon, idx, true);
+        if (!scheduled[idx]) {
+            scheduled[idx] = true;
+            ClutchScheduleViewModelStickerPasses(client, weapon, idx, false);
+        }
     }
 }
 
@@ -3214,7 +3226,7 @@ bool ClutchApplyStickersNativePath(int client, int entity, int idx, int teamSlot
         return false;
     }
 
-    if (!force && hasCached && ClutchEntityStickersMatchCache(client, entity, idx, teamSlot)) {
+    if (hasCached && ClutchEntityStickersMatchCache(client, entity, idx, teamSlot)) {
         return false;
     }
 
@@ -3243,7 +3255,7 @@ bool ClutchApplyStickersNativePath(int client, int entity, int idx, int teamSlot
         ClutchNetworkUpdate(entity);
     }
 
-    return any || force || !hasCached;
+    return any;
 #endif
 }
 
@@ -3636,8 +3648,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
     }
 
     int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
-    bool needsApply = force || !ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot);
-    if (!needsApply) {
+    if (ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
         return;
     }
 
@@ -3650,11 +3661,11 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
             weapon,
             idx,
             teamSlot,
-            force || needsApply
+            force
         );
-        if (applied || force) {
+        if (applied) {
             ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, true);
-            ClutchScheduleStickerFollowUp(client, weapon, idx, force, teamSlot);
+            ClutchScheduleStickerFollowUp(client, weapon, idx, false, teamSlot);
         }
     } else {
         ClutchEnsureEconItemInitialized(client, weapon);
@@ -3662,7 +3673,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
         if (ClutchApplyStickersToEntity(client, weapon, idx, force)) {
             applied = true;
             ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
-            ClutchScheduleStickerFollowUp(client, weapon, idx, force, teamSlot);
+            ClutchScheduleStickerFollowUp(client, weapon, idx, false, teamSlot);
         }
     }
 #else
@@ -3671,33 +3682,19 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
     if (ClutchApplyStickersToEntity(client, weapon, idx, force)) {
         applied = true;
         ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
-        ClutchScheduleStickerFollowUp(client, weapon, idx, force, teamSlot);
+        ClutchScheduleStickerFollowUp(client, weapon, idx, false, teamSlot);
     }
 #endif
 
-    if (g_cvDebug.BoolValue && applied && needsApply) {
+    if (g_cvDebug.BoolValue && applied) {
         char classname[64];
         GetEntityClassname(weapon, classname, sizeof(classname));
-        int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);
         LogMessage(
-            "[Clutch] Applied stickers on %s (idx %d, maxSlots %d) for %N",
+            "[Clutch] Applied stickers on %s (idx %d) for %N",
             classname,
             idx,
-            maxSlots,
             client
         );
-        CEconItemView verifyView = PTaH_GetEconItemViewFromEconEntity(weapon);
-        for (int s = 0; s < CLUTCH_SITE_STICKER_SLOTS; s++) {
-            int cached = g_iStickerSlots[client][ClutchStickerTeamSlot(GetClientTeam(client))][idx][s];
-            int appliedId = ClutchReadStickerIdAtSlot(verifyView, s);
-            LogMessage(
-                "[Clutch] sticker slot %d cached=%d applied=%d for %N",
-                s,
-                cached,
-                appliedId,
-                client
-            );
-        }
     }
 }
 
@@ -4057,7 +4054,7 @@ void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = fa
     }
 
     if (force) {
-        ClutchReapplyStickersOnPlayerWeapons(client, force);
+        ClutchReapplyStickersOnPlayerWeapons(client, false);
     }
     ClutchBridgeUpdateClientModel(client);
 }
