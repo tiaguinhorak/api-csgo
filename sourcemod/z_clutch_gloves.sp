@@ -418,10 +418,24 @@ public void OnQueryGloves(Database database, DBResultSet results, const char[] e
         );
     }
     if (IsPlayerAlive(client) && !g_bMatchGlovesApplied[client]) {
-        GivePlayerGloves(client);
+        DataPack pack = new DataPack();
+        pack.WriteCell(GetClientUserId(client));
+        CreateTimer(0.45, Timer_GloveDbApply, pack, TIMER_FLAG_NO_MAPCHANGE);
     } else if (!IsPlayerAlive(client) && g_cvDebug.BoolValue) {
         LogMessage("[ClutchGloves] Cache updated for %N — visual apply on next spawn", client);
     }
+}
+
+public Action Timer_GloveDbApply(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client) && IsPlayerAlive(client)) {
+        GivePlayerGloves(client);
+    }
+    return Plugin_Stop;
 }
 
 void LoadGloveRow(int client, DBResultSet results) {

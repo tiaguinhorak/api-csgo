@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.72"
+#define PLUGIN_VERSION "3.8.73"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -1519,11 +1519,6 @@ void ClutchBeginForcedSync(int client) {
 #if defined _clutch_gloves_included_
     g_iForcedSyncWeaponGen[client]++;
     int gen = g_iForcedSyncWeaponGen[client];
-    if (ClutchGlovesIsClientUsingSafe(client)) {
-        ClutchGlovesApplyClientSafe(client);
-    } else {
-        ClutchGlovesRefreshClientSafe(client);
-    }
 
     DataPack fallback = new DataPack();
     fallback.WriteCell(GetClientUserId(client));
@@ -1563,6 +1558,18 @@ public Action Timer_ForcedSyncWeaponsFallback(Handle timer, DataPack pack) {
 public Action Timer_ApplyGlovesAfterRefresh(Handle timer, any userid) {
     int client = GetClientOfUserId(userid);
     if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        ClutchGlovesApplyClientSafe(client);
+    }
+    return Plugin_Stop;
+}
+
+public Action Timer_ReapplyGlovesAfterSync(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client) && IsPlayerAlive(client)) {
         ClutchGlovesApplyClientSafe(client);
     }
     return Plugin_Stop;
@@ -3892,6 +3899,14 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
 #endif
     ApplyAllCachedWeaponsToClient(client, force, allowRegive);
     ScheduleForceReapply(client, force, allowRegive);
+#if defined _clutch_gloves_included_
+    if (ClutchUseExternalGlovesPlugin()) {
+        ClutchGlovesApplyClientSafe(client);
+        DataPack glovePack = new DataPack();
+        glovePack.WriteCell(GetClientUserId(client));
+        CreateTimer(0.35, Timer_ReapplyGlovesAfterSync, glovePack, TIMER_FLAG_NO_MAPCHANGE);
+    }
+#endif
     if (g_bInitialSyncPending[client]) {
         ClutchMarkInitialSyncComplete(client);
     }
@@ -5436,6 +5451,9 @@ void ClutchResetPlayerDefaultModel(int client, int team) {
     SetEntityModel(client, defaultModel);
     SetEntPropString(client, Prop_Send, "m_szArmsModel", "");
     g_sAppliedAgentModel[client][0] = '\0';
+#if defined _clutch_gloves_included_
+    ClutchGlovesApplyClientSafe(client);
+#endif
 }
 
 void ClutchApplyAgentModel(int client) {
@@ -5496,8 +5514,12 @@ void ClutchApplyAgentModel(int client) {
     strcopy(g_sAppliedAgentModel[client], sizeof(g_sAppliedAgentModel[]), resolvedModel);
 
     if (g_cvDebug.BoolValue) {
-        LogMessage("[Clutch] Applied agent model for %N team=%d model=%s", client, team, modelPath);
+        LogMessage("[Clutch] Applied agent model for %N team=%d model=%s", client, team, resolvedModel);
     }
+
+#if defined _clutch_gloves_included_
+    ClutchGlovesApplyClientSafe(client);
+#endif
 }
 
 void QueryPlayerAgents(int client, const char[] steamId, int altAttempt) {
