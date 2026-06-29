@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.74"
+#define PLUGIN_VERSION "3.8.75"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -99,6 +99,8 @@ bool g_bAllowWeaponRegive[MAXPLAYERS + 1];
 bool g_bMatchLoadoutSynced[MAXPLAYERS + 1];
 bool g_bConnectApplyScheduled[MAXPLAYERS + 1];
 bool g_bInitialSyncPending[MAXPLAYERS + 1];
+bool g_bInitialWeaponsPassDone[MAXPLAYERS + 1];
+bool g_bPendingInitialVisualApply[MAXPLAYERS + 1];
 int g_iForcedSyncWeaponGen[MAXPLAYERS + 1];
 float g_fLastWsBlockMsg[MAXPLAYERS + 1];
 float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
@@ -970,7 +972,7 @@ void ClutchPrintInventoryOnlyMessage(int client) {
 }
 
 /** Re-apply gloves/skins/stickers/agents from in-memory cache only — no DB query. */
-void ClutchApplyCachedLoadoutVisuals(int client) {
+void ClutchRunCachedVisualPass(int client, bool forceStickers) {
     if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
         return;
     }
@@ -979,7 +981,59 @@ void ClutchApplyCachedLoadoutVisuals(int client) {
     ClutchGlovesApplyClientSafe(client);
 #endif
     ApplyAllCachedWeaponsToClient(client, true, false);
+    if (forceStickers) {
+        ClutchReapplyStickersOnPlayerWeapons(client, true);
+        ClutchScheduleForcedViewModelStickerPasses(client);
+        ClutchMaybeForceStickerFullUpdate(client, true);
+    }
     ClutchApplyAgentModel(client);
+}
+
+void ClutchApplyCachedLoadoutVisuals(int client) {
+    ClutchRunCachedVisualPass(client, true);
+}
+
+void ClutchScheduleInitialVisualApply(int client) {
+    if (client <= 0 || IsFakeClient(client)) {
+        return;
+    }
+
+    int userid = GetClientUserId(client);
+    for (int i = 0; i < RESPAWN_VISUAL_PASS_COUNT; i++) {
+        DataPack pack = new DataPack();
+        pack.WriteCell(userid);
+        pack.WriteCell(1);
+        CreateTimer(g_fRespawnVisualDelays[i], Timer_CachedVisualPass, pack, TIMER_FLAG_NO_MAPCHANGE);
+    }
+}
+
+void ClutchTryFinalizeInitialSync(int client) {
+    if (!g_bInitialSyncPending[client]) {
+        return;
+    }
+    if (!g_bInitialWeaponsPassDone[client] || !g_bStickerDbSynced[client]) {
+        return;
+    }
+
+    if (IsPlayerAlive(client)) {
+        ClutchScheduleInitialVisualApply(client);
+    } else {
+        g_bPendingInitialVisualApply[client] = true;
+    }
+    ClutchMarkInitialSyncComplete(client);
+}
+
+public Action Timer_CachedVisualPass(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    bool forceStickers = pack.ReadCell() == 1;
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client)) {
+        ClutchRunCachedVisualPass(client, forceStickers);
+    }
+    return Plugin_Stop;
 }
 
 void ClutchScheduleRespawnCachedVisuals(int client) {
@@ -991,7 +1045,8 @@ void ClutchScheduleRespawnCachedVisuals(int client) {
     for (int i = 0; i < RESPAWN_VISUAL_PASS_COUNT; i++) {
         DataPack pack = new DataPack();
         pack.WriteCell(userid);
-        CreateTimer(g_fRespawnVisualDelays[i], Timer_RespawnCachedVisuals, pack, TIMER_FLAG_NO_MAPCHANGE);
+        pack.WriteCell(1);
+        CreateTimer(g_fRespawnVisualDelays[i], Timer_CachedVisualPass, pack, TIMER_FLAG_NO_MAPCHANGE);
     }
 }
 
@@ -1507,6 +1562,8 @@ void ClutchBeginForcedSync(int client) {
     g_bMatchLoadoutSynced[client] = false;
     g_bAllowWeaponRegive[client] = false;
     g_bInitialSyncPending[client] = true;
+    g_bInitialWeaponsPassDone[client] = false;
+    g_bPendingInitialVisualApply[client] = false;
 
     char steamId[32];
     if (ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
@@ -1606,6 +1663,8 @@ public void OnClientDisconnect(int client) {
     g_bMatchLoadoutSynced[client] = false;
     g_bConnectApplyScheduled[client] = false;
     g_bInitialSyncPending[client] = false;
+    g_bInitialWeaponsPassDone[client] = false;
+    g_bPendingInitialVisualApply[client] = false;
     g_iForcedSyncWeaponGen[client] = 0;
     g_fLastWsBlockMsg[client] = 0.0;
     g_iReapplyGen[client] = 0;
@@ -1725,14 +1784,17 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     }
 
     if (g_cvOncePerMatch.BoolValue && g_bMatchLoadoutSynced[client]) {
+        if (g_bPendingInitialVisualApply[client]) {
+            g_bPendingInitialVisualApply[client] = false;
+            ClutchScheduleInitialVisualApply(client);
+            return;
+        }
         if (ClutchClientIsSkinAdmin(client)) {
             DataPack pack = new DataPack();
             pack.WriteCell(GetClientUserId(client));
             CreateTimer(0.4, Timer_AdminRespawnApply, pack, TIMER_FLAG_NO_MAPCHANGE);
         } else {
-            DataPack pack = new DataPack();
-            pack.WriteCell(GetClientUserId(client));
-            CreateTimer(0.45, Timer_RespawnCachedVisuals, pack, TIMER_FLAG_NO_MAPCHANGE);
+            ClutchScheduleRespawnCachedVisuals(client);
         }
         return;
     }
@@ -1750,18 +1812,6 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     }
 
     ClutchScheduleConnectLoadout(client);
-}
-
-public Action Timer_RespawnCachedVisuals(Handle timer, DataPack pack) {
-    pack.Reset();
-    int userid = pack.ReadCell();
-    delete pack;
-
-    int client = GetClientOfUserId(userid);
-    if (client > 0 && IsClientInGame(client) && !IsFakeClient(client) && IsPlayerAlive(client)) {
-        ClutchApplyCachedLoadoutVisuals(client);
-    }
-    return Plugin_Stop;
 }
 
 public Action Timer_AdminRespawnApply(Handle timer, DataPack pack) {
@@ -2609,7 +2659,39 @@ void ClutchWriteStickerCacheToEntity(int client, int entity, int idx, int teamSl
     ClutchNetworkUpdate(entity);
 }
 
-void ClutchScheduleViewModelStickerPasses(int client, int weapon, int idx) {
+void ClutchScheduleForcedViewModelStickerPasses(int client) {
+    if (client <= 0 || IsFakeClient(client) || !IsPlayerAlive(client)) {
+        return;
+    }
+
+    for (int idx = 0; idx < CLUTCH_WEAPON_SLOTS; idx++) {
+        if (IsMeleeWeaponKey(g_ClutchWeaponKeys[idx]) || !ClutchWeaponHasStickerCache(client, idx)) {
+            continue;
+        }
+
+        int weapon = FindPlayerWeapon(client, g_ClutchWeaponKeys[idx]);
+        if (weapon != -1) {
+            ClutchScheduleViewModelStickerPasses(client, weapon, idx, true);
+        }
+    }
+
+    int size = GetEntPropArraySize(client, Prop_Send, "m_hMyWeapons");
+    for (int i = 0; i < size; i++) {
+        int weapon = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
+        if (weapon == -1 || !IsValidEntity(weapon)) {
+            continue;
+        }
+
+        int idx = ClutchIndexFromWeaponEntity(client, weapon);
+        if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx]) || !ClutchWeaponHasStickerCache(client, idx)) {
+            continue;
+        }
+
+        ClutchScheduleViewModelStickerPasses(client, weapon, idx, true);
+    }
+}
+
+void ClutchScheduleViewModelStickerPasses(int client, int weapon, int idx, bool force = false) {
     if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
         return;
     }
@@ -2619,7 +2701,7 @@ void ClutchScheduleViewModelStickerPasses(int client, int weapon, int idx) {
     }
 
     int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
-    if (ClutchRoutineApplyLocked(client) && ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
+    if (!force && ClutchRoutineApplyLocked(client) && ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
         return;
     }
 
@@ -2631,6 +2713,7 @@ void ClutchScheduleViewModelStickerPasses(int client, int weapon, int idx) {
         pack.WriteCell(userid);
         pack.WriteCell(weaponRef);
         pack.WriteCell(idx);
+        pack.WriteCell(force ? 1 : 0);
         CreateTimer(g_fViewModelStickerDelays[i], Timer_ViewModelStickerPass, pack, TIMER_FLAG_NO_MAPCHANGE);
     }
 }
@@ -2640,6 +2723,7 @@ public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
     int userid = pack.ReadCell();
     int weaponRef = pack.ReadCell();
     int idx = pack.ReadCell();
+    bool force = pack.ReadCell() == 1;
     delete pack;
 
     int client = GetClientOfUserId(userid);
@@ -2653,7 +2737,7 @@ public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
     }
 
     int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
-    if (ClutchRoutineApplyLocked(client) && ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
+    if (!force && ClutchRoutineApplyLocked(client) && ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
         return Plugin_Stop;
     }
 
@@ -2662,7 +2746,7 @@ public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
     if (paintkit > 0) {
         ApplyCachedSkinToEntity(client, weapon, idx, false, false);
     }
-    ClutchApplyStickersForWeapon(client, weapon, idx, false);
+    ClutchApplyStickersForWeapon(client, weapon, idx, force);
     return Plugin_Stop;
 }
 
@@ -3404,7 +3488,7 @@ void ClutchScheduleStickerFollowUp(int client, int weapon, int idx, bool force, 
     }
 
     ClutchMaybeForceStickerFullUpdate(client, force);
-    ClutchScheduleViewModelStickerPasses(client, weapon, idx);
+    ClutchScheduleViewModelStickerPasses(client, weapon, idx, force);
     if (!ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
         ClutchScheduleStickerSlotReconcile(client, weapon, idx);
     }
@@ -3908,7 +3992,8 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
     }
 #endif
     if (g_bInitialSyncPending[client]) {
-        ClutchMarkInitialSyncComplete(client);
+        g_bInitialWeaponsPassDone[client] = true;
+        ClutchTryFinalizeInitialSync(client);
     }
     return Plugin_Stop;
 }
@@ -4488,12 +4573,14 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         ClutchClearStickerCache(client);
         ClutchReapplyStickersOnPlayerWeapons(client, true);
         g_bStickerDbSynced[client] = true;
+        ClutchTryFinalizeInitialSync(client);
         return;
     }
 
     g_bStickerDbSynced[client] = true;
     ClutchPurgeLegacyStickerRowsForSteam(steamId);
     ClutchReapplyStickersOnPlayerWeapons(client, true);
+    ClutchTryFinalizeInitialSync(client);
 }
 
 public void T_LegacyStickersCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
