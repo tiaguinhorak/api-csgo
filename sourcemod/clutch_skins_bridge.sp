@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.61"
+#define PLUGIN_VERSION "3.8.62"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -2907,6 +2907,10 @@ bool ClutchApplyStickersNativePath(int client, int entity, int idx, int teamSlot
         }
         CS_SetWeaponSticker(client, entity, s, stickerId, wear, 0.0);
         any = true;
+    }
+
+    if (any) {
+        ClutchNetworkUpdateWeaponSkin(entity);
     }
 
     return any || force || !hasCached;
