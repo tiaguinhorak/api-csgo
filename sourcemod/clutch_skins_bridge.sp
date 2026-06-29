@@ -25,8 +25,8 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.59"
-#define STICKER_VIEWMODEL_PASS_COUNT 3
+#define PLUGIN_VERSION "3.8.60"
+#define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define RESPAWN_VISUAL_PASS_COUNT 2
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -2550,12 +2550,13 @@ public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
     return Plugin_Stop;
 }
 
-void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
+void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx, bool useNative = false) {
     if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
         return;
     }
 
-    if (!ClutchWeaponHasStickerCache(client, idx)) {
+    bool hasCache = ClutchWeaponHasStickerCache(client, idx);
+    if (!hasCache && !useNative) {
         return;
     }
 
@@ -2572,7 +2573,11 @@ void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
             ) {
                 ClutchCopyWeaponSkinProps(weapon, viewModel);
                 ClutchEnsureEconItemInitialized(client, viewModel);
-                ClutchWriteStickerCacheToEntity(client, viewModel, idx, teamSlot);
+                if (useNative) {
+                    ClutchApplyStickersNativePath(client, viewModel, idx, teamSlot, true);
+                } else {
+                    ClutchWriteStickerCacheToEntity(client, viewModel, idx, teamSlot);
+                }
             }
         }
     }
@@ -2603,7 +2608,11 @@ void ClutchSyncViewModelStickersFromWeapon(int client, int weapon, int idx) {
 
         ClutchCopyWeaponSkinProps(weapon, predicted);
         ClutchEnsureEconItemInitialized(client, predicted);
-        ClutchWriteStickerCacheToEntity(client, predicted, idx, teamSlot);
+        if (useNative) {
+            ClutchApplyStickersNativePath(client, predicted, idx, teamSlot, true);
+        } else {
+            ClutchWriteStickerCacheToEntity(client, predicted, idx, teamSlot);
+        }
     }
 }
 
@@ -2836,6 +2845,67 @@ void ClutchSyncLegacyStickerTableForClient(int client) {
         );
         ClutchExecStickerSql(query);
     }
+}
+
+void ClutchClearAllStickersViaNative(int client, int weapon) {
+#if !defined _csgo_weaponstickers_included_
+    return;
+#else
+    if (!ClutchWeaponStickersNativeReady() || client <= 0 || weapon <= 0 || !IsValidEntity(weapon)) {
+        return;
+    }
+
+    for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
+        CS_SetWeaponSticker(client, weapon, s, 0, 0.0, 0.0);
+    }
+#endif
+}
+
+bool ClutchApplyStickersNativePath(int client, int entity, int idx, int teamSlot, bool force) {
+#if !defined _csgo_weaponstickers_included_
+    return false;
+#else
+    if (
+        !ClutchWeaponStickersNativeReady()
+        || client <= 0
+        || entity <= 0
+        || !IsValidEntity(entity)
+        || idx < 0
+        || idx >= CLUTCH_WEAPON_SLOTS
+        || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])
+        || !IsPaintableWeaponEntity(entity)
+    ) {
+        return false;
+    }
+
+    bool hasCached = ClutchWeaponHasStickerCache(client, idx);
+    if (!force && !hasCached) {
+        return false;
+    }
+
+    if (!force && hasCached && ClutchEntityStickersMatchCache(client, entity, idx, teamSlot)) {
+        return false;
+    }
+
+    ClutchSyncLegacyStickerRowForWeapon(client, idx);
+    ClutchEnsureEconItemInitialized(client, entity);
+    ClutchClearAllStickersViaNative(client, entity);
+
+    int slotCount = ClutchSiteStickerSlotCount(idx);
+    bool any = false;
+
+    for (int s = 0; s < slotCount; s++) {
+        int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
+        float wear = g_fStickerWears[client][teamSlot][idx][s];
+        if (stickerId <= 0) {
+            continue;
+        }
+        CS_SetWeaponSticker(client, entity, s, stickerId, wear, 0.0);
+        any = true;
+    }
+
+    return any || force || !hasCached;
+#endif
 }
 
 bool ClutchApplyStickersViaNative(int client, int weapon, int idx, bool force = false) {
@@ -3160,27 +3230,44 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
         return;
     }
 
-    ClutchEnsureEconItemInitialized(client, weapon);
-    ClutchWriteStickerCacheToEntity(client, weapon, idx, teamSlot);
-
-    bool updated = ClutchApplyStickersToEntity(client, weapon, idx, force);
-    bool nativeUpdated = false;
+    bool applied = false;
 
 #if defined _csgo_weaponstickers_included_
-    if (ClutchWeaponStickersNativeReady() && hasCache && needsApply) {
-        nativeUpdated = ClutchApplyStickersViaNative(client, weapon, idx, force || updated);
+    if (ClutchWeaponStickersNativeReady()) {
+        applied = ClutchApplyStickersNativePath(
+            client,
+            weapon,
+            idx,
+            teamSlot,
+            force || needsApply
+        );
+        if (applied || force) {
+            ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, true);
+            ClutchMaybeForceStickerFullUpdate(client, force);
+            ClutchScheduleViewModelStickerPasses(client, weapon, idx);
+        }
+    } else {
+        ClutchEnsureEconItemInitialized(client, weapon);
+        ClutchWriteStickerCacheToEntity(client, weapon, idx, teamSlot);
+        if (ClutchApplyStickersToEntity(client, weapon, idx, force)) {
+            applied = true;
+            ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
+            ClutchMaybeForceStickerFullUpdate(client, force);
+            ClutchScheduleViewModelStickerPasses(client, weapon, idx);
+        }
+    }
+#else
+    ClutchEnsureEconItemInitialized(client, weapon);
+    ClutchWriteStickerCacheToEntity(client, weapon, idx, teamSlot);
+    if (ClutchApplyStickersToEntity(client, weapon, idx, force)) {
+        applied = true;
+        ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
+        ClutchMaybeForceStickerFullUpdate(client, force);
+        ClutchScheduleViewModelStickerPasses(client, weapon, idx);
     }
 #endif
 
-    if (!updated && !nativeUpdated) {
-        return;
-    }
-
-    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
-    ClutchMaybeForceStickerFullUpdate(client, true);
-    ClutchScheduleViewModelStickerPasses(client, weapon, idx);
-
-    if (g_cvDebug.BoolValue) {
+    if (g_cvDebug.BoolValue && applied) {
         char classname[64];
         GetEntityClassname(weapon, classname, sizeof(classname));
         int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);

@@ -52,11 +52,15 @@ fi
 SITE_URL="${CLUTCH_SITE_URL:-https://clutchclube.com.br}"
 SITE_URL="${SITE_URL%/}"
 MARKER="clutch_server_branding"
+RUNTIME_MARKER="clutch_server_runtime"
 CFG_NAME="clutch_server_branding.cfg"
+RUNTIME_CFG_NAME="clutch_server_runtime.cfg"
 CFG_PATH="${CSGO_ROOT}/cfg/${CFG_NAME}"
+RUNTIME_CFG_PATH="${CSGO_ROOT}/cfg/${RUNTIME_CFG_NAME}"
 SERVER_CFG="${CSGO_ROOT}/cfg/server.cfg"
 MOTD_FILE="${CSGO_ROOT}/motd.txt"
 CFG_TEMPLATE="${REPO_ROOT}/sourcemod/clutch_server_branding.cfg"
+RUNTIME_CFG_TEMPLATE="${REPO_ROOT}/sourcemod/clutch_server_runtime.cfg"
 
 if [[ ! -d "${CSGO_ROOT}/cfg" ]]; then
   echo "CSGO cfg dir not found: ${CSGO_ROOT}/cfg" >&2
@@ -80,6 +84,11 @@ cat "${MOTD_FILE}"
 echo ""
 echo "Wrote ${CFG_PATH}"
 
+if [[ -f "${RUNTIME_CFG_TEMPLATE}" ]]; then
+  cp -f "${RUNTIME_CFG_TEMPLATE}" "${RUNTIME_CFG_PATH}"
+  echo "Wrote ${RUNTIME_CFG_PATH}"
+fi
+
 if [[ -f "${SERVER_CFG}" ]]; then
   if grep -q "${MARKER}" "${SERVER_CFG}" || grep -q "exec ${CFG_NAME}" "${SERVER_CFG}"; then
     echo "server.cfg already execs ${CFG_NAME}"
@@ -90,6 +99,16 @@ if [[ -f "${SERVER_CFG}" ]]; then
       echo "exec ${CFG_NAME}"
     } >> "${SERVER_CFG}"
     echo "Appended exec ${CFG_NAME} to ${SERVER_CFG}"
+  fi
+  if grep -q "${RUNTIME_MARKER}" "${SERVER_CFG}" || grep -q "exec ${RUNTIME_CFG_NAME}" "${SERVER_CFG}"; then
+    echo "server.cfg already execs ${RUNTIME_CFG_NAME}"
+  else
+    {
+      echo ""
+      echo "// ${RUNTIME_MARKER}"
+      echo "exec ${RUNTIME_CFG_NAME}"
+    } >> "${SERVER_CFG}"
+    echo "Appended exec ${RUNTIME_CFG_NAME} to ${SERVER_CFG}"
   fi
 else
   echo "WARN: ${SERVER_CFG} not found — add manually: exec ${CFG_NAME}"
