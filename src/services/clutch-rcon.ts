@@ -156,7 +156,7 @@ function steam2Variants(steamId: string): string[] {
   return variants;
 }
 
-async function isPlayerInGameServer(steamId: string): Promise<boolean> {
+export async function isPlayerInGameServer(steamId: string): Promise<boolean> {
   const target = resolveRconTarget();
   if (!target) {
     return false;
@@ -268,6 +268,19 @@ export async function reloadClutchSkinsInGame(): Promise<boolean> {
     }
     return viaScreen;
   }
+}
+
+/** Re-read agent rows from SQLite and apply player model (immediate, not staged). */
+export async function refreshPlayerAgentsInGame(steamId?: string): Promise<boolean> {
+  const trimmed = steamId?.trim();
+  const command = trimmed
+    ? `sm_clutch_refresh_agents "${trimmed}"`
+    : 'sm_clutch_refresh_agents';
+  const ok = await sendRconOrScreen(command);
+  if (!ok) {
+    console.warn('[clutch-rcon] agent refresh skipped (no RCON/screen)');
+  }
+  return ok;
 }
 
 /** Re-read sticker rows from SQLite and re-apply on held weapons (lighter than full applyskins). */

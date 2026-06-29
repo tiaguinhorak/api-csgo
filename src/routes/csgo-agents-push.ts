@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { syncPlayerAgentsToDb } from '../services/agents-db-sync';
-import { applyWebLoadoutInGame, resolveWebLoadoutApplyMode } from '../services/clutch-rcon';
+import {
+  isPlayerInGameServer,
+  refreshPlayerAgentsInGame,
+} from '../services/clutch-rcon';
 import type { AgentSyncEntry } from '../services/agents-db-map';
 
 const router = Router();
@@ -18,12 +21,13 @@ router.post('/player-sync', async (req: Request, res: Response) => {
 
   try {
     const result = await syncPlayerAgentsToDb(body.steamId, body.entries);
-    const applyResult = await applyWebLoadoutInGame(result.steamId);
+    const playerInGame = await isPlayerInGameServer(result.steamId);
+    const commandSent = await refreshPlayerAgentsInGame(result.steamId);
     return res.json({
       ok: true,
       mode: 'db',
-      applyMode: await resolveWebLoadoutApplyMode(applyResult),
-      playerInGame: applyResult.playerInGame,
+      applyMode: 'immediate',
+      playerInGame,
       steamId: result.steamId,
       steamIds: result.steamIds,
       entries: body.entries.length,
@@ -31,7 +35,7 @@ router.post('/player-sync', async (req: Request, res: Response) => {
       dbPath: result.dbPath,
       table: result.table,
       rows: result.rows,
-      rconReload: applyResult.commandSent,
+      rconReload: commandSent,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'agent sync failed';

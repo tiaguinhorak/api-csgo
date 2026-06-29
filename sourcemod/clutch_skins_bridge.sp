@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.64"
+#define PLUGIN_VERSION "3.8.65"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -269,6 +269,7 @@ public void OnPluginStart() {
     RegServerCmd("sm_clutch_loadout_pending", Command_LoadoutPending, "Stage web loadout from DB (api-csgo player-sync)");
     RegServerCmd("sm_clutch_web_sync", Command_WebSync, "Apply site loadout+stickers now (api-csgo player-sync)");
     RegServerCmd("sm_clutch_refresh_stickers", Command_RefreshStickers, "Re-read stickers DB and re-apply (api-csgo sticker-sync)");
+    RegServerCmd("sm_clutch_refresh_agents", Command_RefreshAgents, "Re-read agents DB and apply player model (api-csgo agent-sync)");
 
     AddCommandListener(ClutchBlockWsChatForPlayers, "say");
     AddCommandListener(ClutchBlockWsChatForPlayers, "say_team");
@@ -956,7 +957,7 @@ void ClutchPrintInventoryOnlyMessage(int client) {
     );
 }
 
-/** Re-apply gloves/skins/stickers from in-memory cache only — no DB query. */
+/** Re-apply gloves/skins/stickers/agents from in-memory cache only — no DB query. */
 void ClutchApplyCachedLoadoutVisuals(int client) {
     if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
         return;
@@ -966,6 +967,7 @@ void ClutchApplyCachedLoadoutVisuals(int client) {
     ClutchGlovesApplyClientSafe(client);
 #endif
     ApplyAllCachedWeaponsToClient(client, true, false);
+    ClutchApplyAgentModel(client);
 }
 
 void ClutchScheduleRespawnCachedVisuals(int client) {
@@ -1196,8 +1198,9 @@ void ClutchStageWebLoadout(int client) {
         && g_bMatchLoadoutSynced[client]
     ) {
         if (g_cvDebug.BoolValue) {
-            LogMessage("[Clutch] Loadout stage skipped — already applied for %N", client);
+            LogMessage("[Clutch] Loadout stage skipped — already applied for %N (agents still refreshed)", client);
         }
+        ClutchRefreshAgentsForClient(client);
         return;
     }
 
@@ -1257,6 +1260,41 @@ public Action Command_RefreshStickers(int args) {
     return Plugin_Handled;
 }
 
+public Action Command_RefreshAgents(int args) {
+    if (args >= 1) {
+        char steam[32];
+        ClutchReadSteamIdFromCmdArgs(args, steam, sizeof(steam));
+
+        int client = FindClientBySteam2(steam);
+        if (client > 0) {
+            ClutchRefreshAgentsForClient(client);
+        } else {
+            ClutchMarkOfflineWebSyncPending(steam);
+        }
+    } else {
+        for (int i = 1; i <= MaxClients; i++) {
+            if (IsClientInGame(i) && !IsFakeClient(i)) {
+                ClutchRefreshAgentsForClient(i);
+            }
+        }
+    }
+    return Plugin_Handled;
+}
+
+void ClutchRefreshAgentsForClient(int client) {
+    if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client)) {
+        return;
+    }
+
+    char steamId[32];
+    if (!ClutchGetClientSteam2(client, steamId, sizeof(steamId))) {
+        return;
+    }
+
+    g_sAppliedAgentModel[client][0] = '\0';
+    QueryPlayerAgents(client, steamId, 0);
+}
+
 void ClutchApplyWebLoadoutForClient(int client) {
     if (client <= 0 || IsFakeClient(client) || !IsClientInGame(client)) {
         return;
@@ -1273,8 +1311,9 @@ void ClutchApplyWebLoadoutForClient(int client) {
 
         if (g_cvOncePerMatch.BoolValue && g_bMatchLoadoutSynced[client]) {
             if (g_cvDebug.BoolValue) {
-                LogMessage("[Clutch] Web sync skipped — loadout already applied for %N", client);
+                LogMessage("[Clutch] Web sync skipped — loadout already applied for %N (agents still refreshed)", client);
             }
+            ClutchRefreshAgentsForClient(client);
             return;
         }
     }
@@ -5354,6 +5393,7 @@ public void T_AgentsCallback(Database database, DBResultSet results, const char[
         );
     }
 
+    g_sAppliedAgentModel[client][0] = '\0';
     ClutchApplyAgentModel(client);
 }
 
