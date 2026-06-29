@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.67"
+#define PLUGIN_VERSION "3.8.68"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -5293,17 +5293,17 @@ void ClutchDeriveAgentArmsPath(const char[] modelPath, char[] armsPath, int maxl
         return;
     }
 
-    char variant[64];
-    strcopy(variant, sizeof(variant), variantFile);
-    ReplaceString(variant, sizeof(variant), ".mdl", "", false);
+    char agentVariant[64];
+    strcopy(agentVariant, sizeof(agentVariant), variantFile);
+    ReplaceString(agentVariant, sizeof(agentVariant), ".mdl", "", false);
 
     Format(
         armsPath,
         maxlen,
         "models/weapons/v_models/arms/%s/%s/v_%s.mdl",
         folder,
-        variant,
-        variant
+        agentVariant,
+        agentVariant
     );
 }
 
