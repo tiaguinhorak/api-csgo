@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.68"
+#define PLUGIN_VERSION "3.8.69"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -1483,6 +1483,14 @@ bool ClutchRoutineFullApplyBlocked(int client, bool force) {
     return false;
 }
 
+/** Loadout synced for this connect — block equip/reconcile re-apply loops (spawn/round/admin/force still run). */
+bool ClutchRoutineApplyLocked(int client) {
+    return g_cvOncePerMatch.BoolValue
+        && g_bMatchLoadoutSynced[client]
+        && !ClutchClientIsSkinAdmin(client)
+        && !g_bAllowWeaponRegive[client];
+}
+
 void ClutchBeginForcedSync(int client) {
     g_bMatchLoadoutSynced[client] = false;
     g_bAllowWeaponRegive[client] = false;
@@ -1634,6 +1642,10 @@ public Action OnWeaponEquip(int client, int weapon) {
         return Plugin_Continue;
     }
 
+    if (ClutchRoutineApplyLocked(client)) {
+        return Plugin_Continue;
+    }
+
     char classname[64];
     GetEntityClassname(weapon, classname, sizeof(classname));
     int idx = GetClutchIndexForClassname(client, classname);
@@ -1645,24 +1657,6 @@ public Action OnWeaponEquip(int client, int weapon) {
     }
 
     bool isKnife = IsMeleeClassname(classname);
-    int paintkit = g_CachedPaintkit[client][idx];
-    if (
-        g_bMatchLoadoutSynced[client]
-        && !ClutchClientIsSkinAdmin(client)
-        && paintkit > 0
-    ) {
-        int entityPaint = GetEntProp(weapon, Prop_Send, "m_nFallbackPaintKit");
-        if (entityPaint == paintkit) {
-            if (isKnife || !ClutchWeaponHasStickerCache(client, idx)) {
-                return Plugin_Continue;
-            }
-            int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
-            if (ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
-                return Plugin_Continue;
-            }
-        }
-    }
-
     DataPack pack = new DataPack();
     pack.WriteCell(GetClientUserId(client));
     pack.WriteCell(weapon);
@@ -1695,6 +1689,10 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
         return;
     }
 
+    if (g_cvOncePerMatch.BoolValue) {
+        return;
+    }
+
     for (int i = 0; i < CLUTCH_WEAPON_SLOTS; i++) {
         g_fLastEntityApply[client][i] = 0.0;
         g_iAppliedPaintkit[client][i] = 0;
@@ -1713,7 +1711,9 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
             pack.WriteCell(GetClientUserId(client));
             CreateTimer(0.4, Timer_AdminRespawnApply, pack, TIMER_FLAG_NO_MAPCHANGE);
         } else {
-            ClutchScheduleRespawnCachedVisuals(client);
+            DataPack pack = new DataPack();
+            pack.WriteCell(GetClientUserId(client));
+            CreateTimer(0.45, Timer_RespawnCachedVisuals, pack, TIMER_FLAG_NO_MAPCHANGE);
         }
         return;
     }
@@ -1762,15 +1762,11 @@ public void OnMapStart() {
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
-    if (g_cvOncePerMatch.BoolValue) {
-        return;
-    }
-
     if (GameRules_GetProp("m_bWarmupPeriod", view_as<int>(Prop_Send))) {
         return;
     }
 
-    CreateTimer(3.0, Timer_RoundStartApply, _, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(2.5, Timer_RoundStartApply, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_RoundStartApply(Handle timer) {
@@ -1779,6 +1775,10 @@ public Action Timer_RoundStartApply(Handle timer) {
             continue;
         }
         if (g_cvOncePerMatch.BoolValue && g_bMatchLoadoutSynced[client]) {
+            if (ClutchClientIsSkinAdmin(client)) {
+                continue;
+            }
+            ApplyAllCachedWeaponsToClient(client, false, false);
             continue;
         }
         if (
@@ -2599,6 +2599,11 @@ void ClutchScheduleViewModelStickerPasses(int client, int weapon, int idx) {
         return;
     }
 
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    if (ClutchRoutineApplyLocked(client) && ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
+        return;
+    }
+
     int userid = GetClientUserId(client);
     int weaponRef = EntIndexToEntRef(weapon);
 
@@ -2625,6 +2630,11 @@ public Action Timer_ViewModelStickerPass(Handle timer, DataPack pack) {
     }
 
     if (!ClutchWeaponHasStickerCache(client, idx)) {
+        return Plugin_Stop;
+    }
+
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    if (ClutchRoutineApplyLocked(client) && ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
         return Plugin_Stop;
     }
 
@@ -3314,6 +3324,11 @@ void ClutchScheduleStickerSlotReconcile(int client, int weapon, int idx) {
         return;
     }
 
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    if (ClutchRoutineApplyLocked(client) && ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
+        return;
+    }
+
     DataPack pack = new DataPack();
     pack.WriteCell(GetClientUserId(client));
     pack.WriteCell(EntIndexToEntRef(weapon));
@@ -3364,6 +3379,18 @@ public Action Timer_StickerSlotReconcile(Handle timer, DataPack pack) {
     return Plugin_Stop;
 }
 
+void ClutchScheduleStickerFollowUp(int client, int weapon, int idx, bool force, int teamSlot) {
+    if (ClutchRoutineApplyLocked(client) && !force) {
+        return;
+    }
+
+    ClutchMaybeForceStickerFullUpdate(client, force);
+    ClutchScheduleViewModelStickerPasses(client, weapon, idx);
+    if (!ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
+        ClutchScheduleStickerSlotReconcile(client, weapon, idx);
+    }
+}
+
 void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = false) {
     if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
         return;
@@ -3393,9 +3420,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
         );
         if (applied || force) {
             ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, true);
-            ClutchMaybeForceStickerFullUpdate(client, force);
-            ClutchScheduleViewModelStickerPasses(client, weapon, idx);
-            ClutchScheduleStickerSlotReconcile(client, weapon, idx);
+            ClutchScheduleStickerFollowUp(client, weapon, idx, force, teamSlot);
         }
     } else {
         ClutchEnsureEconItemInitialized(client, weapon);
@@ -3403,9 +3428,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
         if (ClutchApplyStickersToEntity(client, weapon, idx, force)) {
             applied = true;
             ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
-            ClutchMaybeForceStickerFullUpdate(client, force);
-            ClutchScheduleViewModelStickerPasses(client, weapon, idx);
-            ClutchScheduleStickerSlotReconcile(client, weapon, idx);
+            ClutchScheduleStickerFollowUp(client, weapon, idx, force, teamSlot);
         }
     }
 #else
@@ -3414,13 +3437,11 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
     if (ClutchApplyStickersToEntity(client, weapon, idx, force)) {
         applied = true;
         ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
-        ClutchMaybeForceStickerFullUpdate(client, force);
-        ClutchScheduleViewModelStickerPasses(client, weapon, idx);
-        ClutchScheduleStickerSlotReconcile(client, weapon, idx);
+        ClutchScheduleStickerFollowUp(client, weapon, idx, force, teamSlot);
     }
 #endif
 
-    if (g_cvDebug.BoolValue && applied) {
+    if (g_cvDebug.BoolValue && applied && needsApply) {
         char classname[64];
         GetEntityClassname(weapon, classname, sizeof(classname));
         int maxSlots = ClutchSupportedStickerSlotsForIndex(idx);
@@ -3801,7 +3822,9 @@ void ApplyAllCachedWeaponsToClient(int client, bool force, bool allowRegive = fa
         );
     }
 
-    ClutchReapplyStickersOnPlayerWeapons(client, force);
+    if (force) {
+        ClutchReapplyStickersOnPlayerWeapons(client, force);
+    }
     ClutchBridgeUpdateClientModel(client);
 }
 
