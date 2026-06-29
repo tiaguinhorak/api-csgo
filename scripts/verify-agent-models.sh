@@ -15,14 +15,17 @@ if [[ ! -d "${MODELS_ROOT}" ]]; then
   echo "CS:GO agent .mdl files are required on the dedicated server."
   echo "They live under models/player/custom_player/ (Shattered Web+ agents)."
   echo ""
+  echo "Note: Steam app 740 (dedicated server) does NOT include custom_player."
+  echo "      app_update 740 validate alone will never create this folder."
+  echo ""
   echo "Fix options:"
-  echo "  1) Stop srcds, then:"
-  echo "     cd ~/api-csgo && ./scripts/validate-csgo-game-files.sh"
-  echo "     (install dir must be /home/csgo/server — NOT /home/csgo)"
-  echo "  2) From a PC with CS:GO installed, copy the folder:"
-  echo "     local:  Steam/steamapps/common/Counter-Strike Global Offensive/csgo/models/player/custom_player"
+  echo "  1) On the VPS (downloads CS:GO client app 730, copies models only):"
+  echo "     cd ~/api-csgo && ./scripts/install-agent-models.sh"
+  echo "  2) From a PC with CS:GO installed:"
+  echo "     local:  Steam/.../Counter-Strike Global Offensive/csgo/models/player/custom_player"
   echo "     server: ${CSGO_ROOT}/models/player/custom_player"
-  echo "  3) Mirror the same tree on your fastdl URL"
+  echo "     scp -r custom_player csgo@server:${CSGO_ROOT}/models/player/"
+  echo "  3) Mirror the same tree on your fastdl URL (or set CSGO_FASTDL_ROOT in install script)"
   exit 1
 fi
 

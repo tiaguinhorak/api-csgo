@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Validate CS:GO dedicated server game files (includes agent models in custom_player).
+# Validate CS:GO dedicated server game files (app 740).
+# Agent models (custom_player) are NOT in app 740 — run install-agent-models.sh after this.
 #
 # Usage (stop srcds first):
 #   ./scripts/validate-csgo-game-files.sh
@@ -62,11 +63,11 @@ if [[ "${STEAM_EXIT}" -ne 0 ]]; then
   echo "Try:"
   echo "  1) Stop srcds, then re-run this script"
   echo "  2) CSGO_INSTALL=${CSGO_INSTALL} STEAMCMD=${STEAMCMD} bash scripts/update-csgo-server.sh"
-  echo "  3) Copy models/player/custom_player from a full CS:GO client install:"
-  echo "     scp -r 'client/csgo/models/player/custom_player' csgo@server:${CSGO_ROOT}/models/player/"
+  echo "  3) Agent models: ./scripts/install-agent-models.sh"
+  echo "     (app 740 does not ship models/player/custom_player)"
 fi
 
 echo ""
-echo "Checking agent models..."
+echo "Checking agent models (requires install-agent-models.sh if MISSING)..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"${SCRIPT_DIR}/verify-agent-models.sh"
+"${SCRIPT_DIR}/verify-agent-models.sh" || true
