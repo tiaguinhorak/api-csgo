@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.65"
+#define PLUGIN_VERSION "3.8.66"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -5299,13 +5299,11 @@ void ClutchApplyAgentModel(int client) {
         return;
     }
 
-    if (!IsModelInTable(modelPath)) {
-        if (!PrecacheModel(modelPath, true)) {
-            if (g_cvDebug.BoolValue) {
-                LogMessage("[Clutch] Agent model precache failed for %N: %s", client, modelPath);
-            }
-            return;
+    if (!PrecacheModel(modelPath, true)) {
+        if (g_cvDebug.BoolValue) {
+            LogMessage("[Clutch] Agent model precache failed for %N: %s", client, modelPath);
         }
+        return;
     }
 
     SetEntityModel(client, modelPath);
