@@ -6,3 +6,4 @@ dist/
 data/store.json
 scripts/.clutch_skins.tmp
 scripts/clutch_skins.export.txt
+custom_player.tgz

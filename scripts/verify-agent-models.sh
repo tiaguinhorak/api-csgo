@@ -19,13 +19,12 @@ if [[ ! -d "${MODELS_ROOT}" ]]; then
   echo "      app_update 740 validate alone will never create this folder."
   echo ""
   echo "Fix options (SteamCMD cannot download CS:GO client on Linux):"
-  echo "  1) From your gaming PC (Git Bash in api-csgo repo):"
-  echo "     VPS_HOST=csgo@19520 ./scripts/push-agent-models-from-pc.sh"
-  echo "  2) Manual tarball:"
-  echo "     PC: tar czf custom_player.tgz -C '.../csgo/models/player' custom_player"
-  echo "     scp custom_player.tgz csgo@server:/tmp/"
+  echo "  1) PC with CS:GO Legacy — models are inside pak01_dir.vpk:"
+  echo "     cd api-csgo && pip install vpk"
+  echo "     python scripts/extract-agent-models-from-csgo.py"
+  echo "     scp custom_player.tgz csgo@YOUR_VPS:/tmp/"
   echo "     VPS: ./scripts/receive-agent-models-tarball.sh /tmp/custom_player.tgz"
-  echo "  3) Mirror the same tree on your fastdl URL (CSGO_FASTDL_ROOT in install script)"
+  echo "  2) One-shot from PC: VPS_HOST=csgo@YOUR_VPS ./scripts/push-agent-models-from-pc.sh"
   exit 1
 fi
 
