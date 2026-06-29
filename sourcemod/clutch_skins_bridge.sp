@@ -102,7 +102,7 @@ float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
 float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
 bool g_bStickerDbSynced[MAXPLAYERS + 1];
 int g_iStickerQueryGen[MAXPLAYERS + 1];
-float g_fViewModelStickerDelays[STICKER_VIEWMODEL_PASS_COUNT] = {0.15, 0.45, 1.0};
+float g_fViewModelStickerDelays[STICKER_VIEWMODEL_PASS_COUNT] = {0.15, 0.45};
 float g_fRespawnVisualDelays[RESPAWN_VISUAL_PASS_COUNT] = {0.45, 1.0};
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
