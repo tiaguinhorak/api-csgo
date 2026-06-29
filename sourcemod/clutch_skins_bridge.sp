@@ -2665,7 +2665,7 @@ bool ClutchViewModelMatchesWeapon(int client, int viewModel, int weapon) {
     }
 
     int activeWeapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
-  return activeWeapon == weapon;
+    return activeWeapon == weapon;
 }
 
 bool ClutchWeaponStickersNativeReady() {
@@ -3281,12 +3281,12 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
         CEconItemView verifyView = PTaH_GetEconItemViewFromEconEntity(weapon);
         for (int s = 0; s < CLUTCH_SITE_STICKER_SLOTS; s++) {
             int cached = g_iStickerSlots[client][ClutchStickerTeamSlot(GetClientTeam(client))][idx][s];
-            int applied = ClutchReadStickerIdAtSlot(verifyView, s);
+            int appliedId = ClutchReadStickerIdAtSlot(verifyView, s);
             LogMessage(
                 "[Clutch] sticker slot %d cached=%d applied=%d for %N",
                 s,
                 cached,
-                applied,
+                appliedId,
                 client
             );
         }
