@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.71"
+#define PLUGIN_VERSION "3.8.72"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -298,6 +298,18 @@ public void OnPluginStart() {
 #endif
     CreateTimer(1.0, Timer_RecheckPluginNatives, _, TIMER_FLAG_NO_MAPCHANGE);
     CreateTimer(3.0, Timer_RecheckPluginNatives, _, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(3.0, Timer_SyncConnectedClientsOnLoad, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_SyncConnectedClientsOnLoad(Handle timer) {
+    for (int client = 1; client <= MaxClients; client++) {
+        if (!IsClientInGame(client) || IsFakeClient(client)) {
+            continue;
+        }
+        g_bConnectApplyScheduled[client] = false;
+        ClutchScheduleConnectLoadout(client);
+    }
+    return Plugin_Stop;
 }
 
 public Action Timer_RecheckPluginNatives(Handle timer) {
@@ -3880,6 +3892,9 @@ public Action Timer_ApplyCachedWeaponsDelayed(Handle timer, DataPack pack) {
 #endif
     ApplyAllCachedWeaponsToClient(client, force, allowRegive);
     ScheduleForceReapply(client, force, allowRegive);
+    if (g_bInitialSyncPending[client]) {
+        ClutchMarkInitialSyncComplete(client);
+    }
     return Plugin_Stop;
 }
 
@@ -4121,13 +4136,13 @@ public void T_TeamLoadoutCallback(Database database, DBResultSet results, const 
             g_bLoggedMissingLoadout[client] = true;
         }
         QueryPlayerGloves(client, steamId, 0);
-        ScheduleWeaponsAfterGlovesApply(client, force, !force);
+        ScheduleWeaponsAfterGlovesApply(client, force, true);
         return;
     }
 
     g_bLoggedMissingLoadout[client] = false;
     QueryPlayerGloves(client, steamId, 0);
-    ScheduleWeaponsAfterGlovesApply(client, force, !force);
+    ScheduleWeaponsAfterGlovesApply(client, force, true);
 }
 
 bool ApplyTeamLoadoutFromResults(int client, DBResultSet results, bool force) {
@@ -4404,7 +4419,6 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
             ScheduleStickersQueryRetry(client, steamId, altAttempt, 0.5);
             return;
         }
-        ClutchMarkInitialSyncComplete(client);
         return;
     }
 
@@ -4459,14 +4473,12 @@ public void T_StickersCallback(Database database, DBResultSet results, const cha
         ClutchClearStickerCache(client);
         ClutchReapplyStickersOnPlayerWeapons(client, true);
         g_bStickerDbSynced[client] = true;
-        ClutchMarkInitialSyncComplete(client);
         return;
     }
 
     g_bStickerDbSynced[client] = true;
     ClutchPurgeLegacyStickerRowsForSteam(steamId);
     ClutchReapplyStickersOnPlayerWeapons(client, true);
-    ClutchMarkInitialSyncComplete(client);
 }
 
 public void T_LegacyStickersCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
@@ -5370,13 +5382,38 @@ bool ClutchAgentModelOnDisk(const char[] modelPath) {
     return modelPath[0] != '\0' && FileExists(modelPath, true);
 }
 
-bool ClutchPrecacheAgentModelPath(const char[] modelPath) {
-    if (!ClutchAgentModelOnDisk(modelPath)) {
+bool ClutchResolveAgentModelPath(const char[] modelPath, char[] resolved, int maxlen) {
+    resolved[0] = '\0';
+    if (modelPath[0] == '\0') {
         return false;
     }
 
-    ClutchAddModelFilesToDownloads(modelPath);
-    return PrecacheModel(modelPath, true) != 0;
+    if (ClutchAgentModelOnDisk(modelPath)) {
+        strcopy(resolved, maxlen, modelPath);
+        return true;
+    }
+
+    if (StrContains(modelPath, "models/player/custom_player/", false) == 0) {
+        char tail[PLATFORM_MAX_PATH];
+        strcopy(tail, sizeof(tail), modelPath);
+        ReplaceString(tail, sizeof(tail), "models/player/custom_player/", "", false);
+        Format(resolved, maxlen, "models/player/%s", tail);
+        if (ClutchAgentModelOnDisk(resolved)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ClutchPrecacheAgentModelPath(const char[] modelPath) {
+    char resolved[PLATFORM_MAX_PATH];
+    if (!ClutchResolveAgentModelPath(modelPath, resolved, sizeof(resolved))) {
+        return false;
+    }
+
+    ClutchAddModelFilesToDownloads(resolved);
+    return PrecacheModel(resolved, true) != 0;
 }
 
 void ClutchGetDefaultTeamModelPath(int team, char[] output, int maxlen) {
@@ -5391,7 +5428,7 @@ void ClutchGetDefaultTeamModelPath(int team, char[] output, int maxlen) {
 void ClutchResetPlayerDefaultModel(int client, int team) {
     char defaultModel[PLATFORM_MAX_PATH];
     ClutchGetDefaultTeamModelPath(team, defaultModel, sizeof(defaultModel));
-    if (defaultModel[0] == '\0') {
+    if (defaultModel[0] == '\0' || !ClutchAgentModelOnDisk(defaultModel)) {
         return;
     }
 
@@ -5425,10 +5462,12 @@ void ClutchApplyAgentModel(int client) {
     }
 
     if (!ClutchPrecacheAgentModelPath(modelPath)) {
+        char resolved[PLATFORM_MAX_PATH];
+        ClutchResolveAgentModelPath(modelPath, resolved, sizeof(resolved));
         LogError(
             "[Clutch] Agent model missing on server disk for %N: %s (install models/player/custom_player/ on srcds + fastdl)",
             client,
-            modelPath
+            resolved[0] != '\0' ? resolved : modelPath
         );
         ClutchResetPlayerDefaultModel(client, team);
         PrintToChat(
@@ -5438,8 +5477,13 @@ void ClutchApplyAgentModel(int client) {
         return;
     }
 
+    char resolvedModel[PLATFORM_MAX_PATH];
+    if (!ClutchResolveAgentModelPath(modelPath, resolvedModel, sizeof(resolvedModel))) {
+        return;
+    }
+
     char armsPath[PLATFORM_MAX_PATH];
-    ClutchDeriveAgentArmsPath(modelPath, armsPath, sizeof(armsPath));
+    ClutchDeriveAgentArmsPath(resolvedModel, armsPath, sizeof(armsPath));
     if (armsPath[0] != '\0' && ClutchAgentModelOnDisk(armsPath)) {
         ClutchAddModelFilesToDownloads(armsPath);
         PrecacheModel(armsPath, true);
@@ -5448,8 +5492,8 @@ void ClutchApplyAgentModel(int client) {
         SetEntPropString(client, Prop_Send, "m_szArmsModel", "");
     }
 
-    SetEntityModel(client, modelPath);
-    strcopy(g_sAppliedAgentModel[client], sizeof(g_sAppliedAgentModel[]), modelPath);
+    SetEntityModel(client, resolvedModel);
+    strcopy(g_sAppliedAgentModel[client], sizeof(g_sAppliedAgentModel[]), resolvedModel);
 
     if (g_cvDebug.BoolValue) {
         LogMessage("[Clutch] Applied agent model for %N team=%d model=%s", client, team, modelPath);
