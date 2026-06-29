@@ -25,7 +25,8 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.60"
+#define PLUGIN_VERSION "3.8.61"
+#define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define RESPAWN_VISUAL_PASS_COUNT 2
@@ -2469,6 +2470,10 @@ void ClutchClearStickerSlotAttributes(CAttributeList attrList, int slot) {
     attrList.SetOrAddAttributeValue(idAttr + 3, 0.0);
 }
 
+bool ClutchIsLegacyStickerDefIndex(int stickerId) {
+    return stickerId > 0 && stickerId <= CLUTCH_LEGACY_MAX_STICKER_DEFINDEX;
+}
+
 void ClutchWriteStickerCacheToEntity(int client, int entity, int idx, int teamSlot) {
     if (entity <= 0 || !IsValidEntity(entity) || idx < 0 || !IsPaintableWeaponEntity(entity)) {
         return;
@@ -2491,7 +2496,7 @@ void ClutchWriteStickerCacheToEntity(int client, int entity, int idx, int teamSl
 
     for (int s = 0; s < slotCount; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
-        if (stickerId <= 0) {
+        if (stickerId <= 0 || !ClutchIsLegacyStickerDefIndex(stickerId)) {
             continue;
         }
         float wear = g_fStickerWears[client][teamSlot][idx][s];
@@ -2897,7 +2902,7 @@ bool ClutchApplyStickersNativePath(int client, int entity, int idx, int teamSlot
     for (int s = 0; s < slotCount; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
         float wear = g_fStickerWears[client][teamSlot][idx][s];
-        if (stickerId <= 0) {
+        if (stickerId <= 0 || !ClutchIsLegacyStickerDefIndex(stickerId)) {
             continue;
         }
         CS_SetWeaponSticker(client, entity, s, stickerId, wear, 0.0);
@@ -2939,7 +2944,7 @@ bool ClutchApplyStickersViaNative(int client, int weapon, int idx, bool force = 
     for (int s = 0; s < slotCount; s++) {
         int stickerId = g_iStickerSlots[client][teamSlot][idx][s];
         float wear = g_fStickerWears[client][teamSlot][idx][s];
-        if (stickerId <= 0) {
+        if (stickerId <= 0 || !ClutchIsLegacyStickerDefIndex(stickerId)) {
             if (force) {
                 CS_SetWeaponSticker(client, weapon, s, 0, 0.0, 0.0);
             }
@@ -4142,7 +4147,11 @@ void ClutchCacheStickerRowForTeam(
     }
 
     for (int s = 0; s < CLUTCH_STICKER_SLOTS; s++) {
-        g_iStickerSlots[client][teamSlot][idx][s] = results.FetchInt(slotColumnStart + s);
+        int stickerId = results.FetchInt(slotColumnStart + s);
+        if (!ClutchIsLegacyStickerDefIndex(stickerId)) {
+            stickerId = 0;
+        }
+        g_iStickerSlots[client][teamSlot][idx][s] = stickerId;
         if (wearColumnStart >= 0) {
             g_fStickerWears[client][teamSlot][idx][s] = results.FetchFloat(wearColumnStart + s);
         } else {
