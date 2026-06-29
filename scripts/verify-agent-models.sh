@@ -18,14 +18,14 @@ if [[ ! -d "${MODELS_ROOT}" ]]; then
   echo "Note: Steam app 740 (dedicated server) does NOT include custom_player."
   echo "      app_update 740 validate alone will never create this folder."
   echo ""
-  echo "Fix options:"
-  echo "  1) On the VPS (downloads CS:GO client app 730, copies models only):"
-  echo "     cd ~/api-csgo && ./scripts/install-agent-models.sh"
-  echo "  2) From a PC with CS:GO installed:"
-  echo "     local:  Steam/.../Counter-Strike Global Offensive/csgo/models/player/custom_player"
-  echo "     server: ${CSGO_ROOT}/models/player/custom_player"
-  echo "     scp -r custom_player csgo@server:${CSGO_ROOT}/models/player/"
-  echo "  3) Mirror the same tree on your fastdl URL (or set CSGO_FASTDL_ROOT in install script)"
+  echo "Fix options (SteamCMD cannot download CS:GO client on Linux):"
+  echo "  1) From your gaming PC (Git Bash in api-csgo repo):"
+  echo "     VPS_HOST=csgo@19520 ./scripts/push-agent-models-from-pc.sh"
+  echo "  2) Manual tarball:"
+  echo "     PC: tar czf custom_player.tgz -C '.../csgo/models/player' custom_player"
+  echo "     scp custom_player.tgz csgo@server:/tmp/"
+  echo "     VPS: ./scripts/receive-agent-models-tarball.sh /tmp/custom_player.tgz"
+  echo "  3) Mirror the same tree on your fastdl URL (CSGO_FASTDL_ROOT in install script)"
   exit 1
 fi
 

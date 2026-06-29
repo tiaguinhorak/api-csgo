@@ -3,19 +3,14 @@ set -euo pipefail
 
 # Install CS:GO agent player models (models/player/custom_player/).
 #
-# Steam app 740 (dedicated server) does NOT ship these files — only the full
-# client (app 730) or a manual copy from a PC with CS:GO installed works.
+# Steam app 740 (dedicated server) does NOT ship these files.
+# SteamCMD app 730 (CS:GO client) usually fails on Linux (0x202 / no subscription).
+# Use push from PC instead:
+#   VPS_HOST=csgo@YOUR_VPS ./scripts/push-agent-models-from-pc.sh
 #
-# Usage:
-#   ./scripts/install-agent-models.sh
-#   CSGO_CLIENT_CSGO=/path/to/csgo ./scripts/install-agent-models.sh
-#
-# Env:
-#   CSGO_ROOT          — server game dir (default /home/csgo/server/csgo)
-#   CSGO_CLIENT_CSGO   — existing client csgo/ with models (skip Steam download)
-#   CSGO_CLIENT_INSTALL — staging dir for app 730 download (default ~/csgo-client)
-#   STEAMCMD           — path to steamcmd.sh
-#   CSGO_FASTDL_ROOT   — optional; mirror custom_player here (e.g. nginx fastdl root)
+# Or manual tarball:
+#   scp custom_player.tgz csgo@server:/tmp/
+#   ./scripts/receive-agent-models-tarball.sh /tmp/custom_player.tgz
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -f "${REPO_ROOT}/.env" ]]; then
@@ -29,6 +24,7 @@ CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
 DEST="${CSGO_ROOT}/models/player/custom_player"
 CLIENT_INSTALL="${CSGO_CLIENT_INSTALL:-${HOME}/csgo-client}"
 STEAMCMD="${STEAMCMD:-${HOME}/steamcmd/steamcmd.sh}"
+MIN_FREE_MB="${MIN_FREE_MB:-2048}"
 
 if [[ ! -x "${STEAMCMD}" ]]; then
   STEAMCMD="/home/csgo/steamcmd/steamcmd.sh"
@@ -78,13 +74,44 @@ mirror_fastdl() {
   fi
 }
 
+check_disk_space() {
+  local dest_parent
+  dest_parent="$(dirname "${DEST}")"
+  mkdir -p "${dest_parent}"
+  local avail_kb
+  avail_kb="$(df -Pk "${dest_parent}" | awk 'NR==2 {print $4}')"
+  local avail_mb=$((avail_kb / 1024))
+  echo "Disk free on ${dest_parent}: ${avail_mb} MB"
+  if [[ "${avail_mb}" -lt "${MIN_FREE_MB}" ]]; then
+    echo "ERROR: need at least ${MIN_FREE_MB} MB free (custom_player is ~500MB–2GB)." >&2
+    df -h "${dest_parent}" >&2
+    exit 1
+  fi
+}
+
+steamcmd_failed_hint() {
+  local code="$1"
+  echo ""
+  echo "SteamCMD failed (exit ${code}). Common causes:" >&2
+  echo "  • 0x202 = disk full or write failure — run: df -h" >&2
+  echo "  • app 730 not available on Linux SteamCMD (CS:GO client is Windows-only now)" >&2
+  echo ""
+  echo "Use copy from your gaming PC instead:" >&2
+  echo "  VPS_HOST=csgo@YOUR_VPS ./scripts/push-agent-models-from-pc.sh" >&2
+  echo "Or tarball:" >&2
+  echo "  scp custom_player.tgz ${VPS_HOST:-csgo@server}:/tmp/" >&2
+  echo "  ./scripts/receive-agent-models-tarball.sh /tmp/custom_player.tgz" >&2
+}
+
 if pgrep -x srcds_linux >/dev/null 2>&1; then
-  echo "WARN: srcds_linux is running — stop the server before replacing models." >&2
+  echo "ERROR: srcds_linux is running — stop the server first (screen -r)." >&2
+  exit 1
 fi
 
 echo "=== Install agent models (custom_player) ==="
 echo "Server:  ${DEST}"
 echo ""
+check_disk_space
 
 SRC=""
 if [[ -n "${CSGO_CLIENT_CSGO:-}" ]]; then
@@ -93,17 +120,31 @@ if [[ -n "${CSGO_CLIENT_CSGO:-}" ]]; then
     echo "ERROR: CSGO_CLIENT_CSGO=${CSGO_CLIENT_CSGO} has no models/player/custom_player" >&2
     exit 1
   fi
-  echo "Using local client path: ${SRC}"
+  echo "Using local path: ${SRC}"
+elif [[ -f /tmp/custom_player.tgz ]]; then
+  echo "Found /tmp/custom_player.tgz — extracting"
+  "${REPO_ROOT}/scripts/receive-agent-models-tarball.sh" /tmp/custom_player.tgz
+  mirror_fastdl
+  exit 0
 else
   SRC="$(find_client_custom_player "${CLIENT_INSTALL}" || true)"
   if [[ -z "${SRC}" ]]; then
     if [[ ! -x "${STEAMCMD}" ]]; then
-      echo "ERROR: steamcmd not found at ${STEAMCMD}" >&2
+      echo "ERROR: steamcmd not found and no local custom_player folder." >&2
+      steamcmd_failed_hint 1
       exit 1
     fi
-    echo "No client models found — downloading CS:GO client (app 730) to ${CLIENT_INSTALL}"
-    echo "    (large download; only custom_player will be copied to the server)"
-    echo ""
+    if [[ "${ALLOW_STEAMCMD_730:-0}" != "1" ]]; then
+      echo "SteamCMD app 730 (CS:GO client) usually cannot be installed on Linux." >&2
+      echo "Copy from a PC with CS:GO / CS:GO Legacy in Steam:" >&2
+      echo ""
+      echo "  On PC (Git Bash): VPS_HOST=csgo@19520 ./scripts/push-agent-models-from-pc.sh" >&2
+      echo "  On VPS after scp:  ./scripts/receive-agent-models-tarball.sh /tmp/custom_player.tgz" >&2
+      echo ""
+      echo "To force SteamCMD attempt anyway: ALLOW_STEAMCMD_730=1 ./scripts/install-agent-models.sh" >&2
+      exit 1
+    fi
+    echo "Trying SteamCMD app 730 (often fails on Linux) → ${CLIENT_INSTALL}"
     mkdir -p "${CLIENT_INSTALL}"
     set +e
     "${STEAMCMD}" \
@@ -114,22 +155,18 @@ else
     STEAM_EXIT=$?
     set -e
     if [[ "${STEAM_EXIT}" -ne 0 ]]; then
-      echo ""
-      echo "WARN: app_update 730 exited ${STEAM_EXIT} — client may no longer be on SteamCMD." >&2
-      echo "Copy from a PC with CS:GO installed:" >&2
-      echo "  scp -r '.../csgo/models/player/custom_player' csgo@server:${CSGO_ROOT}/models/player/" >&2
+      steamcmd_failed_hint "${STEAM_EXIT}"
       exit 1
     fi
     SRC="$(find_client_custom_player "${CLIENT_INSTALL}" || true)"
     if [[ -z "${SRC}" ]]; then
       echo "ERROR: app 730 finished but custom_player not found under ${CLIENT_INSTALL}" >&2
-      echo "List install dir:" >&2
       ls -la "${CLIENT_INSTALL}" >&2 || true
       exit 1
     fi
     echo "Found after download: ${SRC}"
   else
-    echo "Using cached client staging: ${SRC}"
+    echo "Using cached staging: ${SRC}"
   fi
 fi
 
