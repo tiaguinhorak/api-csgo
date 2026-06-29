@@ -5376,7 +5376,7 @@ bool ClutchPrecacheAgentModelPath(const char[] modelPath) {
     }
 
     ClutchAddModelFilesToDownloads(modelPath);
-    return PrecacheModel(modelPath, true);
+    return PrecacheModel(modelPath, true) != 0;
 }
 
 void ClutchGetDefaultTeamModelPath(int team, char[] output, int maxlen) {
@@ -5489,7 +5489,7 @@ public void T_AgentsCallback(Database database, DBResultSet results, const char[
     int userid = pack.ReadCell();
     char steamId[32];
     pack.ReadString(steamId, sizeof(steamId));
-    int altAttempt = pack.ReadCell();
+    pack.ReadCell(); // altAttempt (unused)
     delete pack;
 
     int client = GetClientOfUserId(userid);
