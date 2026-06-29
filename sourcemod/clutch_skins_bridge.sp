@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.76"
+#define PLUGIN_VERSION "3.8.77"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define STICKER_SWEEP_PASS_COUNT 5
@@ -1133,6 +1133,34 @@ public Action Timer_CachedVisualPass(Handle timer, DataPack pack) {
     return Plugin_Stop;
 }
 
+void ClutchScheduleSpawnVisualRestore(int client) {
+    if (client <= 0 || IsFakeClient(client)) {
+        return;
+    }
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    CreateTimer(0.05, Timer_RestoreSpawnVisuals, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_RestoreSpawnVisuals(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
+        return Plugin_Stop;
+    }
+
+    g_sAppliedAgentModel[client][0] = '\0';
+    ClutchApplyAgentModel(client);
+#if defined _clutch_gloves_included_
+    ClutchGlovesApplyClientSafe(client);
+#endif
+    return Plugin_Stop;
+}
+
 void ClutchScheduleRespawnCachedVisuals(int client) {
     if (client <= 0 || IsFakeClient(client)) {
         return;
@@ -1877,6 +1905,8 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
         return;
     }
 
+    g_sAppliedAgentModel[client][0] = '\0';
+
     if (g_cvOncePerMatch.BoolValue) {
         return;
     }
@@ -1900,13 +1930,7 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
             ClutchSchedulePostSyncStickerSweeps(client);
             return;
         }
-        if (ClutchClientIsSkinAdmin(client)) {
-            DataPack pack = new DataPack();
-            pack.WriteCell(GetClientUserId(client));
-            CreateTimer(0.4, Timer_AdminRespawnApply, pack, TIMER_FLAG_NO_MAPCHANGE);
-        } else {
-            ClutchScheduleRespawnCachedVisuals(client);
-        }
+        ClutchScheduleSpawnVisualRestore(client);
         return;
     }
 
@@ -1955,10 +1979,6 @@ public Action Timer_RoundStartApply(Handle timer) {
             continue;
         }
         if (g_cvOncePerMatch.BoolValue && g_bMatchLoadoutSynced[client]) {
-            if (ClutchClientIsSkinAdmin(client)) {
-                continue;
-            }
-            ApplyAllCachedWeaponsToClient(client, true, false);
             continue;
         }
         if (
