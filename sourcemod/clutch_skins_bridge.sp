@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.62"
+#define PLUGIN_VERSION "3.8.63"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -2909,8 +2909,12 @@ bool ClutchApplyStickersNativePath(int client, int entity, int idx, int teamSlot
         any = true;
     }
 
+    // Sync PTaH econ attributes so all slots (especially slot 4) render and match checks work.
+    ClutchWriteStickerCacheToEntity(client, entity, idx, teamSlot);
+
     if (any) {
         ClutchNetworkUpdateWeaponSkin(entity);
+        ClutchNetworkUpdate(entity);
     }
 
     return any || force || !hasCached;
@@ -3223,6 +3227,61 @@ void ClutchMirrorStickersToViewModels(int client, int weapon, int idx) {
     ClutchSyncViewModelStickersFromWeapon(client, weapon, idx);
 }
 
+void ClutchScheduleStickerSlotReconcile(int client, int weapon, int idx) {
+    if (client <= 0 || weapon <= 0 || idx < 0 || !IsValidEntity(weapon)) {
+        return;
+    }
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteCell(EntIndexToEntRef(weapon));
+    pack.WriteCell(idx);
+    CreateTimer(0.2, Timer_StickerSlotReconcile, pack, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_StickerSlotReconcile(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int weaponRef = pack.ReadCell();
+    int idx = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    int weapon = EntRefToEntIndex(weaponRef);
+    if (client <= 0 || !IsClientInGame(client) || weapon == -1 || !IsValidEntity(weapon) || idx < 0) {
+        return Plugin_Stop;
+    }
+
+    if (!ClutchWeaponHasStickerCache(client, idx)) {
+        return Plugin_Stop;
+    }
+
+    int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+    if (ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
+        return Plugin_Stop;
+    }
+
+#if defined _csgo_weaponstickers_included_
+    if (ClutchWeaponStickersNativeReady()) {
+        ClutchApplyStickersNativePath(client, weapon, idx, teamSlot, true);
+        ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, true);
+        ClutchMaybeForceStickerFullUpdate(client, true);
+    } else {
+        ClutchWriteStickerCacheToEntity(client, weapon, idx, teamSlot);
+        ClutchApplyStickersToEntity(client, weapon, idx, true);
+        ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
+        ClutchMaybeForceStickerFullUpdate(client, true);
+    }
+#else
+    ClutchWriteStickerCacheToEntity(client, weapon, idx, teamSlot);
+    ClutchApplyStickersToEntity(client, weapon, idx, true);
+    ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
+    ClutchMaybeForceStickerFullUpdate(client, true);
+#endif
+
+    return Plugin_Stop;
+}
+
 void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = false) {
     if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
         return;
@@ -3254,6 +3313,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
             ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, true);
             ClutchMaybeForceStickerFullUpdate(client, force);
             ClutchScheduleViewModelStickerPasses(client, weapon, idx);
+            ClutchScheduleStickerSlotReconcile(client, weapon, idx);
         }
     } else {
         ClutchEnsureEconItemInitialized(client, weapon);
@@ -3263,6 +3323,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
             ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
             ClutchMaybeForceStickerFullUpdate(client, force);
             ClutchScheduleViewModelStickerPasses(client, weapon, idx);
+            ClutchScheduleStickerSlotReconcile(client, weapon, idx);
         }
     }
 #else
@@ -3273,6 +3334,7 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
         ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
         ClutchMaybeForceStickerFullUpdate(client, force);
         ClutchScheduleViewModelStickerPasses(client, weapon, idx);
+        ClutchScheduleStickerSlotReconcile(client, weapon, idx);
     }
 #endif
 
