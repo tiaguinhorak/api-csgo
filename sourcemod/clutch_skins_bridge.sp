@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.69"
+#define PLUGIN_VERSION "3.8.70"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -1778,7 +1778,7 @@ public Action Timer_RoundStartApply(Handle timer) {
             if (ClutchClientIsSkinAdmin(client)) {
                 continue;
             }
-            ApplyAllCachedWeaponsToClient(client, false, false);
+            ApplyAllCachedWeaponsToClient(client, true, false);
             continue;
         }
         if (

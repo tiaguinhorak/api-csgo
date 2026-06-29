@@ -112,6 +112,13 @@ fi
 PLUGIN_SMX="z_clutch_skins_bridge.smx"
 GLOVES_SMX="z_clutch_gloves.smx"
 LEGACY_SMX="clutch_skins_bridge.smx"
+BRIDGE_PLUGIN="${SM}/plugins/${PLUGIN_SMX}"
+BRIDGE_BACKUP="${SM}/plugins/.z_clutch_skins_bridge.smx.bak"
+
+if [[ -f "${BRIDGE_PLUGIN}" ]]; then
+  cp -f "${BRIDGE_PLUGIN}" "${BRIDGE_BACKUP}"
+  echo "Backed up existing ${PLUGIN_SMX}"
+fi
 
 echo "Compiling z_clutch_gloves..."
 if [[ -f "${SM}/scripting/z_clutch_gloves.sp" ]]; then
@@ -126,16 +133,27 @@ else
 fi
 
 echo "Compiling z_clutch_skins_bridge..."
-if ! (cd "${SM}/scripting" && "${SPCOMP}" clutch_skins_bridge.sp -o"${SM}/plugins/${PLUGIN_SMX}"); then
+if ! (cd "${SM}/scripting" && "${SPCOMP}" clutch_skins_bridge.sp -o"${BRIDGE_PLUGIN}"); then
   echo "Compile failed — fix errors above. Run: cd ~/api-csgo && git pull" >&2
-  rm -f "${SM}/plugins/${PLUGIN_SMX}"
+  if [[ -f "${BRIDGE_BACKUP}" ]]; then
+    cp -f "${BRIDGE_BACKUP}" "${BRIDGE_PLUGIN}"
+    echo "Restored previous ${PLUGIN_SMX} from backup (server can reload the old build)." >&2
+  else
+    rm -f "${BRIDGE_PLUGIN}"
+  fi
   exit 1
 fi
 
-if [[ ! -f "${SM}/plugins/${PLUGIN_SMX}" ]]; then
+if [[ ! -f "${BRIDGE_PLUGIN}" ]]; then
   echo "Compile failed — no .smx output" >&2
+  if [[ -f "${BRIDGE_BACKUP}" ]]; then
+    cp -f "${BRIDGE_BACKUP}" "${BRIDGE_PLUGIN}"
+    echo "Restored previous ${PLUGIN_SMX} from backup." >&2
+  fi
   exit 1
 fi
+
+rm -f "${BRIDGE_BACKUP}"
 
 # Load after weapons.smx (alphabetical: z_ > weapons)
 rm -f "${SM}/plugins/${LEGACY_SMX}"
