@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.66"
+#define PLUGIN_VERSION "3.8.67"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -5276,6 +5276,103 @@ void ClutchNormalizeAgentModelPath(const char[] input, char[] output, int maxlen
     }
 }
 
+void ClutchDeriveAgentArmsPath(const char[] modelPath, char[] armsPath, int maxlen) {
+    armsPath[0] = '\0';
+
+    char relative[PLATFORM_MAX_PATH];
+    if (StrContains(modelPath, "models/player/custom_player/", false) != 0) {
+        return;
+    }
+
+    strcopy(relative, sizeof(relative), modelPath);
+    ReplaceString(relative, sizeof(relative), "models/player/custom_player/", "", false);
+
+    char folder[64];
+    char variantFile[64];
+    if (SplitString(relative, "/", folder, sizeof(folder), variantFile, sizeof(variantFile)) == -1) {
+        return;
+    }
+
+    char variant[64];
+    strcopy(variant, sizeof(variant), variantFile);
+    ReplaceString(variant, sizeof(variant), ".mdl", "", false);
+
+    Format(
+        armsPath,
+        maxlen,
+        "models/weapons/v_models/arms/%s/%s/v_%s.mdl",
+        folder,
+        variant,
+        variant
+    );
+}
+
+void ClutchAddModelFilesToDownloads(const char[] modelPath) {
+    if (modelPath[0] == '\0') {
+        return;
+    }
+
+    char path[PLATFORM_MAX_PATH];
+    AddFileToDownloadsTable(modelPath);
+
+    strcopy(path, sizeof(path), modelPath);
+    ReplaceString(path, sizeof(path), ".mdl", ".vvd", false);
+    AddFileToDownloadsTable(path);
+
+    strcopy(path, sizeof(path), modelPath);
+    ReplaceString(path, sizeof(path), ".mdl", ".dx90.vtx", false);
+    if (FileExists(path, true)) {
+        AddFileToDownloadsTable(path);
+    }
+
+    strcopy(path, sizeof(path), modelPath);
+    ReplaceString(path, sizeof(path), ".mdl", ".vtx", false);
+    if (FileExists(path, true)) {
+        AddFileToDownloadsTable(path);
+    }
+
+    strcopy(path, sizeof(path), modelPath);
+    ReplaceString(path, sizeof(path), ".mdl", ".phy", false);
+    if (FileExists(path, true)) {
+        AddFileToDownloadsTable(path);
+    }
+}
+
+bool ClutchAgentModelOnDisk(const char[] modelPath) {
+    return modelPath[0] != '\0' && FileExists(modelPath, true);
+}
+
+bool ClutchPrecacheAgentModelPath(const char[] modelPath) {
+    if (!ClutchAgentModelOnDisk(modelPath)) {
+        return false;
+    }
+
+    ClutchAddModelFilesToDownloads(modelPath);
+    return PrecacheModel(modelPath, true);
+}
+
+void ClutchGetDefaultTeamModelPath(int team, char[] output, int maxlen) {
+    output[0] = '\0';
+    if (team == CS_TEAM_T) {
+        strcopy(output, maxlen, "models/player/tm_phoenix/tm_phoenix.mdl");
+    } else if (team == CS_TEAM_CT) {
+        strcopy(output, maxlen, "models/player/ctm_sas/ctm_sas.mdl");
+    }
+}
+
+void ClutchResetPlayerDefaultModel(int client, int team) {
+    char defaultModel[PLATFORM_MAX_PATH];
+    ClutchGetDefaultTeamModelPath(team, defaultModel, sizeof(defaultModel));
+    if (defaultModel[0] == '\0') {
+        return;
+    }
+
+    PrecacheModel(defaultModel, true);
+    SetEntityModel(client, defaultModel);
+    SetEntPropString(client, Prop_Send, "m_szArmsModel", "");
+    g_sAppliedAgentModel[client][0] = '\0';
+}
+
 void ClutchApplyAgentModel(int client) {
     if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
         return;
@@ -5299,11 +5396,28 @@ void ClutchApplyAgentModel(int client) {
         return;
     }
 
-    if (!PrecacheModel(modelPath, true)) {
-        if (g_cvDebug.BoolValue) {
-            LogMessage("[Clutch] Agent model precache failed for %N: %s", client, modelPath);
-        }
+    if (!ClutchPrecacheAgentModelPath(modelPath)) {
+        LogError(
+            "[Clutch] Agent model missing on server disk for %N: %s (install models/player/custom_player/ on srcds + fastdl)",
+            client,
+            modelPath
+        );
+        ClutchResetPlayerDefaultModel(client, team);
+        PrintToChat(
+            client,
+            " \x04ClutchClube\x01: Modelo do agente indisponível no servidor — usando modelo padrão."
+        );
         return;
+    }
+
+    char armsPath[PLATFORM_MAX_PATH];
+    ClutchDeriveAgentArmsPath(modelPath, armsPath, sizeof(armsPath));
+    if (armsPath[0] != '\0' && ClutchAgentModelOnDisk(armsPath)) {
+        ClutchAddModelFilesToDownloads(armsPath);
+        PrecacheModel(armsPath, true);
+        SetEntPropString(client, Prop_Send, "m_szArmsModel", armsPath);
+    } else {
+        SetEntPropString(client, Prop_Send, "m_szArmsModel", "");
     }
 
     SetEntityModel(client, modelPath);
