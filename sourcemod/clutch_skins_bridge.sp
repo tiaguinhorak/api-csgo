@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.63"
+#define PLUGIN_VERSION "3.8.64"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 2
 #define CLUTCH_SITE_STICKER_SLOTS 4
@@ -58,6 +58,7 @@ Database g_hWeaponsDb = null;
 Database g_hStickersDb = null;
 char g_sStickersTable[32];
 char g_sLegacyStickersTable[32];
+char g_sAgentsTable[32];
 char g_sResolvedStickersDbPath[PLATFORM_MAX_PATH];
 char g_sTablePrefix[16];
 bool g_bLoggedMissingLoadout[MAXPLAYERS + 1];
@@ -65,6 +66,7 @@ float g_fLastApplyTime[MAXPLAYERS + 1];
 int g_iLastKnifePaint[MAXPLAYERS + 1];
 int g_iItemIdHigh = 16384;
 bool g_bGlovesTableReady = false;
+bool g_bAgentsTableReady = false;
 bool g_bStickersTableReady = false;
 bool g_bGlovesPending[MAXPLAYERS + 1];
 int g_iGloveQueryGen[MAXPLAYERS + 1];
@@ -105,6 +107,11 @@ bool g_bStickerDbSynced[MAXPLAYERS + 1];
 int g_iStickerQueryGen[MAXPLAYERS + 1];
 float g_fViewModelStickerDelays[STICKER_VIEWMODEL_PASS_COUNT] = {0.15, 0.45};
 float g_fRespawnVisualDelays[RESPAWN_VISUAL_PASS_COUNT] = {0.45, 1.0};
+int g_iAgentDefT[MAXPLAYERS + 1];
+int g_iAgentDefCT[MAXPLAYERS + 1];
+char g_sAgentModelT[MAXPLAYERS + 1][PLATFORM_MAX_PATH];
+char g_sAgentModelCT[MAXPLAYERS + 1][PLATFORM_MAX_PATH];
+char g_sAppliedAgentModel[MAXPLAYERS + 1][PLATFORM_MAX_PATH];
 
 char g_ClutchWeaponKeys[CLUTCH_WEAPON_SLOTS][32] = {
     "weapon_awp", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer",
@@ -335,6 +342,7 @@ public void OnConfigsExecuted() {
     g_cvStickersTablePrefix.GetString(stickersPrefix, sizeof(stickersPrefix));
     Format(g_sStickersTable, sizeof(g_sStickersTable), "%sclutch_weaponstickers", stickersPrefix);
     Format(g_sLegacyStickersTable, sizeof(g_sLegacyStickersTable), "%sweaponstickers1", stickersPrefix);
+    Format(g_sAgentsTable, sizeof(g_sAgentsTable), "%sclutch_agents", g_sTablePrefix);
     UpdateRefreshTimer();
 
     ConnectStickersDatabase();
@@ -513,7 +521,9 @@ public void WeaponsDatabaseConnected(Database database, const char[] error, any 
 
     g_hWeaponsDb = database;
     g_bGlovesTableReady = false;
+    g_bAgentsTableReady = false;
     EnsureGlovesTable();
+    EnsureAgentsTable();
     EnsureTeamLoadoutTable();
 
     if (g_cvDebug.BoolValue) {
@@ -818,6 +828,32 @@ public void T_EnsureGlovesTableCallback(Database database, DBResultSet results, 
         return;
     }
     g_bGlovesTableReady = true;
+}
+
+void EnsureAgentsTable() {
+    if (g_hWeaponsDb == null) {
+        return;
+    }
+
+    char query[640];
+    Format(
+        query,
+        sizeof(query),
+        "CREATE TABLE IF NOT EXISTS %s (steamid varchar(64) NOT NULL PRIMARY KEY, t_defindex int NOT NULL DEFAULT 0, ct_defindex int NOT NULL DEFAULT 0, t_model varchar(512) NOT NULL DEFAULT '', ct_model varchar(512) NOT NULL DEFAULT '', last_seen int NOT NULL DEFAULT 0)",
+        g_sAgentsTable
+    );
+    g_hWeaponsDb.Query(T_EnsureAgentsTableCallback, query, _, DBPrio_High);
+}
+
+public void T_EnsureAgentsTableCallback(Database database, DBResultSet results, const char[] error, any data) {
+    if (results == null) {
+        LogError("[Clutch] agents table create failed: %s", error);
+        return;
+    }
+    g_bAgentsTableReady = true;
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] %s table ready", g_sAgentsTable);
+    }
 }
 
 void EnsureTeamLoadoutTable() {
@@ -1247,7 +1283,7 @@ void ClutchApplyWebLoadoutForClient(int client) {
     ClutchBeginForcedSync(client);
 
     if (g_cvDebug.BoolValue) {
-        LogMessage("[Clutch] Web sync apply for %N (skins+gloves+stickers)", client);
+        LogMessage("[Clutch] Web sync apply for %N (skins+gloves+stickers+agents)", client);
     }
 }
 
@@ -1418,6 +1454,7 @@ void ClutchBeginForcedSync(int client) {
         g_bStickerDbSynced[client] = false;
         QueryPlayerLoadout(client, steamId, 0, true);
         QueryPlayerStickers(client, steamId, 0);
+        QueryPlayerAgents(client, steamId, 0);
     }
 
 #if defined _clutch_gloves_included_
@@ -1524,6 +1561,11 @@ public void OnClientDisconnect(int client) {
     ClutchClearStickerCache(client);
     g_bStickerDbSynced[client] = false;
     g_iStickerQueryGen[client] = 0;
+    g_iAgentDefT[client] = 0;
+    g_iAgentDefCT[client] = 0;
+    g_sAgentModelT[client][0] = '\0';
+    g_sAgentModelCT[client][0] = '\0';
+    g_sAppliedAgentModel[client][0] = '\0';
 }
 
 public void OnClientPutInServer(int client) {
@@ -2019,6 +2061,7 @@ public Action Timer_ApplySkinsDelayed(Handle timer, any userid) {
     int client = GetClientOfUserId(userid);
     if (client > 0) {
         ApplyClientSkins(client, false);
+        ClutchApplyAgentModel(client);
     }
     return Plugin_Stop;
 }
@@ -5176,6 +5219,142 @@ void ApplyClientSkins(int client, bool force) {
 
     QueryPlayerLoadout(client, steamId, 0, force);
     QueryPlayerStickers(client, steamId, 0);
+    QueryPlayerAgents(client, steamId, 0);
+}
+
+void ClutchNormalizeAgentModelPath(const char[] input, char[] output, int maxlen) {
+    output[0] = '\0';
+    if (input[0] == '\0') {
+        return;
+    }
+
+    strcopy(output, maxlen, input);
+    ReplaceString(output, maxlen, ".vmdl", ".mdl", false);
+    if (StrContains(output, "agents/models/", false) == 0) {
+        char tail[PLATFORM_MAX_PATH];
+        strcopy(tail, sizeof(tail), output[14]);
+        Format(output, maxlen, "models/player/custom_player/%s", tail);
+    }
+}
+
+void ClutchApplyAgentModel(int client) {
+    if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
+        return;
+    }
+
+    int team = GetClientTeam(client);
+    char modelPath[PLATFORM_MAX_PATH];
+    modelPath[0] = '\0';
+
+    if (team == CS_TEAM_T && g_sAgentModelT[client][0] != '\0') {
+        strcopy(modelPath, sizeof(modelPath), g_sAgentModelT[client]);
+    } else if (team == CS_TEAM_CT && g_sAgentModelCT[client][0] != '\0') {
+        strcopy(modelPath, sizeof(modelPath), g_sAgentModelCT[client]);
+    }
+
+    if (modelPath[0] == '\0') {
+        return;
+    }
+
+    if (StrEqual(g_sAppliedAgentModel[client], modelPath, false)) {
+        return;
+    }
+
+    if (!IsModelInTable(modelPath)) {
+        if (!PrecacheModel(modelPath, true)) {
+            if (g_cvDebug.BoolValue) {
+                LogMessage("[Clutch] Agent model precache failed for %N: %s", client, modelPath);
+            }
+            return;
+        }
+    }
+
+    SetEntityModel(client, modelPath);
+    strcopy(g_sAppliedAgentModel[client], sizeof(g_sAppliedAgentModel[]), modelPath);
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage("[Clutch] Applied agent model for %N team=%d model=%s", client, team, modelPath);
+    }
+}
+
+void QueryPlayerAgents(int client, const char[] steamId, int altAttempt) {
+    if (g_hWeaponsDb == null) {
+        return;
+    }
+
+    if (!g_bAgentsTableReady) {
+        EnsureAgentsTable();
+    }
+
+    char escaped[64];
+    g_hWeaponsDb.Escape(steamId, escaped, sizeof(escaped));
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(GetClientUserId(client));
+    pack.WriteString(steamId);
+    pack.WriteCell(altAttempt);
+
+    char query[384];
+    Format(
+        query,
+        sizeof(query),
+        "SELECT t_defindex, ct_defindex, t_model, ct_model FROM %s WHERE steamid='%s' LIMIT 1",
+        g_sAgentsTable,
+        escaped
+    );
+    g_hWeaponsDb.Query(T_AgentsCallback, query, pack);
+}
+
+public void T_AgentsCallback(Database database, DBResultSet results, const char[] error, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    char steamId[32];
+    pack.ReadString(steamId, sizeof(steamId));
+    int altAttempt = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client)) {
+        return;
+    }
+
+    if (results == null) {
+        if (error[0] != '\0') {
+            LogError("[Clutch] agents DB query failed: %s", error);
+        }
+        return;
+    }
+
+    if (!results.FetchRow()) {
+        g_iAgentDefT[client] = 0;
+        g_iAgentDefCT[client] = 0;
+        g_sAgentModelT[client][0] = '\0';
+        g_sAgentModelCT[client][0] = '\0';
+        g_sAppliedAgentModel[client][0] = '\0';
+        return;
+    }
+
+    g_iAgentDefT[client] = results.FetchInt(0);
+    g_iAgentDefCT[client] = results.FetchInt(1);
+
+    char rawT[PLATFORM_MAX_PATH];
+    char rawCT[PLATFORM_MAX_PATH];
+    results.FetchString(2, rawT, sizeof(rawT));
+    results.FetchString(3, rawCT, sizeof(rawCT));
+
+    ClutchNormalizeAgentModelPath(rawT, g_sAgentModelT[client], sizeof(g_sAgentModelT[]));
+    ClutchNormalizeAgentModelPath(rawCT, g_sAgentModelCT[client], sizeof(g_sAgentModelCT[]));
+
+    if (g_cvDebug.BoolValue) {
+        LogMessage(
+            "[Clutch] Agent loadout for %N T=%d CT=%d",
+            client,
+            g_iAgentDefT[client],
+            g_iAgentDefCT[client]
+        );
+    }
+
+    ClutchApplyAgentModel(client);
 }
 
 #if defined _clutch_gloves_included_

@@ -7,9 +7,11 @@ import serversRouter from './routes/servers';
 import skinsRouter from './routes/skins';
 import csgoSkinsPushRouter, { logSkinsAuthStatus } from './routes/csgo-skins-push';
 import csgoStickersPushRouter from './routes/csgo-stickers-push';
+import csgoAgentsPushRouter from './routes/csgo-agents-push';
 import { skinManager } from './services/skin-manager';
 import { resolveWeaponsDbPath } from './services/weapons-db-path';
 import { logStickersDbPath } from './services/stickers-db-sync';
+import { logAgentsDbPath } from './services/agents-db-sync';
 import { startMatchLiveWatcher } from './services/match-live-watcher';
 import { startSteamAllowlistSync } from './services/steam-allowlist-sync';
 import { assertProductionApiKey, requireApiAuth } from './middleware/auth';
@@ -39,6 +41,8 @@ app.get('/health', (_req, res) => {
     glovesPlayerSync: true,
     /** Present when sticker player-sync route is deployed. */
     stickersPlayerSync: true,
+    /** Present when agent player-sync route is deployed. */
+    agentsPlayerSync: true,
   });
 });
 
@@ -50,6 +54,7 @@ app.use('/api/servers', serversRouter);
 app.use('/api/skins', skinsRouter);
 app.use('/api/csgo/skins', csgoSkinsPushRouter);
 app.use('/api/csgo/stickers', csgoStickersPushRouter);
+app.use('/api/csgo/agents', csgoAgentsPushRouter);
 
 skinManager.initializeDefaultSkins();
 logSkinsAuthStatus();
@@ -61,6 +66,7 @@ try {
   console.warn(`[csgo-skins] weapons DB not ready: ${message}`);
 }
 logStickersDbPath();
+logAgentsDbPath();
 
 startMatchLiveWatcher();
 
