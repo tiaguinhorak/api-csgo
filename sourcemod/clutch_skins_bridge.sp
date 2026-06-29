@@ -25,9 +25,10 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.75"
+#define PLUGIN_VERSION "3.8.76"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
-#define STICKER_VIEWMODEL_PASS_COUNT 2
+#define STICKER_VIEWMODEL_PASS_COUNT 3
+#define STICKER_SWEEP_PASS_COUNT 5
 #define CLUTCH_SITE_STICKER_SLOTS 4
 #define RESPAWN_VISUAL_PASS_COUNT 2
 #define STICKER_FORCE_UPDATE_COOLDOWN 0.35
@@ -107,7 +108,9 @@ float g_fReapplyDelays[REAPPLY_PASS_COUNT] = {0.35};
 float g_fLastStickerForceUpdate[MAXPLAYERS + 1];
 bool g_bStickerDbSynced[MAXPLAYERS + 1];
 int g_iStickerQueryGen[MAXPLAYERS + 1];
-float g_fViewModelStickerDelays[STICKER_VIEWMODEL_PASS_COUNT] = {0.15, 0.45};
+int g_iStickerSweepGen[MAXPLAYERS + 1];
+float g_fViewModelStickerDelays[STICKER_VIEWMODEL_PASS_COUNT] = {0.15, 0.45, 0.9};
+float g_fStickerSweepDelays[STICKER_SWEEP_PASS_COUNT] = {0.35, 1.0, 2.0, 4.0, 6.0};
 float g_fRespawnVisualDelays[RESPAWN_VISUAL_PASS_COUNT] = {0.45, 1.0};
 int g_iAgentDefT[MAXPLAYERS + 1];
 int g_iAgentDefCT[MAXPLAYERS + 1];
@@ -993,6 +996,99 @@ void ClutchApplyCachedLoadoutVisuals(int client) {
     ClutchRunCachedVisualPass(client, true);
 }
 
+void ClutchApplyAllCachedStickersForced(int client) {
+    if (!IsClientInGame(client) || IsFakeClient(client) || !IsPlayerAlive(client)) {
+        return;
+    }
+
+    ApplyAllCachedWeaponsToClient(client, true, false);
+    ClutchReapplyStickersOnPlayerWeapons(client, true);
+    ClutchScheduleForcedViewModelStickerPasses(client);
+    ClutchMaybeForceStickerFullUpdate(client, true);
+}
+
+bool ClutchPlayerNeedsStickerSync(int client) {
+    if (!IsPlayerAlive(client)) {
+        return false;
+    }
+
+    for (int idx = 0; idx < CLUTCH_WEAPON_SLOTS; idx++) {
+        if (IsMeleeWeaponKey(g_ClutchWeaponKeys[idx]) || !ClutchWeaponHasStickerCache(client, idx)) {
+            continue;
+        }
+
+        int weapon = FindPlayerWeapon(client, g_ClutchWeaponKeys[idx]);
+        if (weapon != -1 && ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
+            return true;
+        }
+    }
+
+    int size = GetEntPropArraySize(client, Prop_Send, "m_hMyWeapons");
+    for (int i = 0; i < size; i++) {
+        int weapon = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
+        if (weapon == -1 || !IsValidEntity(weapon)) {
+            continue;
+        }
+
+        int idx = ClutchIndexFromWeaponEntity(client, weapon);
+        if (idx < 0 || IsMeleeWeaponKey(g_ClutchWeaponKeys[idx])) {
+            continue;
+        }
+
+        if (ClutchWeaponNeedsStickerSync(client, weapon, idx)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void ClutchSchedulePostSyncStickerSweeps(int client) {
+    if (client <= 0 || IsFakeClient(client)) {
+        return;
+    }
+
+    g_iStickerSweepGen[client]++;
+    int gen = g_iStickerSweepGen[client];
+    int userid = GetClientUserId(client);
+
+    for (int i = 0; i < STICKER_SWEEP_PASS_COUNT; i++) {
+        DataPack pack = new DataPack();
+        pack.WriteCell(userid);
+        pack.WriteCell(gen);
+        pack.WriteCell(i);
+        CreateTimer(g_fStickerSweepDelays[i], Timer_PostSyncStickerSweep, pack, TIMER_FLAG_NO_MAPCHANGE);
+    }
+}
+
+public Action Timer_PostSyncStickerSweep(Handle timer, DataPack pack) {
+    pack.Reset();
+    int userid = pack.ReadCell();
+    int gen = pack.ReadCell();
+    int pass = pack.ReadCell();
+    delete pack;
+
+    int client = GetClientOfUserId(userid);
+    if (client <= 0 || !IsClientInGame(client) || IsFakeClient(client)) {
+        return Plugin_Stop;
+    }
+
+    if (gen != g_iStickerSweepGen[client]) {
+        return Plugin_Stop;
+    }
+
+    if (!g_bMatchLoadoutSynced[client] || !IsPlayerAlive(client)) {
+        return Plugin_Stop;
+    }
+
+  // Late weapon gives (kgns/loadout) — keep sweeping until all cached stickers match or last pass.
+    if (pass == STICKER_SWEEP_PASS_COUNT - 1 || ClutchPlayerNeedsStickerSync(client)) {
+        ClutchApplyAllCachedStickersForced(client);
+    }
+
+    return Plugin_Stop;
+}
+
 void ClutchScheduleInitialVisualApply(int client) {
     if (client <= 0 || IsFakeClient(client)) {
         return;
@@ -1017,6 +1113,7 @@ void ClutchTryFinalizeInitialSync(int client) {
 
     if (IsPlayerAlive(client)) {
         ClutchScheduleInitialVisualApply(client);
+        ClutchSchedulePostSyncStickerSweeps(client);
     } else {
         g_bPendingInitialVisualApply[client] = true;
     }
@@ -1686,6 +1783,7 @@ public void OnClientDisconnect(int client) {
     ClutchClearStickerCache(client);
     g_bStickerDbSynced[client] = false;
     g_iStickerQueryGen[client] = 0;
+    g_iStickerSweepGen[client] = 0;
     g_iAgentDefT[client] = 0;
     g_iAgentDefCT[client] = 0;
     g_sAgentModelT[client][0] = '\0';
@@ -1720,27 +1818,39 @@ public Action OnWeaponEquip(int client, int weapon) {
         return Plugin_Continue;
     }
 
-    if (ClutchRoutineApplyLocked(client)) {
-        return Plugin_Continue;
+    int idx = ClutchIndexFromWeaponEntity(client, weapon);
+    if (idx < 0) {
+        char classname[64];
+        GetEntityClassname(weapon, classname, sizeof(classname));
+        idx = GetClutchIndexForClassname(client, classname);
     }
-
-    char classname[64];
-    GetEntityClassname(weapon, classname, sizeof(classname));
-    int idx = GetClutchIndexForClassname(client, classname);
     if (idx < 0) {
         return Plugin_Continue;
     }
+
     if (g_CachedPaintkit[client][idx] <= 0 && !ClutchWeaponHasStickerCache(client, idx)) {
         return Plugin_Continue;
     }
 
+    if (ClutchRoutineApplyLocked(client)) {
+        int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
+        bool needsSkin = g_CachedPaintkit[client][idx] > 0 && g_iAppliedPaintkit[client][idx] != g_CachedPaintkit[client][idx];
+        bool needsStickers = ClutchWeaponHasStickerCache(client, idx)
+            && !ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot);
+        if (!needsSkin && !needsStickers) {
+            return Plugin_Continue;
+        }
+    }
+
+    char classname[64];
+    GetEntityClassname(weapon, classname, sizeof(classname));
     bool isKnife = IsMeleeClassname(classname);
     DataPack pack = new DataPack();
     pack.WriteCell(GetClientUserId(client));
     pack.WriteCell(weapon);
     pack.WriteCell(idx);
     pack.WriteCell(isKnife ? 1 : 0);
-    CreateTimer(0.1, Timer_ApplyEquippedWeapon, pack, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(0.12, Timer_ApplyEquippedWeapon, pack, TIMER_FLAG_NO_MAPCHANGE);
     return Plugin_Continue;
 }
 
@@ -1787,6 +1897,7 @@ public void OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
         if (g_bPendingInitialVisualApply[client]) {
             g_bPendingInitialVisualApply[client] = false;
             ClutchScheduleInitialVisualApply(client);
+            ClutchSchedulePostSyncStickerSweeps(client);
             return;
         }
         if (ClutchClientIsSkinAdmin(client)) {
