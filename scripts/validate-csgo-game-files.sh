@@ -3,17 +3,16 @@ set -euo pipefail
 
 # Validate CS:GO dedicated server game files (includes agent models in custom_player).
 #
-# Usage:
+# Usage (stop srcds first):
 #   ./scripts/validate-csgo-game-files.sh
 #
-# Requires steamcmd installed — common paths:
-#   ~/steamcmd/steamcmd.sh
-#   /home/steam/steamcmd/steamcmd.sh
+# Same as scripts/update-csgo-server.sh but also runs verify-agent-models.sh.
 
 CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
-STEAMCMD="${STEAMCMD:-}"
+CSGO_INSTALL="${CSGO_INSTALL:-$(dirname "${CSGO_ROOT}")}"
+STEAMCMD="${STEAMCMD:-/home/csgo/steamcmd/steamcmd.sh}"
 
-if [[ -z "${STEAMCMD}" ]]; then
+if [[ ! -x "${STEAMCMD}" ]]; then
   for candidate in \
     "${HOME}/steamcmd/steamcmd.sh" \
     "/home/steam/steamcmd/steamcmd.sh" \
@@ -26,25 +25,48 @@ if [[ -z "${STEAMCMD}" ]]; then
   done
 fi
 
-if [[ -z "${STEAMCMD}" || ! -x "${STEAMCMD}" ]]; then
-  echo "steamcmd not found."
+if [[ ! -x "${STEAMCMD}" ]]; then
+  echo "steamcmd not found at ${STEAMCMD}"
   echo "Install: https://developer.valvesoftware.com/wiki/SteamCMD"
-  echo "Then run:"
-  echo "  STEAMCMD=/path/to/steamcmd.sh ./scripts/validate-csgo-game-files.sh"
   exit 1
 fi
 
-APP_DIR="$(dirname "$(dirname "${CSGO_ROOT}")")"
-echo "SteamCMD: ${STEAMCMD}"
-echo "App dir:  ${APP_DIR}"
-echo "CSGO:     ${CSGO_ROOT}"
+if pgrep -x srcds_linux >/dev/null 2>&1; then
+  echo "WARN: srcds_linux is running — stop the server before validate (files may not update)."
+  echo "  screen -r  → stop server, or: bash scripts/start-csgo-screen.sh after update"
+fi
+
+echo "SteamCMD:   ${STEAMCMD}"
+echo "Install dir: ${CSGO_INSTALL}  (must contain csgo/ and steamapps/)"
+echo "CSGO game:   ${CSGO_ROOT}"
 echo ""
+
+if [[ ! -d "${CSGO_INSTALL}/csgo" ]]; then
+  echo "ERROR: ${CSGO_INSTALL}/csgo not found — CSGO_INSTALL should be parent of csgo/, e.g. /home/csgo/server"
+  exit 1
+fi
+
 echo "Running app_update 740 validate (may take several minutes)..."
+set +e
+"${STEAMCMD}" \
+  +force_install_dir "${CSGO_INSTALL}" \
+  +login anonymous \
+  +app_update 740 validate \
+  +quit
+STEAM_EXIT=$?
+set -e
 
-"${STEAMCMD}" +force_install_dir "${APP_DIR}" +login anonymous \
-  +app_update 740 validate +quit
+if [[ "${STEAM_EXIT}" -ne 0 ]]; then
+  echo ""
+  echo "SteamCMD exited with code ${STEAM_EXIT} (0x202 = wrong install dir or server running)."
+  echo "Try:"
+  echo "  1) Stop srcds, then re-run this script"
+  echo "  2) CSGO_INSTALL=${CSGO_INSTALL} STEAMCMD=${STEAMCMD} bash scripts/update-csgo-server.sh"
+  echo "  3) Copy models/player/custom_player from a full CS:GO client install:"
+  echo "     scp -r 'client/csgo/models/player/custom_player' csgo@server:${CSGO_ROOT}/models/player/"
+fi
 
 echo ""
-echo "Done. Checking agent models..."
+echo "Checking agent models..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "${SCRIPT_DIR}/verify-agent-models.sh"
