@@ -147,10 +147,11 @@ export class SshService {
     rconPassword: string,
     serverPassword?: string
   ): Promise<string> {
-    const logPath = `${csgoDir}/clutch-srcds.log`;
+    const logPath = `${csgoDir}/clutch-srcds-${port}.log`;
+    const bindIp = process.env.CSGO_BIND_IP?.trim() || '0.0.0.0';
     const gslt = process.env.CSGO_GSLT_TOKEN?.trim();
 
-    // Libera a porta de processos órfãos antes de subir (evita "porta ocupada" silencioso).
+    // Libera só esta porta (não mata outros srcds em portas diferentes).
     const freePort =
       `fuser -k ${port}/udp 2>/dev/null || true; ` +
       `fuser -k ${port}/tcp 2>/dev/null || true; `;
@@ -158,6 +159,7 @@ export class SshService {
     let launch = `./srcds_run`;
     launch += ` -tickrate ${tickrate}`;
     launch += ` -game csgo -console -usercon`;
+    launch += ` -ip ${bindIp}`;
     launch += ` -port ${port}`;
     launch += ` +game_type ${gameType} +game_mode ${gameMode}`;
     launch += ` +map ${map}`;
@@ -179,11 +181,13 @@ export class SshService {
   }
 
   /** Lê o fim do log do srcds para diagnosticar falha de start. */
-  async readServerLog(conn: ServerConnection, csgoDir: string, lines = 25): Promise<string> {
+  async readServerLog(conn: ServerConnection, csgoDir: string, port?: number, lines = 25): Promise<string> {
+    const suffix = port != null ? `-${port}` : '';
+    const logPath = `${csgoDir}/clutch-srcds${suffix}.log`;
     try {
       const { stdout } = await this.execCommand(
         conn,
-        `tail -n ${lines} ${csgoDir}/clutch-srcds.log 2>/dev/null || true`,
+        `tail -n ${lines} ${logPath} 2>/dev/null || tail -n ${lines} ${csgoDir}/clutch-srcds.log 2>/dev/null || true`,
       );
       return stdout.trim();
     } catch {

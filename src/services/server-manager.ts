@@ -25,13 +25,23 @@ class ServerManager {
     }
 
     const port = dto.port ?? 27015;
-    const duplicate = Array.from(this.servers.values()).find(
-      (s) => s.host === host && s.port === port,
-    );
-    if (duplicate) {
+    const rconPort = dto.rconPort ?? port;
+
+    const portTaken = Array.from(this.servers.values()).find((s) => s.port === port);
+    if (portTaken) {
       throw new Error(
-        `Já existe um servidor registrado em ${host}:${port} (${duplicate.name}). ` +
-          `Edite ou remova o existente antes de criar outro.`,
+        `A porta ${port} já está em uso por "${portTaken.name}" (${portTaken.host}). ` +
+          `Escolha outra porta (ex.: 27017) ou remova o servidor existente.`,
+      );
+    }
+
+    const rconTaken = Array.from(this.servers.values()).find(
+      (s) => (s.rconPort ?? s.port) === rconPort,
+    );
+    if (rconTaken) {
+      throw new Error(
+        `A porta RCON ${rconPort} já está em uso por "${rconTaken.name}". ` +
+          `Use outra porta RCON ou remova o servidor existente.`,
       );
     }
 
@@ -52,7 +62,7 @@ class ServerManager {
       sshPassword: dto.sshPassword,
       rconPort: dto.rconPort ?? port,
       rconPassword: dto.rconPassword,
-      csgoDir: dto.csgoDir,
+      csgoDir: dto.csgoDir?.trim() || config.csgo.defaultServerDir,
       screenSession,
       status: 'offline',
       port,
@@ -155,7 +165,7 @@ class ServerManager {
     await new Promise(r => setTimeout(r, 4000));
     const running = await sshService.serverStatus(conn, server.screenSession);
     if (running !== 'running') {
-      const log = await sshService.readServerLog(conn, server.csgoDir);
+      const log = await sshService.readServerLog(conn, server.csgoDir, server.port);
       server.status = 'offline';
       stateStore.persist();
       const hint = log
@@ -165,8 +175,8 @@ class ServerManager {
       throw new Error(hint);
     }
 
-    // Aguarda até 30s pelo RCON responder
-    for (let i = 0; i < 30; i++) {
+    // Aguarda até 90s pelo RCON (CS:GO Legacy demora para carregar mapa/Steam).
+    for (let i = 0; i < 90; i++) {
       await new Promise(r => setTimeout(r, 1000));
       try {
         await rconService.getStatus(
@@ -180,13 +190,19 @@ class ServerManager {
       } catch {}
     }
 
-    // Screen está rodando mas RCON não respondeu: provável senha RCON errada ou ainda carregando.
-    const log = await sshService.readServerLog(conn, server.csgoDir);
+    // Screen segue no ar: considera online mesmo sem RCON (A2S/query UDP costuma responder antes).
+    const stillRunning = await sshService.serverStatus(conn, server.screenSession);
+    if (stillRunning === 'running') {
+      server.status = 'online';
+      stateStore.persist();
+      return server;
+    }
+
+    const log = await sshService.readServerLog(conn, server.csgoDir, server.port);
     server.status = 'offline';
     stateStore.persist();
     throw new Error(
-      'Servidor iniciou mas o RCON não respondeu em 30s. ' +
-        'Confira CSGO_RCON_PASSWORD e -usercon.' +
+      'O srcds encerrou durante o start. Verifique CSGO_GSLT_TOKEN, porta livre e logs.' +
         (log ? `\nLog:\n${log}` : ''),
     );
   }
@@ -286,7 +302,7 @@ class ServerManager {
 
   updateServer(
     id: string,
-    patch: { name?: string; pool?: GameServer['pool']; screenSession?: string },
+    patch: { name?: string; pool?: GameServer['pool']; screenSession?: string; csgoDir?: string },
   ): GameServer {
     const server = this.servers.get(id);
     if (!server) throw new Error('Server not found');
@@ -302,6 +318,11 @@ class ServerManager {
       const trimmed = patch.screenSession.trim();
       if (!trimmed) throw new Error('screenSession is required');
       server.screenSession = trimmed;
+    }
+    if (patch.csgoDir !== undefined) {
+      const trimmed = patch.csgoDir.trim();
+      if (!trimmed) throw new Error('csgoDir is required');
+      server.csgoDir = trimmed;
     }
     stateStore.persist();
     return server;

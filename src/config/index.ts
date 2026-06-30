@@ -15,6 +15,8 @@ export const config = {
     tvDelay: 70,
     maxRounds: 30,
     overtimeRounds: 6,
+    /** Diretório do srcds na VPS quando o registro não envia csgoDir. */
+    defaultServerDir: process.env.CSGO_SERVER_DIR?.trim() || '/home/csgo/server',
   },
 
   veto: {

@@ -502,6 +502,8 @@ Porta errada / processo zumbi:
 | `verify-clutch-skins-bridge.sh` | Diagnóstico plugin |
 | `patch-weapons-reload-native.sh` | Patch `Weapons_ReloadClientData` |
 | `start-csgo-screen.sh` | Inicia srcds em screen |
+| `start-csgo-instance.sh` | Segunda instância srcds (porta/screen próprios) |
+| `install-netdata.sh` | Monitoramento VPS (CPU/RAM/disco) — painel `:19999` |
 | `pm2-ensure-api-csgo.sh` | Garante processo PM2 correto |
 | `test-gloves-sync.sh` | Testa sync de luvas por Steam ID |
 
@@ -545,6 +547,27 @@ pm2 logs api-csgo --lines 100
 | `!ws` para players | Esperado — usar site; admin mantém `!ws` |
 | API 401 no sync | `CSGO_SKINS_SYNC_KEY` |
 | Admin SM não funciona | `admins_simple.ini` 2 campos, `sm_reloadadmins`, reconnect |
+
+---
+
+## 16. Monitoramento (Netdata)
+
+Na VPS (root):
+
+```bash
+cd ~/api-csgo && git pull
+sudo bash scripts/install-netdata.sh
+```
+
+Painel: `http://IP_DA_VPS:19999` — restrinja no firewall ao seu IP admin.
+
+Opcional — [Netdata Cloud](https://app.netdata.cloud) (alertas + várias VPS):
+
+```bash
+export NETDATA_CLAIM_TOKEN="seu_token"
+export NETDATA_CLAIM_ROOMS="room_id"
+sudo -E bash scripts/install-netdata.sh
+```
 
 ---
 
