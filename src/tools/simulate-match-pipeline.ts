@@ -76,7 +76,12 @@ function sleep(ms: number): Promise<void> {
 async function probeSiteReachable(baseUrl: string): Promise<boolean> {
   if (!baseUrl) return false;
   try {
+    const headers: Record<string, string> = {};
+    if (baseUrl.includes('ngrok')) {
+      headers['ngrok-skip-browser-warning'] = 'true';
+    }
     const res = await fetch(baseUrl.replace(/\/+$/, '') + '/', {
+      headers,
       signal: AbortSignal.timeout(8_000),
     });
     return res.ok || res.status < 500;

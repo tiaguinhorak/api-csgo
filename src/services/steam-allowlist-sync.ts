@@ -3,26 +3,19 @@ import { getWeaponsDbPath } from './weapons-db-path';
 
 const TABLE = 'clutch_steam_allowlist';
 
-function siteBaseUrl(): string {
-  const raw = process.env.CLUTCH_SITE_URL?.trim();
-  if (!raw) {
-    throw new Error('CLUTCH_SITE_URL is required for steam allowlist sync');
-  }
-  return raw.replace(/\/$/, '');
-}
-
-function syncKey(): string {
-  const key = process.env.CSGO_SKINS_SYNC_KEY?.trim();
-  if (!key) {
-    throw new Error('CSGO_SKINS_SYNC_KEY is required for steam allowlist sync');
-  }
-  return key;
-}
+import { siteBaseUrlFromEnv, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
 
 export async function fetchSteamAllowlistFromSite(): Promise<number[]> {
-  const url = `${siteBaseUrl()}/api/csgo/steam-allowlist`;
+  const base = siteBaseUrlFromEnv();
+  if (!base) {
+    throw new Error('CLUTCH_SITE_URL is required for steam allowlist sync');
+  }
+  if (!siteSyncKeyFromEnv()) {
+    throw new Error('CSGO_SKINS_SYNC_KEY is required for steam allowlist sync');
+  }
+  const url = `${base}/api/csgo/steam-allowlist`;
   const res = await fetch(url, {
-    headers: { 'x-skins-sync-key': syncKey() },
+    headers: siteRequestHeaders(),
   });
 
   if (!res.ok) {

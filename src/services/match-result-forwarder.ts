@@ -5,19 +5,11 @@ import {
   type MatchLiveRow,
 } from './match-live-db';
 
-function siteBaseUrl(): string | null {
-  const raw =
-    process.env.CLUTCH_SITE_URL?.trim() ||
-    process.env.SITE_ORIGIN?.trim() ||
-    '';
-  if (!raw) return null;
-  return raw.replace(/\/+$/, '');
-}
-
-function syncKey(): string | null {
-  const key = process.env.CSGO_SKINS_SYNC_KEY?.trim();
-  return key || null;
-}
+import {
+  siteBaseUrlFromEnv,
+  siteRequestHeaders,
+  siteSyncKeyFromEnv,
+} from './site-http';
 
 export type MatchResultPayload = {
   csgoMatchId: string;
@@ -155,8 +147,8 @@ export function wasMatchResultForwarded(matchId: string): boolean {
 export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow): Promise<boolean> {
   if (forwardedMatchIds.has(match.id)) return true;
 
-  const base = siteBaseUrl();
-  const key = syncKey();
+  const base = siteBaseUrlFromEnv();
+  const key = siteSyncKeyFromEnv();
   if (!base || !key) {
     console.warn('[match-live] CLUTCH_SITE_URL and CSGO_SKINS_SYNC_KEY required to forward results');
     return false;
@@ -168,10 +160,9 @@ export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow):
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
+      headers: siteRequestHeaders({
         'content-type': 'application/json',
-        'x-skins-sync-key': key,
-      },
+      }),
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(12_000),
     });

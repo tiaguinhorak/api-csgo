@@ -25,31 +25,19 @@ const lastSnapshots = new Map<string, Snapshot>();
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let watcherStarted = false;
 
-function siteBaseUrl(): string | null {
-  const raw =
-    process.env.CLUTCH_SITE_URL?.trim() ||
-    process.env.SITE_ORIGIN?.trim() ||
-    '';
-  if (!raw) return null;
-  return raw.replace(/\/+$/, '');
-}
-
-function syncKey(): string | null {
-  return process.env.CSGO_SKINS_SYNC_KEY?.trim() || null;
-}
+import { siteBaseUrlFromEnv, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
 
 async function pushLiveRoundToSite(match: Match, row: MatchLiveRow): Promise<void> {
-  const base = siteBaseUrl();
-  const key = syncKey();
+  const base = siteBaseUrlFromEnv();
+  const key = siteSyncKeyFromEnv();
   if (!base || !key) return;
 
   try {
     const res = await fetch(`${base}/api/csgo/match-live`, {
       method: 'POST',
-      headers: {
+      headers: siteRequestHeaders({
         'content-type': 'application/json',
-        'x-skins-sync-key': key,
-      },
+      }),
       body: JSON.stringify({
         csgoMatchId: match.id,
         roomId: match.roomId,
