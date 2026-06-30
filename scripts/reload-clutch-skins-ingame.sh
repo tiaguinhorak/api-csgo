@@ -106,7 +106,7 @@ send_cmd "sm plugins reload z_clutch_skins_bridge" 1.0
 send_cmd "sm plugins info z_clutch_skins_bridge" 0.5
 send_plugin "clutch_platform_gate"
 
-if clutch_is_warmup_pool && plugin_file_exists "clutch_match_tracker"; then
+if clutch_is_ranked_pool && plugin_file_exists "clutch_match_tracker"; then
   send_plugin "clutch_match_tracker"
 fi
 
