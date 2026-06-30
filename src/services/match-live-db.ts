@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { getWeaponsDbPath } from './weapons-db-path';
+import { getMatchLiveDbPath } from './weapons-db-path';
 
 export type MatchLiveRow = {
   matchId: string;
@@ -69,15 +69,15 @@ let db: Database.Database | null = null;
 
 function getDb(): Database.Database {
   if (!db) {
-    const path = getWeaponsDbPath();
-    db = new Database(path, { readonly: true, fileMustExist: true });
+    const dbPath = getMatchLiveDbPath();
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
   }
   return db;
 }
 
 export function ensureMatchLiveTableWritable(): void {
-  const path = getWeaponsDbPath();
-  const writable = new Database(path);
+  const dbPath = getMatchLiveDbPath();
+  const writable = new Database(dbPath);
   writable.exec(`
     CREATE TABLE IF NOT EXISTS ${TABLE} (
       match_id VARCHAR(64) PRIMARY KEY NOT NULL,

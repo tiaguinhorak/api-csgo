@@ -33,13 +33,14 @@ export function getSourceModRoots(): string[] {
   return [...new Set(roots.map((r) => path.resolve(r)))];
 }
 
-/** Read storage-local (or WEAPONS_DB_CONNECTION) database name from databases.cfg. */
-function resolveFromDatabasesCfg(smRoot: string): string | null {
+/** Resolve SQLite file path for a databases.cfg connection block. */
+export function resolveFromDatabasesCfg(
+  smRoot: string,
+  connectionName: string,
+): string | null {
   const cfgPath = path.join(smRoot, 'configs/databases.cfg');
   if (!fs.existsSync(cfgPath)) return null;
 
-  const connectionName =
-    process.env.WEAPONS_DB_CONNECTION?.trim() || 'storage-local';
   const content = fs.readFileSync(cfgPath, 'utf8');
   const blockPattern = new RegExp(
     `"${connectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\s*\\{([\\s\\S]*?)\\}`,
@@ -58,7 +59,10 @@ function resolveFromDatabasesCfg(smRoot: string): string | null {
 
 function sqliteFileCandidatesForRoot(csgoRoot: string): string[] {
   const smRoot = path.join(csgoRoot, 'addons/sourcemod');
-  const fromCfg = resolveFromDatabasesCfg(smRoot);
+  const fromCfg = resolveFromDatabasesCfg(
+    smRoot,
+    process.env.WEAPONS_DB_CONNECTION?.trim() || 'storage-local',
+  );
   const names = [
     'sourcemod-local',
     'local',
@@ -164,4 +168,92 @@ export function getWeaponsDbPath(): string {
     return path.resolve(expandHome(explicit));
   }
   return resolveWeaponsDbPath();
+}
+
+function hasMatchLiveTable(filePath: string): boolean {
+  try {
+    const conn = new Database(filePath, { readonly: true, fileMustExist: true });
+    const row = conn
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name = 'clutch_match_live' LIMIT 1`,
+      )
+      .get() as { name?: string } | undefined;
+    conn.close();
+    return Boolean(row?.name);
+  } catch {
+    return false;
+  }
+}
+
+function matchLiveRowCount(filePath: string): number {
+  try {
+    const conn = new Database(filePath, { readonly: true, fileMustExist: true });
+    const row = conn
+      .prepare(`SELECT COUNT(*) AS c FROM clutch_match_live`)
+      .get() as { c: number };
+    conn.close();
+    return row.c ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * SQLite file used by clutch_match_tracker (clutch_match_db / storage-local).
+ * On some VPS installs SourceMod writes connection-name.sq3 (storage-local.sq3)
+ * while weapons live in sourcemod-local.sq3 — both must be checked.
+ */
+export function getMatchLiveDbPath(): string {
+  const explicit = process.env.CLUTCH_MATCH_DB_PATH?.trim();
+  if (explicit) {
+    return path.resolve(expandHome(explicit));
+  }
+
+  const connectionName =
+    process.env.CLUTCH_MATCH_DB_CONNECTION?.trim() || 'storage-local';
+  const weaponsPath = getWeaponsDbPath();
+  const sqliteDir = path.dirname(weaponsPath);
+  const smRoot = path.resolve(sqliteDir, '..', '..');
+
+  const candidates: string[] = [
+    path.join(sqliteDir, `${connectionName}.sq3`),
+  ];
+
+  const fromCfg = resolveFromDatabasesCfg(smRoot, connectionName);
+  if (fromCfg) {
+    candidates.push(fromCfg);
+  }
+
+  candidates.push(weaponsPath);
+
+  const unique = [...new Set(candidates.map((p) => path.resolve(p)))];
+  let fallbackWithTable: string | null = null;
+
+  for (const candidate of unique) {
+    if (!fs.existsSync(candidate) || !canOpenDatabase(candidate)) continue;
+    if (!hasMatchLiveTable(candidate)) continue;
+
+    if (matchLiveRowCount(candidate) > 0) {
+      return candidate;
+    }
+
+    if (!fallbackWithTable) {
+      fallbackWithTable = candidate;
+    }
+  }
+
+  if (fallbackWithTable) {
+    return fallbackWithTable;
+  }
+
+  const byConnection = path.join(sqliteDir, `${connectionName}.sq3`);
+  if (fs.existsSync(byConnection)) {
+    return byConnection;
+  }
+
+  if (fromCfg && fs.existsSync(fromCfg)) {
+    return fromCfg;
+  }
+
+  return weaponsPath;
 }
