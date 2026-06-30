@@ -60,6 +60,10 @@ function parseArgs(): CliOptions {
     console.warn(
       `WARN: --room-id não informado — usando ${roomId} (site provavelmente retorna session_not_found)`,
     );
+  } else if (/^STEAM_/i.test(roomId) || /^\d{17}$/.test(roomId)) {
+    console.warn(
+      'WARN: --room-id parece Steam ID, não RankedMatchSession.id (ex.: cmqqznpl80002msus6zrub26r)',
+    );
   }
 
   return { roomId, ichSteam, scoreA, scoreB, dryRun };
@@ -67,6 +71,18 @@ function parseArgs(): CliOptions {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function probeSiteReachable(baseUrl: string): Promise<boolean> {
+  if (!baseUrl) return false;
+  try {
+    const res = await fetch(baseUrl.replace(/\/+$/, '') + '/', {
+      signal: AbortSignal.timeout(8_000),
+    });
+    return res.ok || res.status < 500;
+  } catch {
+    return false;
+  }
 }
 
 function buildStatsJson(ichSteam: string): string {
@@ -145,6 +161,10 @@ async function main(): Promise<void> {
   console.log(`score:     ${opts.scoreA}:${opts.scoreB} (winner B)`);
   console.log(`site:      ${siteUrl || '(CLUTCH_SITE_URL não definido)'}`);
   console.log(`sync key:  ${syncKey ? 'set' : 'MISSING'}`);
+  if (siteUrl) {
+    const reachable = await probeSiteReachable(siteUrl);
+    console.log(`site reach: ${reachable ? 'OK' : 'FAIL (fetch failed — rode: bash scripts/check-site-dns.sh)'}`);
+  }
   console.log('');
 
   const match = matchManager.createMatch({
