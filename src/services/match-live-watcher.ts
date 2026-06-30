@@ -11,7 +11,7 @@ import {
   wasMatchResultForwarded,
 } from './match-result-forwarder';
 import { stateStore } from './state-store';
-import { getWeaponsDbPath } from './weapons-db-path';
+import { getMatchLiveDbPath } from './weapons-db-path';
 
 type Snapshot = {
   phase: string;
@@ -153,7 +153,7 @@ export function startMatchLiveWatcher(): void {
     console.warn(`[match-live] table ensure skipped: ${message}`);
   }
 
-  const dbPath = getWeaponsDbPath();
+  const dbPath = getMatchLiveDbPath();
   const watchDir = path.dirname(dbPath);
   const dbName = path.basename(dbPath);
 

@@ -26,7 +26,15 @@ echo "SQLite:   ${DB}"
 echo ""
 
 echo "--- Live matches (api-csgo) ---"
-LIVE_JSON="$(curl -sf "${API}/api/matches?status=live" 2>/dev/null || echo '[]')"
+API_KEY="${API_KEY:-${CSGO_API_KEY:-${CSGO_SKINS_SYNC_KEY:-}}}"
+AUTH_ARGS=()
+if [[ -n "${API_KEY}" ]]; then
+  AUTH_ARGS=(-H "x-api-key: ${API_KEY}")
+else
+  echo "WARN: API_KEY not set — /api/matches requires auth"
+fi
+
+LIVE_JSON="$(curl -sf "${AUTH_ARGS[@]}" "${API}/api/matches?status=live" 2>/dev/null || echo '[]')"
 echo "${LIVE_JSON}" | node -e "
 const chunks = [];
 process.stdin.on('data', (d) => chunks.push(d));
@@ -42,6 +50,40 @@ process.stdin.on('end', () => {
   }
 });
 "
+
+echo ""
+echo "--- All matches in store (any status) ---"
+ALL_JSON="$(curl -sf "${AUTH_ARGS[@]}" "${API}/api/matches" 2>/dev/null || echo '[]')"
+echo "${ALL_JSON}" | node -e "
+const chunks = [];
+process.stdin.on('data', (d) => chunks.push(d));
+process.stdin.on('end', () => {
+  let rows = [];
+  try { rows = JSON.parse(Buffer.concat(chunks).toString() || '[]'); } catch { rows = []; }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    console.log('(none — api-csgo has no match records)');
+    return;
+  }
+  for (const m of rows.slice(-8)) {
+    console.log('status=' + m.status + ' matchId=' + m.id + ' roomId=' + m.roomId);
+  }
+});
+"
+
+echo ""
+echo "--- store.json (persisted state) ---"
+if [[ -f "${REPO_ROOT}/data/store.json" ]]; then
+  node -e "
+const s = require('./data/store.json');
+const ms = Array.isArray(s.matches) ? s.matches : [];
+if (!ms.length) { console.log('(no matches in store.json)'); process.exit(0); }
+for (const m of ms.slice(-8)) {
+  console.log('status=' + m.status + ' matchId=' + m.id + ' roomId=' + m.roomId);
+}
+"
+else
+  echo "(missing data/store.json)"
+fi
 
 echo ""
 echo "--- clutch_match_live (plugin DB) ---"
