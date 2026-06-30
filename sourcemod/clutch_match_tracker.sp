@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.1.0"
 #define TABLE_MATCH_LIVE "clutch_match_live"
 
 Database g_hDb = null;
@@ -23,6 +23,9 @@ char g_sWinner[8] = "";
 
 StringMap g_hRoster = null;
 StringMap g_hStats = null;
+ArrayList g_aDeaths = null;
+ArrayList g_aRounds = null;
+ArrayList g_aHighlights = null;
 
 public Plugin myinfo = {
     name = "Clutch Match Tracker",
@@ -45,10 +48,14 @@ public void OnPluginStart() {
 
     g_hRoster = new StringMap();
     g_hStats = new StringMap();
+    g_aDeaths = new ArrayList(512);
+    g_aRounds = new ArrayList(64);
+    g_aHighlights = new ArrayList(128);
 
     HookEvent("round_end", Event_RoundEnd, EventHookMode_PostNoCopy);
     HookEvent("cs_win_panel_match", Event_MatchOver, EventHookMode_PostNoCopy);
     HookEvent("player_death", Event_PlayerDeath, EventHookMode_Post);
+    HookEvent("player_hurt", Event_PlayerHurt, EventHookMode_Post);
     HookEvent("round_mvp", Event_RoundMvp, EventHookMode_PostNoCopy);
 
     RegServerCmd("clutch_match_begin", Cmd_MatchBegin, "Begin tracking a ranked match");
@@ -61,6 +68,9 @@ public void OnPluginStart() {
 public void OnPluginEnd() {
     delete g_hRoster;
     delete g_hStats;
+    delete g_aDeaths;
+    delete g_aRounds;
+    delete g_aHighlights;
     if (g_hDb != null) {
         delete g_hDb;
         g_hDb = null;
@@ -205,6 +215,142 @@ void ResetMatchState() {
     g_sWinner[0] = '\0';
     g_hRoster.Clear();
     g_hStats.Clear();
+    if (g_aDeaths != null) g_aDeaths.Clear();
+    if (g_aRounds != null) g_aRounds.Clear();
+    if (g_aHighlights != null) g_aHighlights.Clear();
+}
+
+int GetActiveRoundNumber() {
+    return g_iRound + 1;
+}
+
+void TeamSlotForSteam(const char[] steam, char[] buffer, int maxlen) {
+    int slot = GetPlayerSlot(steam);
+    if (slot == 1) {
+        strcopy(buffer, maxlen, "A");
+    } else if (slot == 2) {
+        strcopy(buffer, maxlen, "B");
+    } else {
+        buffer[0] = '\0';
+    }
+}
+
+void BumpRoundKill(const char[] steam, int roundNumber) {
+    char key[96];
+    Format(key, sizeof(key), "%s:rk:%d", steam, roundNumber);
+    int value = 0;
+    g_hStats.GetValue(key, value);
+    g_hStats.SetValue(key, value + 1);
+}
+
+int GetRoundKill(const char[] steam, int roundNumber) {
+    char key[96];
+    Format(key, sizeof(key), "%s:rk:%d", steam, roundNumber);
+    int value = 0;
+    g_hStats.GetValue(key, value);
+    return value;
+}
+
+void AppendHighlight(const char[] steam, const char[] type, int roundNumber, const char[] detail) {
+    char row[256];
+    Format(
+        row,
+        sizeof(row),
+        "{\"steamId\":\"%s\",\"type\":\"%s\",\"roundNumber\":%d,\"detail\":\"%s\"}",
+        steam,
+        type,
+        roundNumber,
+        detail
+    );
+    g_aHighlights.PushString(row);
+}
+
+void CheckRoundHighlights(int roundNumber) {
+    StringMapSnapshot snap = g_hStats.Snapshot();
+    for (int i = 0; i < snap.Length; i++) {
+        char key[96];
+        snap.GetKey(i, key, sizeof(key));
+
+        char parts[3][64];
+        if (ExplodeString(key, ":", parts, 3, sizeof(parts[]), false) != 3) {
+            continue;
+        }
+        if (strcmp(parts[1], "rk") != 0) {
+            continue;
+        }
+        if (StringToInt(parts[2]) != roundNumber) {
+            continue;
+        }
+
+        int kills = 0;
+        g_hStats.GetValue(key, kills);
+        if (kills >= 5) {
+            AppendHighlight(parts[0], "ACE", roundNumber, "Ace");
+        } else if (kills >= 3) {
+            char detail[32];
+            Format(detail, sizeof(detail), "%d kills", kills);
+            AppendHighlight(parts[0], "MULTI_KILL", roundNumber, detail);
+        }
+    }
+    delete snap;
+}
+
+void AppendDeathRow(
+    int roundNumber,
+    const char[] victimSteam,
+    const char[] killerSteam,
+    const char[] weapon,
+    bool headshot,
+    const char[] victimTeam,
+    float x,
+    float y,
+    float z
+) {
+    char row[320];
+    Format(
+        row,
+        sizeof(row),
+        "{\"roundNumber\":%d,\"victimSteamId\":\"%s\",\"killerSteamId\":\"%s\",\"weapon\":\"%s\",\"headshot\":%s,\"victimTeam\":\"%s\",\"x\":%.1f,\"y\":%.1f,\"z\":%.1f}",
+        roundNumber,
+        victimSteam,
+        killerSteam,
+        weapon,
+        headshot ? "true" : "false",
+        victimTeam,
+        x,
+        y,
+        z
+    );
+    g_aDeaths.PushString(row);
+}
+
+void AppendRoundRow(int roundNumber, const char[] winnerTeam, int reason, bool bombPlanted) {
+    char reasonText[32];
+    if (reason == 1) {
+        strcopy(reasonText, sizeof(reasonText), "target_bombed");
+    } else if (reason == 7) {
+        strcopy(reasonText, sizeof(reasonText), "bomb_defused");
+    } else if (reason == 8) {
+        strcopy(reasonText, sizeof(reasonText), "terrorists_win");
+    } else if (reason == 9) {
+        strcopy(reasonText, sizeof(reasonText), "ct_win");
+    } else if (reason == 12) {
+        strcopy(reasonText, sizeof(reasonText), "time_ran_out");
+    } else {
+        Format(reasonText, sizeof(reasonText), "reason_%d", reason);
+    }
+
+    char row[160];
+    Format(
+        row,
+        sizeof(row),
+        "{\"roundNumber\":%d,\"winnerTeam\":\"%s\",\"reason\":\"%s\",\"bombPlanted\":%s}",
+        roundNumber,
+        winnerTeam,
+        reasonText,
+        bombPlanted ? "true" : "false"
+    );
+    g_aRounds.PushString(row);
 }
 
 int GetPlayerSlot(const char[] steam) {
@@ -240,6 +386,7 @@ int GetStat(const char[] steam, const char[] field) {
 
 public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
     if (g_sMatchId[0] == '\0' || StrEqual(g_sPhase, "idle")) return;
+    if (!StrEqual(g_sPhase, "live")) return;
 
     int victimUserId = event.GetInt("userid");
     int attackerUserId = event.GetInt("attacker");
@@ -253,13 +400,45 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
     EnsurePlayerStat(victimSteam);
     BumpStat(victimSteam, "deaths", 1);
 
+    bool headshot = event.GetBool("headshot");
+    char weapon[48];
+    event.GetString("weapon", weapon, sizeof(weapon));
+
+    char killerSteam[32];
+    killerSteam[0] = '\0';
     int attacker = GetClientOfUserId(attackerUserId);
+    int roundNumber = GetActiveRoundNumber();
+
     if (attacker > 0 && attacker != victim && IsClientInGame(attacker) && !IsFakeClient(attacker)) {
-        char attackerSteam[32];
-        if (GetClientAuthId(attacker, AuthId_Steam2, attackerSteam, sizeof(attackerSteam))) {
-            EnsurePlayerStat(attackerSteam);
-            BumpStat(attackerSteam, "kills", 1);
+        if (GetClientAuthId(attacker, AuthId_Steam2, killerSteam, sizeof(killerSteam))) {
+            EnsurePlayerStat(killerSteam);
+            BumpStat(killerSteam, "kills", 1);
+            BumpRoundKill(killerSteam, roundNumber);
+            if (headshot) {
+                BumpStat(killerSteam, "headshots", 1);
+            }
+            if (StrContains(weapon, "awp", false) != -1) {
+                BumpStat(killerSteam, "awp_kills", 1);
+            }
         }
+    }
+
+    if (StrEqual(g_sPhase, "live")) {
+        char victimTeam[2];
+        TeamSlotForSteam(victimSteam, victimTeam, sizeof(victimTeam));
+        float origin[3];
+        GetClientAbsOrigin(victim, origin);
+        AppendDeathRow(
+            roundNumber,
+            victimSteam,
+            killerSteam,
+            weapon,
+            headshot,
+            victimTeam,
+            origin[0],
+            origin[1],
+            origin[2]
+        );
     }
 
     int assister = GetClientOfUserId(assisterUserId);
@@ -270,6 +449,31 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
             BumpStat(assistSteam, "assists", 1);
         }
     }
+}
+
+public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
+    if (g_sMatchId[0] == '\0' || StrEqual(g_sPhase, "idle")) return;
+
+    int attackerUserId = event.GetInt("attacker");
+    int victimUserId = event.GetInt("userid");
+    if (attackerUserId == victimUserId) return;
+
+    int attacker = GetClientOfUserId(attackerUserId);
+    if (attacker <= 0 || !IsClientInGame(attacker) || IsFakeClient(attacker)) return;
+
+    int victim = GetClientOfUserId(victimUserId);
+    if (victim <= 0 || !IsClientInGame(victim)) return;
+
+    // Ignore team damage so ADR reflects damage on enemies only.
+    if (GetClientTeam(attacker) == GetClientTeam(victim)) return;
+
+    int dmgHealth = event.GetInt("dmg_health");
+    if (dmgHealth <= 0) return;
+
+    char attackerSteam[32];
+    if (!GetClientAuthId(attacker, AuthId_Steam2, attackerSteam, sizeof(attackerSteam))) return;
+    EnsurePlayerStat(attackerSteam);
+    BumpStat(attackerSteam, "damage", dmgHealth);
 }
 
 public void Event_RoundMvp(Event event, const char[] name, bool dontBroadcast) {
@@ -291,7 +495,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) {
     int winner = event.GetInt("winner");
     if (winner != CS_TEAM_CT && winner != CS_TEAM_T) return;
 
-    g_iRound++;
+    int roundNumber = GetActiveRoundNumber();
     strcopy(g_sPhase, sizeof(g_sPhase), "live");
 
     int slot1OnWinner = 0;
@@ -308,11 +512,20 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) {
         else if (slot == 2) slot2OnWinner++;
     }
 
+    char winnerTeam[2];
     if (slot1OnWinner >= slot2OnWinner) {
         g_iScoreA++;
+        strcopy(winnerTeam, sizeof(winnerTeam), "A");
     } else {
         g_iScoreB++;
+        strcopy(winnerTeam, sizeof(winnerTeam), "B");
     }
+
+    int reason = event.GetInt("reason");
+    bool bombPlanted = event.GetBool("bomb");
+    CheckRoundHighlights(roundNumber);
+    AppendRoundRow(roundNumber, winnerTeam, reason, bombPlanted);
+    g_iRound++;
 
     int scoreCt = CS_GetTeamScore(CS_TEAM_CT);
     int scoreT = CS_GetTeamScore(CS_TEAM_T);
@@ -378,10 +591,14 @@ void FinalizeMatch() {
 void PersistLiveRow(bool final) {
     if (g_hDb == null || g_sMatchId[0] == '\0') return;
 
-    char statsJson[4096];
-    BuildStatsJson(statsJson, sizeof(statsJson));
+    char statsJson[16384];
+    if (final) {
+        BuildFinalPayloadJson(statsJson, sizeof(statsJson));
+    } else {
+        BuildStatsJson(statsJson, sizeof(statsJson));
+    }
 
-    char escapedStats[8192];
+    char escapedStats[32768];
     g_hDb.Escape(statsJson, escapedStats, sizeof(escapedStats));
 
     int scoreCt = CS_GetTeamScore(CS_TEAM_CT);
@@ -448,18 +665,24 @@ void BuildStatsJson(char[] buffer, int maxlen) {
         int assists = GetStat(steam, "assists");
         int mvp = GetStat(steam, "mvp");
         int score = GetStat(steam, "score");
+        int headshots = GetStat(steam, "headshots");
+        int damage = GetStat(steam, "damage");
+        int awpKills = GetStat(steam, "awp_kills");
 
         len += Format(
             buffer[len],
             maxlen - len,
-            "{\"steam\":\"%s\",\"slot\":%d,\"kills\":%d,\"deaths\":%d,\"assists\":%d,\"score\":%d,\"mvp\":%d}",
+            "{\"steam\":\"%s\",\"slot\":%d,\"kills\":%d,\"deaths\":%d,\"assists\":%d,\"score\":%d,\"mvp\":%d,\"headshots\":%d,\"damage\":%d,\"awpKills\":%d}",
             steam,
             slot,
             kills,
             deaths,
             assists,
             score,
-            mvp
+            mvp,
+            headshots,
+            damage,
+            awpKills
         );
 
         if (len >= maxlen - 4) break;
@@ -467,4 +690,46 @@ void BuildStatsJson(char[] buffer, int maxlen) {
 
     delete snap;
     Format(buffer[len], maxlen - len, "]");
+}
+
+void JoinArrayListJson(ArrayList list, char[] buffer, int maxlen) {
+    buffer[0] = '[';
+    int len = 1;
+    bool first = true;
+    if (list != null) {
+        for (int i = 0; i < list.Length; i++) {
+            char row[512];
+            list.GetString(i, row, sizeof(row));
+            if (row[0] == '\0') continue;
+            if (!first) {
+                len += Format(buffer[len], maxlen - len, ",");
+            }
+            first = false;
+            len += Format(buffer[len], maxlen - len, "%s", row);
+            if (len >= maxlen - 8) break;
+        }
+    }
+    Format(buffer[len], maxlen - len, "]");
+}
+
+void BuildFinalPayloadJson(char[] buffer, int maxlen) {
+    char playersJson[4096];
+    char roundsJson[2048];
+    char deathsJson[8192];
+    char highlightsJson[2048];
+
+    BuildStatsJson(playersJson, sizeof(playersJson));
+    JoinArrayListJson(g_aRounds, roundsJson, sizeof(roundsJson));
+    JoinArrayListJson(g_aDeaths, deathsJson, sizeof(deathsJson));
+    JoinArrayListJson(g_aHighlights, highlightsJson, sizeof(highlightsJson));
+
+    Format(
+        buffer,
+        maxlen,
+        "{\"players\":%s,\"rounds\":%s,\"deaths\":%s,\"highlights\":%s}",
+        playersJson,
+        roundsJson,
+        deathsJson,
+        highlightsJson
+    );
 }

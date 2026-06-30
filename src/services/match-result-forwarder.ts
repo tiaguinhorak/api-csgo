@@ -1,6 +1,6 @@
 import type { Match } from '../models/match';
 import {
-  parseMatchLivePlayerStats,
+  parseMatchLivePayload,
   readMatchLive,
   type MatchLiveRow,
 } from './match-live-db';
@@ -34,12 +34,38 @@ export type MatchResultPayload = {
     assists: number;
     score: number;
     mvp: number;
+    headshots: number;
+    damage: number;
+    awpKills: number;
+  }>;
+  rounds?: Array<{
+    roundNumber: number;
+    winnerTeam?: string | null;
+    reason?: string | null;
+    bombPlanted?: boolean;
+  }>;
+  deaths?: Array<{
+    roundNumber?: number;
+    victimSteamId: string;
+    killerSteamId?: string | null;
+    weapon?: string | null;
+    headshot?: boolean;
+    victimTeam?: string | null;
+    x?: number;
+    y?: number;
+    z?: number;
+  }>;
+  highlights?: Array<{
+    steamId: string;
+    type: 'ACE' | 'CLUTCH' | 'MULTI_KILL' | 'HEADSHOTS' | 'ENTRY' | 'KNIFE';
+    roundNumber?: number;
+    detail?: string;
   }>;
 };
 
 function buildPayload(match: Match, row: MatchLiveRow): MatchResultPayload {
-  const rawPlayers = parseMatchLivePlayerStats(row.statsJson);
-  const players = rawPlayers.map((p) => ({
+  const live = parseMatchLivePayload(row.statsJson);
+  const players = live.players.map((p) => ({
     steamId: p.steam,
     team: (p.slot === 1 ? 'A' : 'B') as 'A' | 'B',
     kills: p.kills ?? 0,
@@ -47,9 +73,11 @@ function buildPayload(match: Match, row: MatchLiveRow): MatchResultPayload {
     assists: p.assists ?? 0,
     score: p.score ?? 0,
     mvp: p.mvp ?? 0,
+    headshots: p.headshots ?? 0,
+    damage: p.damage ?? 0,
+    awpKills: p.awpKills ?? 0,
   }));
 
-  // Fallback roster mapping when plugin stats missing slot
   if (players.some((p) => p.team !== 'A' && p.team !== 'B')) {
     const teamASteams = new Set(match.teamA.players.map((pl) => pl.steamId));
     for (const pl of players) {
@@ -69,7 +97,7 @@ function buildPayload(match: Match, row: MatchLiveRow): MatchResultPayload {
       ? Math.max(0, row.finishedAt - row.startedAt)
       : 0;
 
-  return {
+  const payload: MatchResultPayload = {
     csgoMatchId: match.id,
     roomId: match.roomId,
     scoreTeamA: row.scoreTeamA,
@@ -78,6 +106,44 @@ function buildPayload(match: Match, row: MatchLiveRow): MatchResultPayload {
     durationSec,
     players,
   };
+
+  if (live.rounds.length > 0) {
+    payload.rounds = live.rounds.map((round) => ({
+      roundNumber: round.roundNumber,
+      winnerTeam: round.winnerTeam ?? null,
+      reason: round.reason ?? null,
+      bombPlanted: round.bombPlanted ?? false,
+    }));
+  }
+
+  if (live.deaths.length > 0) {
+    payload.deaths = live.deaths.map((death) => ({
+      roundNumber: death.roundNumber ?? 0,
+      victimSteamId: death.victimSteamId,
+      killerSteamId: death.killerSteamId ?? null,
+      weapon: death.weapon ?? null,
+      headshot: death.headshot ?? false,
+      victimTeam: death.victimTeam ?? null,
+      x: death.x ?? 0,
+      y: death.y ?? 0,
+      z: death.z ?? 0,
+    }));
+  }
+
+  if (live.highlights.length > 0) {
+    payload.highlights = live.highlights
+      .filter((hl) =>
+        ['ACE', 'CLUTCH', 'MULTI_KILL', 'HEADSHOTS', 'ENTRY', 'KNIFE'].includes(hl.type),
+      )
+      .map((hl) => ({
+        steamId: hl.steamId,
+        type: hl.type as 'ACE' | 'CLUTCH' | 'MULTI_KILL' | 'HEADSHOTS' | 'ENTRY' | 'KNIFE',
+        roundNumber: hl.roundNumber,
+        detail: hl.detail,
+      }));
+  }
+
+  return payload;
 }
 
 const forwardedMatchIds = new Set<string>();

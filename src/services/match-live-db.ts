@@ -25,6 +25,42 @@ export type MatchLivePlayerStat = {
   assists: number;
   score: number;
   mvp: number;
+  headshots?: number;
+  damage?: number;
+  awpKills?: number;
+};
+
+export type MatchLiveRound = {
+  roundNumber: number;
+  winnerTeam?: string | null;
+  reason?: string | null;
+  bombPlanted?: boolean;
+};
+
+export type MatchLiveDeath = {
+  roundNumber?: number;
+  victimSteamId: string;
+  killerSteamId?: string | null;
+  weapon?: string | null;
+  headshot?: boolean;
+  victimTeam?: string | null;
+  x?: number;
+  y?: number;
+  z?: number;
+};
+
+export type MatchLiveHighlight = {
+  steamId: string;
+  type: string;
+  roundNumber?: number;
+  detail?: string;
+};
+
+export type MatchLivePayload = {
+  players: MatchLivePlayerStat[];
+  rounds: MatchLiveRound[];
+  deaths: MatchLiveDeath[];
+  highlights: MatchLiveHighlight[];
 };
 
 const TABLE = 'clutch_match_live';
@@ -111,15 +147,51 @@ export function readMatchLive(matchId: string): MatchLiveRow | null {
   }
 }
 
-export function parseMatchLivePlayerStats(statsJson: string): MatchLivePlayerStat[] {
-  if (!statsJson.trim()) return [];
-  try {
-    const parsed = JSON.parse(statsJson) as MatchLivePlayerStat[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (p) => typeof p.steam === 'string' && p.steam.length > 4,
-    );
-  } catch {
-    return [];
+function isPlayerStat(value: unknown): value is MatchLivePlayerStat {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as MatchLivePlayerStat;
+  return typeof row.steam === 'string' && row.steam.length > 4;
+}
+
+export function parseMatchLivePayload(statsJson: string): MatchLivePayload {
+  if (!statsJson.trim()) {
+    return { players: [], rounds: [], deaths: [], highlights: [] };
   }
+
+  try {
+    const parsed: unknown = JSON.parse(statsJson);
+    if (Array.isArray(parsed)) {
+      return {
+        players: parsed.filter(isPlayerStat),
+        rounds: [],
+        deaths: [],
+        highlights: [],
+      };
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as {
+        players?: unknown;
+        rounds?: MatchLiveRound[];
+        deaths?: MatchLiveDeath[];
+        highlights?: MatchLiveHighlight[];
+      };
+      const players = Array.isArray(obj.players) ? obj.players.filter(isPlayerStat) : [];
+      return {
+        players,
+        rounds: obj.rounds ?? [],
+        deaths: obj.deaths ?? [],
+        highlights: obj.highlights ?? [],
+      };
+    }
+  } catch {
+    return { players: [], rounds: [], deaths: [], highlights: [] };
+  }
+
+  return { players: [], rounds: [], deaths: [], highlights: [] };
+}
+
+/** @deprecated Use parseMatchLivePayload instead */
+export function parseMatchLivePlayerStats(statsJson: string): MatchLivePlayerStat[] {
+  return parseMatchLivePayload(statsJson).players;
 }
