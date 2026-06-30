@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.1.1"
 #define TABLE_MATCH_LIVE "clutch_match_live"
 
 Database g_hDb = null;
@@ -56,11 +56,12 @@ public void OnPluginStart() {
     HookEvent("cs_win_panel_match", Event_MatchOver, EventHookMode_PostNoCopy);
     HookEvent("player_death", Event_PlayerDeath, EventHookMode_Post);
     HookEvent("player_hurt", Event_PlayerHurt, EventHookMode_Post);
-    HookEvent("round_mvp", Event_RoundMvp, EventHookMode_PostNoCopy);
+    HookEvent("round_mvp", Event_RoundMvp, EventHookMode_Post);
 
     RegServerCmd("clutch_match_begin", Cmd_MatchBegin, "Begin tracking a ranked match");
     RegServerCmd("clutch_match_roster", Cmd_MatchRoster, "Set team rosters (pipe-separated steam ids)");
     RegServerCmd("clutch_match_clear", Cmd_MatchClear, "Clear active match tracking");
+    RegServerCmd("clutch_match_finish", Cmd_MatchFinish, "Finalize active match tracking (stats to DB)");
 
     ConnectDatabase();
 }
@@ -197,6 +198,15 @@ public Action Cmd_MatchClear(int args) {
     return Plugin_Handled;
 }
 
+public Action Cmd_MatchFinish(int args) {
+    if (g_sMatchId[0] == '\0') {
+        LogMessage("[ClutchMatch] no active match to finish");
+        return Plugin_Handled;
+    }
+    FinalizeMatch();
+    return Plugin_Handled;
+}
+
 public void SimpleQueryCallback(Database database, DBResultSet results, const char[] error, any data) {
     if (error[0]) {
         LogError("[ClutchMatch] query: %s", error);
@@ -241,14 +251,6 @@ void BumpRoundKill(const char[] steam, int roundNumber) {
     int value = 0;
     g_hStats.GetValue(key, value);
     g_hStats.SetValue(key, value + 1);
-}
-
-int GetRoundKill(const char[] steam, int roundNumber) {
-    char key[96];
-    Format(key, sizeof(key), "%s:rk:%d", steam, roundNumber);
-    int value = 0;
-    g_hStats.GetValue(key, value);
-    return value;
 }
 
 void AppendHighlight(const char[] steam, const char[] type, int roundNumber, const char[] detail) {
