@@ -11,13 +11,10 @@ cd "${REPO_ROOT}"
 
 # shellcheck source=lib/parse-site-url.sh
 source "${REPO_ROOT}/scripts/lib/parse-site-url.sh"
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/lib/env-file.sh"
 
-if [[ -f .env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
-fi
+source_clutch_env "${REPO_ROOT}/.env"
 
 CSGO_ROOT="${CSGO_ROOT:-/home/csgo/server/csgo}"
 SM_PLUGINS="${CSGO_ROOT}/addons/sourcemod/plugins"

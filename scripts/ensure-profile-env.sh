@@ -6,6 +6,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${REPO_ROOT}/.env"
 EXAMPLE="${REPO_ROOT}/.env.example"
 
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/lib/env-file.sh"
+
 if [[ ! -f "${ENV_FILE}" ]]; then
   if [[ -f "${EXAMPLE}" ]]; then
     cp "${EXAMPLE}" "${ENV_FILE}"
@@ -16,35 +19,28 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   fi
 fi
 
-set_kv_if_missing() {
-  local key="$1"
-  local value="$2"
-  if ! grep -qE "^${key}=" "${ENV_FILE}"; then
-    echo "${key}=${value}" >> "${ENV_FILE}"
-    echo "Added ${key}=${value}"
-  fi
-}
+env_repair_unquoted_values "${ENV_FILE}"
 
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/scripts/lib/profile.sh"
 clutch_profile_init "${REPO_ROOT}"
 
-set_kv_if_missing "PORT" "3001"
-set_kv_if_missing "DATA_DIR" "./data"
-set_kv_if_missing "CSGO_RCON_LOOPBACK" "1"
-set_kv_if_missing "CSGO_SERVER_HOST" "127.0.0.1"
-set_kv_if_missing "CSGO_RCON_PORT" "27015"
-set_kv_if_missing "CSGO_SERVER_DIR" "/home/csgo/server"
-set_kv_if_missing "SERVER_PROFILE" "${CLUTCH_SERVER_PROFILE}"
-set_kv_if_missing "CSGO_SERVER_POOL" "${CLUTCH_SERVER_POOL}"
+env_set_kv_if_missing "${ENV_FILE}" "PORT" "3001"
+env_set_kv_if_missing "${ENV_FILE}" "DATA_DIR" "./data"
+env_set_kv_if_missing "${ENV_FILE}" "CSGO_RCON_LOOPBACK" "1"
+env_set_kv_if_missing "${ENV_FILE}" "CSGO_SERVER_HOST" "127.0.0.1"
+env_set_kv_if_missing "${ENV_FILE}" "CSGO_RCON_PORT" "27015"
+env_set_kv_if_missing "${ENV_FILE}" "CSGO_SERVER_DIR" "/home/csgo/server"
+env_set_kv_if_missing "${ENV_FILE}" "SERVER_PROFILE" "${CLUTCH_SERVER_PROFILE}"
+env_set_kv_if_missing "${ENV_FILE}" "CSGO_SERVER_POOL" "${CLUTCH_SERVER_POOL}"
 
 if [[ "${CLUTCH_IS_RANKED}" -eq 1 ]]; then
-  set_kv_if_missing "CLUTCH_CS_SCREEN" "csgo-clutch-#1"
+  env_set_kv_if_missing "${ENV_FILE}" "CLUTCH_CS_SCREEN" "csgo-clutch-#1"
 else
-  set_kv_if_missing "WARMUP_VPS" "1"
-  set_kv_if_missing "CLUTCH_CS_SCREEN" "csgo-warmup-#1"
-  set_kv_if_missing "CSGO_BIND_IP" "0.0.0.0"
-  set_kv_if_missing "BIND_HOST" "0.0.0.0"
+  env_set_kv_if_missing "${ENV_FILE}" "WARMUP_VPS" "1"
+  env_set_kv_if_missing "${ENV_FILE}" "CLUTCH_CS_SCREEN" "csgo-warmup-#1"
+  env_set_kv_if_missing "${ENV_FILE}" "CSGO_BIND_IP" "0.0.0.0"
+  env_set_kv_if_missing "${ENV_FILE}" "BIND_HOST" "0.0.0.0"
   if ! grep -qE '^CSGO_PUBLIC_HOST=' "${ENV_FILE}"; then
     echo "WARN: add CSGO_PUBLIC_HOST=<public IP> so players outside LAN can connect"
   fi
@@ -54,8 +50,8 @@ else
   fi
 fi
 
-set_kv_if_missing "SERVER_MODE_LABEL" "${CLUTCH_SERVER_MODE_LABEL}"
-set_kv_if_missing "SERVER_NAME" "${CLUTCH_SERVER_NAME}"
+env_set_kv_if_missing "${ENV_FILE}" "SERVER_MODE_LABEL" "${CLUTCH_SERVER_MODE_LABEL}"
+env_set_kv_if_missing "${ENV_FILE}" "SERVER_NAME" "${CLUTCH_SERVER_NAME}"
 
 bash "${REPO_ROOT}/scripts/ensure-clutch-site-env.sh"
 

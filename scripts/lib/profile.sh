@@ -2,11 +2,15 @@
 # Clutch VPS profile — loaded by deploy/install scripts.
 # Only SERVER_PROFILE + labels/game vars should differ per machine.
 
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env-file.sh"
+
 clutch_profile_init() {
   local repo_root="${1:?repo root required}"
   CLUTCH_REPO_ROOT="${repo_root}"
 
   if [[ -f "${CLUTCH_REPO_ROOT}/.env" ]]; then
+    env_repair_unquoted_values "${CLUTCH_REPO_ROOT}/.env"
     set -a
     # shellcheck disable=SC1091
     source "${CLUTCH_REPO_ROOT}/.env"

@@ -9,6 +9,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/lib/env-file.sh"
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  env_repair_unquoted_values "${REPO_ROOT}/.env"
+fi
+
 SKIP_PULL=0
 SKIP_INGAME=0
 SKIP_PLUGIN=0
@@ -85,8 +91,7 @@ echo ""
 echo ">>> ensure .env (profile)"
 bash "${REPO_ROOT}/scripts/ensure-profile-env.sh"
 # Re-load after ensure may have appended keys
-# shellcheck disable=SC1091
-source "${REPO_ROOT}/.env"
+source_clutch_env "${REPO_ROOT}/.env"
 clutch_profile_init "${REPO_ROOT}"
 
 echo ""
