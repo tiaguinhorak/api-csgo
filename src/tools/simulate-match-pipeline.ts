@@ -16,13 +16,22 @@ import { ensureMatchLiveTableWritable } from '../services/match-live-db';
 import { getMatchLiveDbPath } from '../services/weapons-db-path';
 import { processMatchLiveDbChanges } from '../services/match-live-watcher';
 
+/** Same steam ids as site/lib/ranked/simulate-match.ts bot users. */
+const ADMIN_STEAM_DEFAULT = '76561198000000001';
+
 type CliOptions = {
   roomId: string;
   ichSteam: string;
   scoreA: number;
   scoreB: number;
+  winnerTeam: 'A' | 'B';
+  fullRoster: boolean;
   dryRun: boolean;
 };
+
+function botSteam(index: number): string {
+  return `765611979602879${(30 + index).toString().padStart(2, '0')}`;
+}
 
 function parseArgs(): CliOptions {
   const args = process.argv.slice(2);
@@ -30,6 +39,8 @@ function parseArgs(): CliOptions {
   let ichSteam = '76561198367970104';
   let scoreA = 8;
   let scoreB = 13;
+  let winnerTeam: 'A' | 'B' = 'B';
+  let fullRoster = false;
   let dryRun = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -50,6 +61,15 @@ function parseArgs(): CliOptions {
       scoreB = Number(args[++i]);
       continue;
     }
+    if (arg === '--winner' && args[i + 1]) {
+      const w = args[++i]?.toUpperCase();
+      if (w === 'A' || w === 'B') winnerTeam = w;
+      continue;
+    }
+    if (arg === '--full-roster') {
+      fullRoster = true;
+      continue;
+    }
     if (arg === '--dry-run') {
       dryRun = true;
     }
@@ -66,7 +86,13 @@ function parseArgs(): CliOptions {
     );
   }
 
-  return { roomId, ichSteam, scoreA, scoreB, dryRun };
+  if (scoreA === scoreB) {
+    console.warn('WARN: empate no placar — ajustando +1 para o vencedor.');
+    if (winnerTeam === 'A') scoreA += 1;
+    else scoreB += 1;
+  }
+
+  return { roomId, ichSteam, scoreA, scoreB, winnerTeam, fullRoster, dryRun };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -90,45 +116,67 @@ async function probeSiteReachable(baseUrl: string): Promise<boolean> {
   }
 }
 
-function buildStatsJson(ichSteam: string): string {
-  const botA = '76561197960287931';
+type SimPlayer = {
+  steam: string;
+  slot: 1 | 2;
+  kills: number;
+  deaths: number;
+  assists: number;
+  score: number;
+  mvp: number;
+  headshots: number;
+  damage: number;
+  awpKills: number;
+};
+
+function buildPlayerStats(steam: string, slot: 1 | 2, seed: number): SimPlayer {
+  const kills = 8 + (seed % 18);
+  const deaths = 6 + ((seed * 3) % 16);
+  return {
+    steam,
+    slot,
+    kills,
+    deaths,
+    assists: 2 + (seed % 8),
+    score: kills * 2 + (seed % 12),
+    mvp: seed % 4,
+    headshots: Math.floor(kills * (0.25 + (seed % 5) * 0.05)),
+    damage: kills * 90 + seed * 12,
+    awpKills: seed % 6,
+  };
+}
+
+function buildStatsJson(opts: {
+  ichSteam: string;
+  fullRoster: boolean;
+  winnerTeam: 'A' | 'B';
+}): string {
+  const players: SimPlayer[] = opts.fullRoster
+    ? [
+        buildPlayerStats(ADMIN_STEAM_DEFAULT, 1, 0),
+        ...([1, 2, 3, 4] as const).map((i) => buildPlayerStats(botSteam(i), 1, i)),
+        buildPlayerStats(opts.ichSteam, 2, 10),
+        ...([6, 7, 8, 9] as const).map((i) => buildPlayerStats(botSteam(i), 2, i + 10)),
+      ]
+    : [
+        buildPlayerStats(opts.ichSteam, 2, 10),
+        buildPlayerStats(botSteam(1), 1, 1),
+      ];
+
+  const mvpSteam = players.reduce((best, p) => (p.kills > best.kills ? p : best)).steam;
+
   return JSON.stringify({
-    players: [
-      {
-        steam: ichSteam,
-        slot: 2,
-        kills: 24,
-        deaths: 12,
-        assists: 5,
-        score: 55,
-        mvp: 3,
-        headshots: 10,
-        damage: 2400,
-        awpKills: 8,
-      },
-      {
-        steam: botA,
-        slot: 1,
-        kills: 18,
-        deaths: 16,
-        assists: 4,
-        score: 42,
-        mvp: 1,
-        headshots: 6,
-        damage: 1900,
-        awpKills: 2,
-      },
-    ],
+    players,
     rounds: [
-      { roundNumber: 1, winnerTeam: 'B', reason: 'ct_win', bombPlanted: false },
-      { roundNumber: 2, winnerTeam: 'B', reason: 'terrorists_win', bombPlanted: true },
-      { roundNumber: 3, winnerTeam: 'A', reason: 'ct_win', bombPlanted: false },
+      { roundNumber: 1, winnerTeam: opts.winnerTeam, reason: 'ct_win', bombPlanted: false },
+      { roundNumber: 2, winnerTeam: opts.winnerTeam, reason: 'terrorists_win', bombPlanted: true },
+      { roundNumber: 3, winnerTeam: opts.winnerTeam === 'A' ? 'B' : 'A', reason: 'ct_win', bombPlanted: false },
     ],
     deaths: [
       {
         roundNumber: 1,
-        victimSteamId: botA,
-        killerSteamId: ichSteam,
+        victimSteamId: players[0]!.steam,
+        killerSteamId: mvpSteam,
         weapon: 'ak47',
         headshot: true,
         victimTeam: 'A',
@@ -138,8 +186,8 @@ function buildStatsJson(ichSteam: string): string {
       },
       {
         roundNumber: 2,
-        victimSteamId: botA,
-        killerSteamId: ichSteam,
+        victimSteamId: players[1]?.steam ?? players[0]!.steam,
+        killerSteamId: mvpSteam,
         weapon: 'awp',
         headshot: true,
         victimTeam: 'A',
@@ -149,10 +197,54 @@ function buildStatsJson(ichSteam: string): string {
       },
     ],
     highlights: [
-      { steamId: ichSteam, type: 'ACE', roundNumber: 10, detail: 'Ace' },
-      { steamId: ichSteam, type: 'MULTI_KILL', roundNumber: 5, detail: '3 kills' },
+      { steamId: mvpSteam, type: 'ACE', roundNumber: 10, detail: 'Ace' },
+      { steamId: mvpSteam, type: 'MULTI_KILL', roundNumber: 5, detail: '3 kills' },
     ],
   });
+}
+
+function buildMatchTeams(opts: { ichSteam: string; fullRoster: boolean }) {
+  if (opts.fullRoster) {
+    return {
+      teamA: {
+        name: 'Team Alpha',
+        players: [
+          { steamId: ADMIN_STEAM_DEFAULT, name: 'Admin' },
+          ...([1, 2, 3, 4] as const).map((i) => ({
+            steamId: botSteam(i),
+            name: `Bot Alpha ${i}`,
+          })),
+        ],
+      },
+      teamB: {
+        name: 'Team Beta',
+        players: [
+          { steamId: opts.ichSteam, name: 'Player' },
+          ...([6, 7, 8, 9] as const).map((i) => ({
+            steamId: botSteam(i),
+            name: `Bot Beta ${i}`,
+          })),
+        ],
+      },
+    };
+  }
+
+  return {
+    teamA: {
+      name: 'Team Alpha',
+      players: [
+        { steamId: botSteam(1), name: 'Bot Alpha 1' },
+        { steamId: botSteam(2), name: 'Bot Alpha 2' },
+      ],
+    },
+    teamB: {
+      name: 'Team Ichi',
+      players: [
+        { steamId: opts.ichSteam, name: 'Player' },
+        { steamId: botSteam(3), name: 'Bot Beta 1' },
+      ],
+    },
+  };
 }
 
 async function main(): Promise<void> {
@@ -162,8 +254,9 @@ async function main(): Promise<void> {
 
   console.log('=== Clutch — simulate match pipeline (sem CS:GO) ===');
   console.log(`roomId:    ${opts.roomId}`);
-  console.log(`steam B:   ${opts.ichSteam}`);
-  console.log(`score:     ${opts.scoreA}:${opts.scoreB} (winner B)`);
+  console.log(`steam:     ${opts.ichSteam}`);
+  console.log(`score:     ${opts.scoreA}:${opts.scoreB} (winner ${opts.winnerTeam})`);
+  console.log(`roster:    ${opts.fullRoster ? '10 jogadores (admin + bots do site)' : '2 jogadores'}`);
   console.log(`site:      ${siteUrl || '(CLUTCH_SITE_URL não definido)'}`);
   console.log(`sync key:  ${syncKey ? 'set' : 'MISSING'}`);
   if (siteUrl) {
@@ -172,22 +265,10 @@ async function main(): Promise<void> {
   }
   console.log('');
 
+  const teams = buildMatchTeams(opts);
   const match = matchManager.createMatch({
     roomId: opts.roomId,
-    teamA: {
-      name: 'Team Alpha',
-      players: [
-        { steamId: '76561197960287931', name: 'Bot Alpha 1' },
-        { steamId: '76561197960287932', name: 'Bot Alpha 2' },
-      ],
-    },
-    teamB: {
-      name: 'Team Ichi',
-      players: [
-        { steamId: opts.ichSteam, name: 'ichi' },
-        { steamId: '76561197960287933', name: 'Bot Beta 1' },
-      ],
-    },
+    ...teams,
     mapPool: ['de_dust2', 'de_mirage'],
   });
 
@@ -196,7 +277,11 @@ async function main(): Promise<void> {
   stateStore.matches.set(match.id, match);
   stateStore.persist();
 
-  const statsJson = buildStatsJson(opts.ichSteam);
+  const statsJson = buildStatsJson({
+    ichSteam: opts.ichSteam,
+    fullRoster: opts.fullRoster,
+    winnerTeam: opts.winnerTeam,
+  });
   const now = Math.floor(Date.now() / 1000);
   const startedAt = now - 1800;
   const finishedAt = now;
@@ -217,7 +302,7 @@ async function main(): Promise<void> {
     `REPLACE INTO clutch_match_live (
       match_id, score_team_a, score_team_b, score_ct, score_t, round_num,
       phase, winner, max_rounds, started_at, finished_at, stats_json, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'finished', 'B', 30, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, 'finished', ?, 30, ?, ?, ?, ?)`,
   ).run(
     match.id,
     opts.scoreA,
@@ -225,6 +310,7 @@ async function main(): Promise<void> {
     opts.scoreA,
     opts.scoreB,
     opts.scoreA + opts.scoreB,
+    opts.winnerTeam,
     startedAt,
     finishedAt,
     statsJson,

@@ -11,26 +11,51 @@ class ServerManager {
   private servers = stateStore.servers;
 
   registerServer(dto: CreateServerDTO): GameServer {
+    const host = dto.host?.trim();
+    if (!host) throw new Error('Host é obrigatório.');
+
+    // O site consulta os servidores via A2S no host público; loopback/LAN não são alcançáveis de fora.
+    // Para api-csgo + srcds na mesma VPS, registre o IP PÚBLICO — o mapeamento p/ loopback é interno.
+    const allowLocal = process.env.CSGO_ALLOW_LOCAL_REGISTER === '1';
+    if (!allowLocal && this.isUnreachableHost(host)) {
+      throw new Error(
+        `Host "${host}" é loopback/LAN e o painel não consegue consultá-lo de fora. ` +
+          `Use o IP público da VPS (ex.: o mesmo de CSGO_PUBLIC_HOST).`,
+      );
+    }
+
+    const port = dto.port ?? 27015;
+    const duplicate = Array.from(this.servers.values()).find(
+      (s) => s.host === host && s.port === port,
+    );
+    if (duplicate) {
+      throw new Error(
+        `Já existe um servidor registrado em ${host}:${port} (${duplicate.name}). ` +
+          `Edite ou remova o existente antes de criar outro.`,
+      );
+    }
+
     const envScreen = process.env.CLUTCH_CS_SCREEN?.trim();
-    const screenSession =
+    const screenSession = this.sanitizeScreenSession(
       dto.screenSession?.trim() ||
-      envScreen ||
-      `csgo-${dto.name.toLowerCase().replace(/\s+/g, '-')}`;
+        envScreen ||
+        `csgo-${dto.name.toLowerCase().replace(/\s+/g, '-')}-${port}`,
+    );
 
     const server: GameServer = {
       id: uuidv4(),
       name: dto.name,
-      host: dto.host,
+      host,
       sshPort: dto.sshPort || 22,
       sshUser: dto.sshUser,
       sshKey: dto.sshKey,
       sshPassword: dto.sshPassword,
-      rconPort: dto.rconPort ?? dto.port ?? 27015,
+      rconPort: dto.rconPort ?? port,
       rconPassword: dto.rconPassword,
       csgoDir: dto.csgoDir,
       screenSession,
       status: 'offline',
-      port: dto.port ?? 27015,
+      port,
       tickrate: dto.tickrate || config.csgo.defaultTickrate,
       pool: dto.pool ?? 'public',
     };
@@ -38,6 +63,19 @@ class ServerManager {
     this.servers.set(server.id, server);
     stateStore.persist();
     return server;
+  }
+
+  private isUnreachableHost(host: string): boolean {
+    if (host === '127.0.0.1' || host === 'localhost' || host === '::1') return true;
+    if (/^10\./.test(host)) return true;
+    if (/^192\.168\./.test(host)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+    return false;
+  }
+
+  private sanitizeScreenSession(raw: string): string {
+    const clean = raw.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return clean || `csgo-${Date.now()}`;
   }
 
   getServer(id: string): GameServer | undefined {
@@ -113,6 +151,20 @@ class ServerManager {
       map, server.rconPassword, serverPassword
     );
 
+    // Dá um tempo para o screen subir e detecta crash imediato (porta ocupada, GSLT, binário ausente).
+    await new Promise(r => setTimeout(r, 4000));
+    const running = await sshService.serverStatus(conn, server.screenSession);
+    if (running !== 'running') {
+      const log = await sshService.readServerLog(conn, server.csgoDir);
+      server.status = 'offline';
+      stateStore.persist();
+      const hint = log
+        ? `O srcds não permaneceu no ar. Últimas linhas do log:\n${log}`
+        : 'O srcds não permaneceu no ar (screen encerrou). Verifique se o CS:GO está instalado em ' +
+          `${server.csgoDir} e se a porta ${server.port} está livre.`;
+      throw new Error(hint);
+    }
+
     // Aguarda até 30s pelo RCON responder
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 1000));
@@ -128,9 +180,15 @@ class ServerManager {
       } catch {}
     }
 
+    // Screen está rodando mas RCON não respondeu: provável senha RCON errada ou ainda carregando.
+    const log = await sshService.readServerLog(conn, server.csgoDir);
     server.status = 'offline';
     stateStore.persist();
-    return server;
+    throw new Error(
+      'Servidor iniciou mas o RCON não respondeu em 30s. ' +
+        'Confira CSGO_RCON_PASSWORD e -usercon.' +
+        (log ? `\nLog:\n${log}` : ''),
+    );
   }
 
   async stopServer(id: string): Promise<GameServer> {

@@ -13,6 +13,14 @@
 #   ./install.sh --skip-ingame        deploy sem reload RCON
 set -euo pipefail
 
+# Loop-guard: se este script for disparado pelo lifecycle `npm install`
+# (npm_lifecycle_event=install), aborta — senão deploy → npm install → install.sh
+# → deploy entra em loop infinito. Rode o instalador via ./install.sh ou `npm run setup`.
+if [[ "${npm_lifecycle_event:-}" == "install" || "${npm_lifecycle_event:-}" == "preinstall" || "${npm_lifecycle_event:-}" == "postinstall" ]]; then
+  echo "install.sh: ignorado (chamado pelo lifecycle do npm). Use ./install.sh ou 'npm run setup'." >&2
+  exit 0
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${REPO_ROOT}"
 

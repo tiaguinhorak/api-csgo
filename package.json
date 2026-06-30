@@ -17,7 +17,7 @@
     "pm2:logs": "pm2 logs api-csgo --lines 50",
     "deploy": "bash deploy.sh",
     "deploy:vps": "bash deploy.sh",
-    "install": "bash install.sh",
+    "setup": "bash install.sh",
     "simulate:match": "npm run build && node dist/tools/simulate-match-pipeline.js",
     "sync:allowlist": "bash scripts/sync-steam-allowlist.sh",
     "lint": "tsc --noEmit"

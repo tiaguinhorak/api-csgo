@@ -1,5 +1,6 @@
 import { Client as SSHClient, ConnectConfig } from 'ssh2';
 import { exec } from 'child_process';
+import os from 'os';
 
 interface ServerConnection {
   host: string;
@@ -9,17 +10,66 @@ interface ServerConnection {
   password?: string;
 }
 
+/** Hard cap so a stuck shell/SSH never pendura a requisição (era a causa do start/stop travar). */
+const EXEC_TIMEOUT_MS = 25_000;
+const SSH_READY_TIMEOUT_MS = 10_000;
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function isLocalConn(conn: ServerConnection): boolean {
+  return conn.host === '127.0.0.1' || conn.host === 'localhost' || !conn.username;
+}
+
+/**
+ * Monta o comando local rodando como o usuário dono do srcds, SEM `su` interativo
+ * (o `su - user -c` bloqueava esperando senha quando api-csgo não roda como root).
+ */
+function buildLocalCommand(conn: ServerConnection, command: string): string {
+  const targetUser = (conn.username || process.env.CSGO_SERVER_USER || 'csgo').trim();
+  const currentUser = os.userInfo().username;
+  const quoted = shellSingleQuote(command);
+
+  // Já somos o usuário dono do srcds → roda direto.
+  if (currentUser === targetUser) {
+    return `bash -lc ${quoted} < /dev/null`;
+  }
+
+  // root pode trocar de usuário sem senha via runuser (não interativo).
+  if (currentUser === 'root') {
+    return `runuser -l ${targetUser} -c ${quoted} < /dev/null`;
+  }
+
+  // Caso contrário: tenta sudo não interativo; se não houver permissão, roda direto.
+  return (
+    `sudo -n -u ${targetUser} bash -lc ${quoted} < /dev/null 2>/dev/null ` +
+    `|| bash -lc ${quoted} < /dev/null`
+  );
+}
+
 export class SshService {
   async execCommand(conn: ServerConnection, command: string): Promise<{ stdout: string; stderr: string }> {
     // Local execution (same machine, no SSH needed)
-    if (conn.host === '127.0.0.1' || conn.host === 'localhost' || !conn.username) {
-      const user = conn.username || 'csgo';
-      const fullCmd = `su - ${user} -c '${command.replace(/'/g, "'\\''")}'`;
+    if (isLocalConn(conn)) {
+      const fullCmd = buildLocalCommand(conn, command);
       return new Promise((resolve, reject) => {
-        exec(fullCmd, { maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-          if (error && stderr) reject(new Error(stderr));
-          else resolve({ stdout: stdout || '', stderr: stderr || '' });
-        });
+        exec(
+          fullCmd,
+          { maxBuffer: 1024 * 1024, timeout: EXEC_TIMEOUT_MS, killSignal: 'SIGKILL' },
+          (error, stdout, stderr) => {
+            // timeout do exec mata o processo e seta error.killed
+            if (error && (error as NodeJS.ErrnoException & { killed?: boolean }).killed) {
+              reject(new Error(`Comando local excedeu ${EXEC_TIMEOUT_MS / 1000}s e foi abortado.`));
+              return;
+            }
+            if (error && stderr) {
+              reject(new Error(stderr));
+              return;
+            }
+            resolve({ stdout: stdout || '', stderr: stderr || '' });
+          },
+        );
       });
     }
 
@@ -30,7 +80,7 @@ export class SshService {
         host: conn.host,
         port: conn.port,
         username: conn.username || 'root',
-        readyTimeout: 10000,
+        readyTimeout: SSH_READY_TIMEOUT_MS,
       };
 
       if (conn.privateKey) {
@@ -41,18 +91,33 @@ export class SshService {
 
       let stdout = '';
       let stderr = '';
+      let settled = false;
+
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(guard);
+        try {
+          client.end();
+        } catch {
+          /* ignore */
+        }
+        fn();
+      };
+
+      const guard = setTimeout(() => {
+        finish(() => reject(new Error(`SSH excedeu ${EXEC_TIMEOUT_MS / 1000}s e foi abortado.`)));
+      }, EXEC_TIMEOUT_MS);
 
       client.on('ready', () => {
         client.exec(command, (err, stream) => {
           if (err) {
-            client.end();
-            reject(err);
+            finish(() => reject(err));
             return;
           }
 
           stream.on('close', () => {
-            client.end();
-            resolve({ stdout, stderr });
+            finish(() => resolve({ stdout, stderr }));
           });
 
           stream.on('data', (data: Buffer) => {
@@ -65,7 +130,7 @@ export class SshService {
         });
       });
 
-      client.on('error', reject);
+      client.on('error', (err) => finish(() => reject(err)));
       client.connect(config);
     });
   }
@@ -82,20 +147,48 @@ export class SshService {
     rconPassword: string,
     serverPassword?: string
   ): Promise<string> {
-    let cmd = `cd ${csgoDir} && screen -dmS ${screenSession} ./srcds_run`;
-    cmd += ` -tickrate ${tickrate}`;
-    cmd += ` -game csgo -console -usercon`;
-    cmd += ` -port ${port}`;
-    cmd += ` +game_type ${gameType} +game_mode ${gameMode}`;
-    cmd += ` +map ${map}`;
-    cmd += ` +rcon_password "${rconPassword}"`;
-    cmd += ` -maxplayers 10`;
+    const logPath = `${csgoDir}/clutch-srcds.log`;
+    const gslt = process.env.CSGO_GSLT_TOKEN?.trim();
+
+    // Libera a porta de processos órfãos antes de subir (evita "porta ocupada" silencioso).
+    const freePort =
+      `fuser -k ${port}/udp 2>/dev/null || true; ` +
+      `fuser -k ${port}/tcp 2>/dev/null || true; `;
+
+    let launch = `./srcds_run`;
+    launch += ` -tickrate ${tickrate}`;
+    launch += ` -game csgo -console -usercon`;
+    launch += ` -port ${port}`;
+    launch += ` +game_type ${gameType} +game_mode ${gameMode}`;
+    launch += ` +map ${map}`;
+    launch += ` +rcon_password "${rconPassword}"`;
+    launch += ` -maxplayers 10`;
+    if (gslt) launch += ` +sv_setsteamaccount ${gslt}`;
     if (serverPassword) {
-      cmd += ` +sv_password "${serverPassword}"`;
+      launch += ` +sv_password "${serverPassword}"`;
     }
+
+    // Roda dentro do screen redirecionando saída para um log que conseguimos inspecionar.
+    const inner = `cd ${csgoDir} && ${launch} > ${logPath} 2>&1`;
+    const cmd =
+      `cd ${csgoDir} && ${freePort} ` +
+      `screen -L -dmS ${screenSession} bash -c ${shellSingleQuote(inner)}`;
 
     const { stdout, stderr } = await this.execCommand(conn, cmd);
     return stderr || stdout || 'Server started';
+  }
+
+  /** Lê o fim do log do srcds para diagnosticar falha de start. */
+  async readServerLog(conn: ServerConnection, csgoDir: string, lines = 25): Promise<string> {
+    try {
+      const { stdout } = await this.execCommand(
+        conn,
+        `tail -n ${lines} ${csgoDir}/clutch-srcds.log 2>/dev/null || true`,
+      );
+      return stdout.trim();
+    } catch {
+      return '';
+    }
   }
 
   async stopServer(conn: ServerConnection, screenSession: string): Promise<string> {

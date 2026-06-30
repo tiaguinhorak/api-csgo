@@ -4,6 +4,24 @@ const createRcon: (opts: { address: string; password: string }) => {
   command(cmd: string): Promise<string>;
 } = require('srcds-rcon');
 
+const RCON_TIMEOUT_MS = 6_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} excedeu ${ms / 1000}s`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export class RconService {
   private connections: Map<string, ReturnType<typeof createRcon>> = new Map();
 
@@ -16,7 +34,7 @@ export class RconService {
     await this.disconnect(host, port);
 
     const rcon = createRcon({ address: `${host}:${port}`, password });
-    await rcon.connect();
+    await withTimeout(rcon.connect(), RCON_TIMEOUT_MS, 'RCON connect');
     this.connections.set(key, rcon);
   }
 
@@ -26,16 +44,20 @@ export class RconService {
 
     if (!rcon) {
       const client = createRcon({ address: `${host}:${port}`, password });
-      await client.connect();
+      await withTimeout(client.connect(), RCON_TIMEOUT_MS, 'RCON connect');
       this.connections.set(key, client);
       rcon = client;
     }
 
     try {
-      const response = await rcon.command(command);
-      return response;
+      return await withTimeout(rcon.command(command), RCON_TIMEOUT_MS, 'RCON command');
     } catch (error) {
       this.connections.delete(key);
+      try {
+        await rcon.disconnect();
+      } catch {
+        /* ignore */
+      }
       throw error;
     }
   }

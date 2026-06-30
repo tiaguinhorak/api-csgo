@@ -4,6 +4,7 @@
 # Uso:
 #   ./scripts/simulate-match-pipeline.sh --room-id <RankedMatchSession.id>
 #   ./scripts/simulate-match-pipeline.sh --room-id cmxxx --steam 76561198367970104
+#   ./scripts/simulate-match-pipeline.sh --room-id cmxxx --full-roster --winner B
 #
 # Obtenha room-id: no site, sessão ranked em starting/live (URL ou Admin).
 
