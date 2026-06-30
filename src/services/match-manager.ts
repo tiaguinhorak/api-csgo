@@ -195,7 +195,11 @@ class MatchManager {
           teamBPipe,
         );
         await rconService.startMatch(server.host, rconPort, server.rconPassword);
-      } catch {}
+        console.log(`[match-start] tracker armed match=${matchId} map=${match.selectedMap}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[match-start] tracker RCON failed match=${matchId}: ${message}`);
+      }
     }, 15000);
 
     stateStore.persist();
