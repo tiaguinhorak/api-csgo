@@ -8,6 +8,7 @@ import skinsRouter from './routes/skins';
 import csgoSkinsPushRouter, { logSkinsAuthStatus } from './routes/csgo-skins-push';
 import csgoStickersPushRouter from './routes/csgo-stickers-push';
 import csgoAgentsPushRouter from './routes/csgo-agents-push';
+import csgoPlayerBanRouter from './routes/csgo-player-ban';
 import { skinManager } from './services/skin-manager';
 import { resolveWeaponsDbPath } from './services/weapons-db-path';
 import { logStickersDbPath } from './services/stickers-db-sync';
@@ -72,6 +73,7 @@ app.use('/api/skins', skinsRouter);
 app.use('/api/csgo/skins', csgoSkinsPushRouter);
 app.use('/api/csgo/stickers', csgoStickersPushRouter);
 app.use('/api/csgo/agents', csgoAgentsPushRouter);
+app.use('/api/csgo/players', csgoPlayerBanRouter);
 
 skinManager.initializeDefaultSkins();
 logSkinsAuthStatus();
