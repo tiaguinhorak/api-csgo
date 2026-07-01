@@ -21,6 +21,7 @@ export type MatchResultPayload = {
   scoreTeamB: number;
   winnerTeam: string | null;
   durationSec: number;
+  replayStale?: boolean;
   players: Array<{
     steamId: string;
     team: 'A' | 'B';
@@ -187,7 +188,11 @@ export function wasMatchResultForwarded(matchId: string): boolean {
   return forwardedMatchIds.has(matchId);
 }
 
-export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow): Promise<boolean> {
+export async function forwardMatchResultToSite(
+  match: Match,
+  row: MatchLiveRow,
+  options: { replayStale?: boolean; trackForwardedIds?: string[] } = {},
+): Promise<boolean> {
   if (forwardedMatchIds.has(match.id)) return true;
 
   if (row.phase !== 'finished' || row.finishedAt <= 0) {
@@ -205,6 +210,10 @@ export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow):
   if (payload.players.length === 0) {
     console.warn(`[match-live] skip forward ${match.id}: no player stats in SQLite payload`);
     return false;
+  }
+
+  if (options.replayStale) {
+    payload.replayStale = true;
   }
 
   const url = `${base}/api/csgo/match-result`;
@@ -229,6 +238,9 @@ export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow):
 
     const body = (await res.json().catch(() => null)) as { skipped?: boolean } | null;
     forwardedMatchIds.add(match.id);
+    for (const extraId of options.trackForwardedIds ?? []) {
+      if (extraId) forwardedMatchIds.add(extraId);
+    }
     persistForwardedStore();
     console.log(
       `[match-live] forwarded result for match ${match.id} → session ${match.roomId}` +

@@ -1,26 +1,31 @@
 /**
- * Re-forward finished SQLite rows whose match_id exists in store.json.
- * Usage: npm run build && node dist/tools/replay-pending-results.js [--dry-run]
+ * Re-forward finished SQLite rows to the site (including stale/cancelled sessions).
+ * Usage:
+ *   npm run build && node dist/tools/replay-pending-results.js [--dry-run] [--replay-stale]
  */
 import 'dotenv/config';
 import { listFinishedMatchLiveRowsAll } from '../services/match-live-db';
 import {
   forwardMatchResultToSite,
-  resolveMatchForLiveRow,
   wasMatchResultForwarded,
 } from '../services/match-result-forwarder';
+import {
+  isLikelyRankedSessionRoomId,
+  resolveMatchForReplay,
+} from '../services/replay-match-resolver';
 import { siteRequestBaseUrl, siteSyncKeyFromEnv } from '../services/site-http';
 
 async function main(): Promise<void> {
   const dryRun = process.argv.includes('--dry-run');
+  const replayStale = process.argv.includes('--replay-stale') || !process.argv.includes('--no-replay-stale');
   const base = siteRequestBaseUrl();
   const key = siteSyncKeyFromEnv();
 
   console.log('=== Replay pending match results ===');
   console.log(`CLUTCH_SITE_URL (public): ${process.env.CLUTCH_SITE_URL?.trim() ?? '(not set)'}`);
-  console.log(`CLUTCH_SITE_INTERNAL_URL: ${process.env.CLUTCH_SITE_INTERNAL_URL?.trim() ?? '(not set — using public URL)'}`);
   console.log(`Request base: ${base ?? '(not set)'}`);
   console.log(`CSGO_SKINS_SYNC_KEY: ${key ? 'set' : 'MISSING'}`);
+  console.log(`replayStale: ${replayStale}`);
   console.log(`dry-run: ${dryRun}`);
   console.log('');
 
@@ -38,7 +43,8 @@ async function main(): Promise<void> {
   let attempted = 0;
   let forwarded = 0;
   let skipped = 0;
-  let noStore = 0;
+  let unresolved = 0;
+  let invalidRoom = 0;
 
   for (const row of rows) {
     if (wasMatchResultForwarded(row.matchId)) {
@@ -46,28 +52,45 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const match = resolveMatchForLiveRow(row);
-    if (!match) {
-      noStore += 1;
-      console.log(`skip ${row.matchId}: not in store.json (orphan SQLite row)`);
+    const resolved = resolveMatchForReplay(row);
+    if (!resolved) {
+      unresolved += 1;
+      console.log(`skip ${row.matchId}: no store match (orphan — plugin id ≠ api-csgo, roster mismatch)`);
+      continue;
+    }
+
+    const { match, source } = resolved;
+    if (!isLikelyRankedSessionRoomId(match.roomId)) {
+      invalidRoom += 1;
+      console.log(
+        `skip sqlite=${row.matchId} store=${match.id}: invalid roomId "${match.roomId}" (not a ranked session)`,
+      );
       continue;
     }
 
     attempted += 1;
     console.log(
-      `forward ${row.matchId} → room ${match.roomId} score ${row.scoreTeamA}:${row.scoreTeamB}`,
+      `forward sqlite=${row.matchId} → store=${match.id} room=${match.roomId} (${source}) score ${row.scoreTeamA}:${row.scoreTeamB}`,
     );
 
     if (dryRun) continue;
 
-    const ok = await forwardMatchResultToSite(match, row);
+    const ok = await forwardMatchResultToSite(match, row, {
+      replayStale,
+      trackForwardedIds: [row.matchId],
+    });
     if (ok) forwarded += 1;
   }
 
   console.log('');
   console.log(
-    `done: ${forwarded} forwarded, ${attempted - forwarded} failed, ${skipped} already sent, ${noStore} orphan SQLite rows`,
+    `done: ${forwarded} synced, ${attempted - forwarded} failed, ${skipped} already sent, ${unresolved} orphan, ${invalidRoom} invalid roomId`,
   );
+  if (attempted - forwarded > 0) {
+    console.log('');
+    console.log('If still session_not_found: session may be deleted on site, or roomId never existed.');
+    console.log('Deploy site with replayStale support, then re-run with --replay-stale');
+  }
 }
 
 main().catch((err) => {
