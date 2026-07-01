@@ -13,8 +13,12 @@ export const config = {
     defaultGameType: 0,
     defaultGameMode: 1,
     tvDelay: 70,
-    maxRounds: 30,
+    /** MR12 — 12 rounds por half. */
+    maxRounds: 24,
     overtimeRounds: 6,
+    knifeRound: true,
+    /** 10 jogadores + 1 slot reservado para admin telespectador. */
+    maxPlayers: parseInt(process.env.CSGO_MAXPLAYERS || '11', 10),
     /** Diretório do srcds na VPS quando o registro não envia csgoDir. */
     defaultServerDir: process.env.CSGO_SERVER_DIR?.trim() || '/home/csgo/server',
   },

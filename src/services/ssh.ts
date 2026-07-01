@@ -164,7 +164,8 @@ export class SshService {
     launch += ` +game_type ${gameType} +game_mode ${gameMode}`;
     launch += ` +map ${map}`;
     launch += ` +rcon_password "${rconPassword}"`;
-    launch += ` -maxplayers 10`;
+    const maxPlayers = parseInt(process.env.CSGO_MAXPLAYERS || '11', 10);
+    launch += ` -maxplayers ${maxPlayers}`;
     if (gslt) launch += ` +sv_setsteamaccount ${gslt}`;
     if (serverPassword) {
       launch += ` +sv_password "${serverPassword}"`;

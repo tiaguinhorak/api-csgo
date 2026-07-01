@@ -81,6 +81,8 @@ export class RconService {
       `sv_hibernate_when_empty 0`,
       `mp_team_timeout_max 1`,
       `mp_team_timeout_time 30`,
+      /** 10 vagas visíveis; slot 11 reservado para admin telespectador. */
+      `sv_visiblemaxplayers 10`,
     ];
     const results = await Promise.all(
       cmds.map(cmd => this.sendCommand(host, port, password, cmd))
@@ -120,6 +122,52 @@ export class RconService {
       `clutch_wr_buy_anywhere ${rules.warmupBuyAnywhere ? 1 : 0}`,
       `clutch_wr_random_spawns ${rules.randomSpawns ? 1 : 0}`,
       `clutch_wr_dm_respawn ${rules.dmRespawn ? 1 : 0}`,
+    ];
+    const results = await Promise.all(
+      cmds.map((cmd) => this.sendCommand(host, port, password, cmd)),
+    );
+    return results.join('\n');
+  }
+
+  /** MR12 round limits, overtime e loadout de knife round (warmup). */
+  async applyRankedMatchRules(
+    host: string,
+    port: number,
+    password: string,
+    rules: { maxRounds: number; overtimeRounds: number; knifeRound: boolean },
+  ): Promise<string> {
+    const cmds = [
+      `mp_maxrounds ${Math.max(1, rules.maxRounds)}`,
+      `mp_overtime_enable 1`,
+      `mp_overtime_maxrounds ${Math.max(1, rules.overtimeRounds)}`,
+    ];
+    if (rules.knifeRound) {
+      cmds.push(
+        `mp_t_default_primary ""`,
+        `mp_ct_default_primary ""`,
+        `mp_t_default_secondary ""`,
+        `mp_ct_default_secondary ""`,
+        `mp_t_default_melee weapon_knife`,
+        `mp_ct_default_melee weapon_knife`,
+        `mp_free_armor 1`,
+      );
+    }
+    const results = await Promise.all(
+      cmds.map((cmd) => this.sendCommand(host, port, password, cmd)),
+    );
+    return results.join('\n');
+  }
+
+  /** Restaura loadout competitivo após knife round no warmup. */
+  async restoreCompetitiveLoadout(host: string, port: number, password: string): Promise<string> {
+    const cmds = [
+      `mp_t_default_primary ""`,
+      `mp_ct_default_primary ""`,
+      `mp_t_default_secondary weapon_hkp2000`,
+      `mp_ct_default_secondary weapon_usp_silencer`,
+      `mp_t_default_melee weapon_knife_t`,
+      `mp_ct_default_melee weapon_knife`,
+      `mp_free_armor 0`,
     ];
     const results = await Promise.all(
       cmds.map((cmd) => this.sendCommand(host, port, password, cmd)),

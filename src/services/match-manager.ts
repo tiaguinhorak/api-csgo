@@ -42,6 +42,7 @@ class MatchManager {
         enableCoach: false,
         maxRounds: config.csgo.maxRounds,
         overtimeRounds: config.csgo.overtimeRounds,
+        knifeRound: config.csgo.knifeRound,
         ...dto.config,
       },
     };
@@ -161,6 +162,21 @@ class MatchManager {
 
     await rconService.setMatchConfig(server.host, rconPort, server.rconPassword, matchId);
 
+    const knifeRound = match.config.knifeRound === true;
+    const maxRounds = match.config.maxRounds ?? config.csgo.maxRounds;
+    const overtimeRounds = match.config.overtimeRounds ?? config.csgo.overtimeRounds;
+
+    try {
+      await rconService.applyRankedMatchRules(server.host, rconPort, server.rconPassword, {
+        maxRounds,
+        overtimeRounds,
+        knifeRound,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[match-start] applyRankedMatchRules failed match=${matchId}: ${message}`);
+    }
+
     const gameRules = await fetchGameConfig(server.pool ?? 'ranked');
     if (gameRules.enabled) {
       try {
@@ -190,16 +206,21 @@ class MatchManager {
     const teamAPipe = match.teamA.players.map((p) => p.steamId).join('|');
     const teamBPipe = match.teamB.players.map((p) => p.steamId).join('|');
 
-    const warmupMs = Math.max(5, gameRules.enabled ? gameRules.warmupSeconds : 15) * 1000;
+    const baseWarmupSec = Math.max(5, gameRules.enabled ? gameRules.warmupSeconds : 15);
+    const knifeWarmupSec = knifeRound ? 75 : 0;
+    const competitiveWarmupSec = baseWarmupSec;
 
-    setTimeout(async () => {
+    const armTrackerAndStart = async () => {
       try {
+        if (knifeRound) {
+          await rconService.restoreCompetitiveLoadout(server.host, rconPort, server.rconPassword);
+        }
         await rconService.beginMatchTracker(
           server.host,
           rconPort,
           server.rconPassword,
           matchId,
-          match.config.maxRounds,
+          maxRounds,
         );
         await rconService.setMatchTrackerRoster(
           server.host,
@@ -209,12 +230,15 @@ class MatchManager {
           teamBPipe,
         );
         await rconService.startMatch(server.host, rconPort, server.rconPassword);
-        console.log(`[match-start] tracker armed match=${matchId} map=${match.selectedMap}`);
+        console.log(`[match-start] tracker armed match=${matchId} map=${match.selectedMap} knife=${knifeRound}`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[match-start] tracker RCON failed match=${matchId}: ${message}`);
       }
-    }, warmupMs);
+    };
+
+    const totalDelayMs = (knifeWarmupSec + competitiveWarmupSec) * 1000;
+    setTimeout(() => void armTrackerAndStart(), totalDelayMs);
 
     stateStore.persist();
     return match;

@@ -34,6 +34,7 @@ export interface MatchConfig {
   enableCoach: boolean;
   maxRounds: number;
   overtimeRounds: number;
+  knifeRound?: boolean;
 }
 
 export interface VetoAction {
