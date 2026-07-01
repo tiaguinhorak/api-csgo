@@ -25,7 +25,7 @@
     bool g_bLoggedGlovesNativeReadyOnce = false;
 #endif
 
-#define PLUGIN_VERSION "3.8.78"
+#define PLUGIN_VERSION "3.8.79"
 #define CLUTCH_LEGACY_MAX_STICKER_DEFINDEX 8553
 #define STICKER_VIEWMODEL_PASS_COUNT 3
 #define STICKER_SWEEP_PASS_COUNT 5
@@ -1868,7 +1868,10 @@ public Action OnWeaponEquip(int client, int weapon) {
         bool needsSkin = g_CachedPaintkit[client][idx] > 0 && g_iAppliedPaintkit[client][idx] != g_CachedPaintkit[client][idx];
         bool needsStickers = ClutchWeaponHasStickerCache(client, idx)
             && !ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot);
-        if (!needsSkin && !needsStickers) {
+        // Even when the world weapon already matches cache, a freshly deployed
+        // viewmodel starts with no stickers — let stickered weapons through so
+        // the apply path re-syncs the first-person viewmodel (fixes vanishing).
+        if (!needsSkin && !needsStickers && !ClutchWeaponHasStickerCache(client, idx)) {
             return Plugin_Continue;
         }
     }
@@ -3649,6 +3652,15 @@ void ClutchApplyStickersForWeapon(int client, int weapon, int idx, bool force = 
 
     int teamSlot = ClutchStickerTeamSlot(GetClientTeam(client));
     if (ClutchEntityStickersMatchCache(client, weapon, idx, teamSlot)) {
+        // World weapon already matches cache, but the first-person viewmodel may
+        // still be missing/partial stickers (skin re-apply mirrors paint only).
+        // Always re-sync the viewmodel so FP stickers never disappear.
+#if defined _csgo_weaponstickers_included_
+        ClutchSyncViewModelStickersFromWeapon(
+            client, weapon, idx, ClutchWeaponStickersNativeReady());
+#else
+        ClutchSyncViewModelStickersFromWeapon(client, weapon, idx, false);
+#endif
         return;
     }
 

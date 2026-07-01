@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <cstrike>
 
-#define PLUGIN_VERSION "1.1.1"
+#define PLUGIN_VERSION "1.2.0"
 #define TABLE_MATCH_LIVE "clutch_match_live"
 
 Database g_hDb = null;
@@ -20,6 +20,8 @@ int g_iMaxRounds = 30;
 int g_iStartedAt = 0;
 int g_iFinishedAt = 0;
 char g_sWinner[8] = "";
+char g_sDemoFile[128] = "";
+ConVar g_cvDemoEnabled = null;
 
 StringMap g_hRoster = null;
 StringMap g_hStats = null;
@@ -45,6 +47,13 @@ public void OnPluginStart() {
         FCVAR_NONE
     );
     cvDb.GetString(g_sDbName, sizeof(g_sDbName));
+
+    g_cvDemoEnabled = CreateConVar(
+        "clutch_match_demo_enabled",
+        "1",
+        "Record GOTV demo as clutch_<matchId>.dem when match tracking begins",
+        FCVAR_NONE
+    );
 
     g_hRoster = new StringMap();
     g_hStats = new StringMap();
@@ -148,6 +157,17 @@ public Action Cmd_MatchBegin(int args) {
     g_sWinner[0] = '\0';
 
     LogMessage("[ClutchMatch] begin %s maxRounds=%d", g_sMatchId, g_iMaxRounds);
+
+    g_sDemoFile[0] = '\0';
+    if (g_cvDemoEnabled.BoolValue) {
+        Format(g_sDemoFile, sizeof(g_sDemoFile), "clutch_%s.dem", g_sMatchId);
+        ServerCommand("tv_enable 1");
+        char recordName[96];
+        Format(recordName, sizeof(recordName), "clutch_%s", g_sMatchId);
+        ServerCommand("tv_record %s", recordName);
+        LogMessage("[ClutchMatch] demo recording %s", g_sDemoFile);
+    }
+
     PersistLiveRow(false);
     return Plugin_Handled;
 }
@@ -223,6 +243,7 @@ void ResetMatchState() {
     g_iStartedAt = 0;
     g_iFinishedAt = 0;
     g_sWinner[0] = '\0';
+    g_sDemoFile[0] = '\0';
     g_hRoster.Clear();
     g_hStats.Clear();
     if (g_aDeaths != null) g_aDeaths.Clear();
@@ -563,6 +584,11 @@ public void Event_MatchOver(Event event, const char[] name, bool dontBroadcast) 
 void FinalizeMatch() {
     if (g_sPhase[0] == 'f') return;
 
+    if (g_cvDemoEnabled != null && g_cvDemoEnabled.BoolValue && g_sDemoFile[0] != '\0') {
+        ServerCommand("tv_stoprecord");
+        LogMessage("[ClutchMatch] demo stopped %s", g_sDemoFile);
+    }
+
     strcopy(g_sPhase, sizeof(g_sPhase), "finished");
     g_iFinishedAt = GetTime();
 
@@ -728,10 +754,11 @@ void BuildFinalPayloadJson(char[] buffer, int maxlen) {
     Format(
         buffer,
         maxlen,
-        "{\"players\":%s,\"rounds\":%s,\"deaths\":%s,\"highlights\":%s}",
+        "{\"players\":%s,\"rounds\":%s,\"deaths\":%s,\"highlights\":%s,\"demoFile\":\"%s\"}",
         playersJson,
         roundsJson,
         deathsJson,
-        highlightsJson
+        highlightsJson,
+        g_sDemoFile
     );
 }

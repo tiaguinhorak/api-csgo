@@ -7,6 +7,7 @@ import { rconService } from './rcon';
 import { serverManager } from './server-manager';
 import { stateStore } from './state-store';
 import { resolveRconPort } from '../utils/rcon-port';
+import { fetchGameConfig } from './game-config';
 
 class MatchManager {
   private matches = stateStore.matches;
@@ -159,6 +160,17 @@ class MatchManager {
     const rconPort = resolveRconPort(server);
 
     await rconService.setMatchConfig(server.host, rconPort, server.rconPassword, matchId);
+
+    const gameRules = await fetchGameConfig(server.pool ?? 'ranked');
+    if (gameRules.enabled) {
+      try {
+        await rconService.applyGameRules(server.host, rconPort, server.rconPassword, gameRules);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[match-start] applyGameRules failed match=${matchId}: ${message}`);
+      }
+    }
+
     await rconService.sendCommand(server.host, rconPort, server.rconPassword,
       `mp_teamname_1 "${match.teamA.name}"`);
     await rconService.sendCommand(server.host, rconPort, server.rconPassword,
@@ -177,6 +189,8 @@ class MatchManager {
 
     const teamAPipe = match.teamA.players.map((p) => p.steamId).join('|');
     const teamBPipe = match.teamB.players.map((p) => p.steamId).join('|');
+
+    const warmupMs = Math.max(5, gameRules.enabled ? gameRules.warmupSeconds : 15) * 1000;
 
     setTimeout(async () => {
       try {
@@ -200,7 +214,7 @@ class MatchManager {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[match-start] tracker RCON failed match=${matchId}: ${message}`);
       }
-    }, 15000);
+    }, warmupMs);
 
     stateStore.persist();
     return match;

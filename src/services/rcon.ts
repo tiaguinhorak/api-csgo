@@ -92,6 +92,41 @@ export class RconService {
     return this.sendCommand(host, port, password, 'mp_warmup_end');
   }
 
+  /**
+   * Apply gameplay rules (warmup duration/economy/buy, random spawns, DM respawn)
+   * via engine cvars + the clutch_warmup_rules plugin cvars.
+   */
+  async applyGameRules(
+    host: string,
+    port: number,
+    password: string,
+    rules: {
+      warmupSeconds: number;
+      warmupStartMoney: number;
+      warmupMaxMoney: number;
+      warmupBuyAnywhere: boolean;
+      randomSpawns: boolean;
+      dmRespawn: boolean;
+    },
+  ): Promise<string> {
+    const cmds = [
+      `mp_warmuptime ${Math.max(0, rules.warmupSeconds)}`,
+      `mp_warmuptime_all_players_connected ${Math.max(0, rules.warmupSeconds)}`,
+      `mp_warmup_pausetimer 0`,
+      // clutch_warmup_rules plugin owns warmup-only economy/buy + spawn behavior.
+      `clutch_wr_enabled 1`,
+      `clutch_wr_warmup_money ${Math.max(0, rules.warmupStartMoney)}`,
+      `clutch_wr_warmup_maxmoney ${Math.max(0, rules.warmupMaxMoney)}`,
+      `clutch_wr_buy_anywhere ${rules.warmupBuyAnywhere ? 1 : 0}`,
+      `clutch_wr_random_spawns ${rules.randomSpawns ? 1 : 0}`,
+      `clutch_wr_dm_respawn ${rules.dmRespawn ? 1 : 0}`,
+    ];
+    const results = await Promise.all(
+      cmds.map((cmd) => this.sendCommand(host, port, password, cmd)),
+    );
+    return results.join('\n');
+  }
+
   async pauseMatch(host: string, port: number, password: string): Promise<string> {
     return this.sendCommand(host, port, password, 'mp_pause_match');
   }

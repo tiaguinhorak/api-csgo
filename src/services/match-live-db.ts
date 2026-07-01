@@ -61,6 +61,7 @@ export type MatchLivePayload = {
   rounds: MatchLiveRound[];
   deaths: MatchLiveDeath[];
   highlights: MatchLiveHighlight[];
+  demoFile?: string;
 };
 
 const TABLE = 'clutch_match_live';
@@ -247,6 +248,7 @@ export function parseMatchLivePayload(statsJson: string): MatchLivePayload {
         rounds?: MatchLiveRound[];
         deaths?: MatchLiveDeath[];
         highlights?: MatchLiveHighlight[];
+        demoFile?: unknown;
       };
       const players = Array.isArray(obj.players) ? obj.players.filter(isPlayerStat) : [];
       return {
@@ -254,6 +256,9 @@ export function parseMatchLivePayload(statsJson: string): MatchLivePayload {
         rounds: obj.rounds ?? [],
         deaths: obj.deaths ?? [],
         highlights: obj.highlights ?? [],
+        demoFile: typeof obj.demoFile === 'string' && obj.demoFile.trim()
+          ? obj.demoFile.trim()
+          : undefined,
       };
     }
   } catch {

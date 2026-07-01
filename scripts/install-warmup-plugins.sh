@@ -12,6 +12,7 @@ bash "${REPO_ROOT}/scripts/install-ptah.sh"
 bash "${REPO_ROOT}/scripts/install-kgns-weapons.sh"
 bash "${REPO_ROOT}/scripts/install-clutch-skins-bridge.sh"
 bash "${REPO_ROOT}/scripts/install-clutch-platform-gate.sh"
+bash "${REPO_ROOT}/scripts/install-clutch-warmup-rules.sh"
 bash "${REPO_ROOT}/scripts/sync-weapons-cfg-from-site.sh" || true
 bash "${REPO_ROOT}/scripts/sync-steam-allowlist.sh" || true
 bash "${REPO_ROOT}/scripts/ensure-clutch-server-branding.sh" || true

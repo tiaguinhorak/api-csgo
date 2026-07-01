@@ -13,6 +13,7 @@ import {
   siteRequestHeaders,
   siteSyncKeyFromEnv,
 } from './site-http';
+import { publishMatchDemo } from './match-demo-publisher';
 
 export type MatchResultPayload = {
   csgoMatchId: string;
@@ -22,6 +23,7 @@ export type MatchResultPayload = {
   winnerTeam: string | null;
   durationSec: number;
   replayStale?: boolean;
+  demoUrl?: string | null;
   players: Array<{
     steamId: string;
     team: 'A' | 'B';
@@ -214,6 +216,12 @@ export async function forwardMatchResultToSite(
 
   if (options.replayStale) {
     payload.replayStale = true;
+  }
+
+  const live = parseMatchLivePayload(row.statsJson);
+  const demoUrl = await publishMatchDemo(match.id, live.demoFile);
+  if (demoUrl) {
+    payload.demoUrl = demoUrl;
   }
 
   const url = `${base}/api/csgo/match-result`;

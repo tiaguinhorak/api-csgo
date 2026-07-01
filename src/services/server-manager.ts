@@ -6,6 +6,7 @@ import { config } from '../config';
 import { stateStore } from './state-store';
 import { resolveRconPort } from '../utils/rcon-port';
 import { resolveRconConnectHost, resolveSshConnectionHost } from '../utils/server-connection';
+import { fetchGameConfig } from './game-config';
 
 class ServerManager {
   private servers = stateStore.servers;
@@ -154,10 +155,13 @@ class ServerManager {
     if (!server) throw new Error('Server not found');
 
     const conn = this.getSshConnection(server);
+    const gameRules = await fetchGameConfig(server.pool ?? 'ranked');
+    const gameType = gameRules.enabled ? gameRules.gameType : config.csgo.defaultGameType;
+    const gameMode = gameRules.enabled ? gameRules.gameMode : config.csgo.defaultGameMode;
     await sshService.startServer(
       conn, server.csgoDir, server.screenSession,
       server.port, server.tickrate,
-      config.csgo.defaultGameType, config.csgo.defaultGameMode,
+      gameType, gameMode,
       map, server.rconPassword, serverPassword
     );
 
@@ -186,6 +190,19 @@ class ServerManager {
         );
         server.status = 'online';
         stateStore.persist();
+        if (gameRules.enabled) {
+          try {
+            await rconService.applyGameRules(
+              this.getRconHost(server),
+              resolveRconPort(server),
+              server.rconPassword,
+              gameRules,
+            );
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error(`[server-start] applyGameRules failed server=${server.id}: ${message}`);
+          }
+        }
         return server;
       } catch {}
     }
