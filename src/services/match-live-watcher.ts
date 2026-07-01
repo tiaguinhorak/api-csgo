@@ -3,15 +3,19 @@ import path from 'path';
 import type { Match } from '../models/match';
 import {
   ensureMatchLiveTableWritable,
+  listFinishedMatchLiveRowsAll,
   readMatchLive,
   type MatchLiveRow,
 } from './match-live-db';
 import {
   forwardMatchResultToSite,
+  resolveMatchForLiveRow,
   wasMatchResultForwarded,
 } from './match-result-forwarder';
 import { stateStore } from './state-store';
 import { getMatchLiveDbPath } from './weapons-db-path';
+
+import { siteBaseUrlFromEnv, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
 
 type Snapshot = {
   phase: string;
@@ -21,11 +25,12 @@ type Snapshot = {
   finishedAt: number;
 };
 
+const TRACKABLE_STATUSES = new Set<Match['status']>(['veto', 'ready', 'live', 'finished']);
+
 const lastSnapshots = new Map<string, Snapshot>();
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 let watcherStarted = false;
-
-import { siteBaseUrlFromEnv, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
 
 async function pushLiveRoundToSite(match: Match, row: MatchLiveRow): Promise<void> {
   const base = siteBaseUrlFromEnv();
@@ -79,47 +84,73 @@ function rowChanged(prev: Snapshot | undefined, row: MatchLiveRow): boolean {
   );
 }
 
-export async function processMatchLiveDbChanges(): Promise<void> {
-  const liveMatches = Array.from(stateStore.matches.values()).filter(
-    (m) => m.status === 'live',
-  );
-  if (!liveMatches.length) return;
+async function tryForwardFinishedMatch(match: Match, row: MatchLiveRow): Promise<boolean> {
+  if (row.phase !== 'finished' || row.finishedAt <= 0) return false;
+  if (wasMatchResultForwarded(match.id)) return true;
 
-  for (const match of liveMatches) {
-    const row = readMatchLive(match.id);
-    if (!row) continue;
+  const ok = await forwardMatchResultToSite(match, row);
+  if (!ok) return false;
 
-    const prev = lastSnapshots.get(match.id);
-    if (!rowChanged(prev, row)) continue;
-
-    lastSnapshots.set(match.id, snapshotFromRow(row));
-
-    if (row.phase === 'finished' && row.finishedAt > 0) {
-      if (!wasMatchResultForwarded(match.id)) {
-        await forwardMatchResultToSite(match, row);
+  if (match.status === 'live') {
+    try {
+      const { matchManager } = await import('./match-manager');
+      const { serverManager } = await import('./server-manager');
+      await matchManager.endMatch(match.id);
+      if (match.serverId) {
+        serverManager.releaseServer(match.serverId);
       }
-
-      if (match.status === 'live') {
-        try {
-          const { matchManager } = await import('./match-manager');
-          const { serverManager } = await import('./server-manager');
-          await matchManager.endMatch(match.id);
-          if (match.serverId) {
-            serverManager.releaseServer(match.serverId);
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          console.warn(`[match-live] auto-release failed: ${message}`);
-        }
-      }
-
-      continue;
-    }
-
-    if (row.phase === 'live' || row.phase === 'warmup') {
-      await pushLiveRoundToSite(match, row);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[match-live] auto-release failed: ${message}`);
     }
   }
+
+  return true;
+}
+
+async function processTrackableMatch(match: Match): Promise<void> {
+  if (!TRACKABLE_STATUSES.has(match.status)) return;
+
+  const row = readMatchLive(match.id);
+  if (!row) return;
+
+  const prev = lastSnapshots.get(match.id);
+  if (!rowChanged(prev, row)) return;
+
+  lastSnapshots.set(match.id, snapshotFromRow(row));
+
+  if (row.phase === 'finished' && row.finishedAt > 0) {
+    await tryForwardFinishedMatch(match, row);
+    return;
+  }
+
+  if (row.phase === 'live' || row.phase === 'warmup') {
+    await pushLiveRoundToSite(match, row);
+  }
+}
+
+async function processFinishedRowsFromDb(): Promise<void> {
+  const rows = listFinishedMatchLiveRowsAll(15);
+  for (const row of rows) {
+    if (wasMatchResultForwarded(row.matchId)) continue;
+
+    const match = resolveMatchForLiveRow(row);
+    if (!match) continue;
+
+    await tryForwardFinishedMatch(match, row);
+  }
+}
+
+export async function processMatchLiveDbChanges(): Promise<void> {
+  const trackable = Array.from(stateStore.matches.values()).filter((m) =>
+    TRACKABLE_STATUSES.has(m.status),
+  );
+
+  for (const match of trackable) {
+    await processTrackableMatch(match);
+  }
+
+  await processFinishedRowsFromDb();
 }
 
 function scheduleProcess(): void {
@@ -162,12 +193,26 @@ export function startMatchLiveWatcher(): void {
     console.warn(`[match-live] fs.watch failed: ${message}`);
   }
 
-  // Optional: api-csgo can also receive direct game webhooks (POST /api/matches/:id/game-event).
+  const pollMs = Number(process.env.MATCH_LIVE_POLL_MS ?? '5000');
+  if (Number.isFinite(pollMs) && pollMs >= 2000) {
+    pollTimer = setInterval(() => {
+      void processMatchLiveDbChanges();
+    }, pollMs);
+    console.log(`[match-live] polling SQLite every ${pollMs}ms`);
+  }
+
+  void processMatchLiveDbChanges();
 }
 
 /** Called by HTTP webhook from game-event route (same path as SQLite watcher). */
 export function notifyMatchLiveFromWebhook(matchId: string): void {
   const match = stateStore.matches.get(matchId);
-  if (!match || match.status !== 'live') return;
+  if (!match || match.status === 'cancelled') return;
   scheduleProcess();
+}
+
+export function stopMatchLiveWatcherForTests(): void {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  watcherStarted = false;
 }

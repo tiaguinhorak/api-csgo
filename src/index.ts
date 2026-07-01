@@ -14,6 +14,8 @@ import { logStickersDbPath } from './services/stickers-db-sync';
 import { logAgentsDbPath } from './services/agents-db-sync';
 import { startMatchLiveWatcher } from './services/match-live-watcher';
 import { startSteamAllowlistSync } from './services/steam-allowlist-sync';
+import { getMatchLiveDbPath } from './services/weapons-db-path';
+import { siteBaseUrlFromEnv, siteSyncKeyFromEnv } from './services/site-http';
 import { assertProductionApiKey, requireApiAuth } from './middleware/auth';
 
 const app = express();
@@ -34,9 +36,22 @@ app.use(express.json({ limit: '64kb' }));
 
 // Health check (no auth — bind to private network in production)
 app.get('/health', (_req, res) => {
+  const siteUrl = siteBaseUrlFromEnv();
+  const syncKey = siteSyncKeyFromEnv();
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
+    matchPipeline: {
+      siteUrl: siteUrl ?? null,
+      syncKeyConfigured: Boolean(syncKey),
+      matchLiveDb: (() => {
+        try {
+          return getMatchLiveDbPath();
+        } catch {
+          return null;
+        }
+      })(),
+    },
     /** Present when player-sync writes the gloves SQLite table (commit a77152a+). */
     glovesPlayerSync: true,
     /** Present when sticker player-sync route is deployed. */

@@ -1,9 +1,12 @@
+import fs from 'fs';
+import path from 'path';
 import type { Match } from '../models/match';
 import {
   parseMatchLivePayload,
-  readMatchLive,
   type MatchLiveRow,
 } from './match-live-db';
+import { stateStore } from './state-store';
+import { normalizeSteamId64 } from '../utils/steam-id';
 
 import {
   siteBaseUrlFromEnv,
@@ -55,10 +58,50 @@ export type MatchResultPayload = {
   }>;
 };
 
+const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+const forwardedStorePath = path.join(dataDir, 'forwarded-match-results.json');
+
+const forwardedMatchIds = new Set<string>();
+
+function loadForwardedStore(): void {
+  try {
+    if (!fs.existsSync(forwardedStorePath)) return;
+    const parsed = JSON.parse(fs.readFileSync(forwardedStorePath, 'utf8')) as unknown;
+    if (!Array.isArray(parsed)) return;
+    for (const id of parsed) {
+      if (typeof id === 'string' && id.length > 0) {
+        forwardedMatchIds.add(id);
+      }
+    }
+  } catch {
+    // ignore corrupt store
+  }
+}
+
+function persistForwardedStore(): void {
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    const ids = [...forwardedMatchIds].slice(-500);
+    fs.writeFileSync(forwardedStorePath, JSON.stringify(ids, null, 2), 'utf8');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[match-live] failed to persist forwarded store: ${message}`);
+  }
+}
+
+loadForwardedStore();
+
+function rosterHasSteam(roster: Match['teamA'], steamId: string): boolean {
+  const normalized = normalizeSteamId64(steamId);
+  return roster.players.some(
+    (player) => normalizeSteamId64(player.steamId) === normalized,
+  );
+}
+
 function buildPayload(match: Match, row: MatchLiveRow): MatchResultPayload {
   const live = parseMatchLivePayload(row.statsJson);
   const players = live.players.map((p) => ({
-    steamId: p.steam,
+    steamId: normalizeSteamId64(p.steam),
     team: (p.slot === 1 ? 'A' : 'B') as 'A' | 'B',
     kills: p.kills ?? 0,
     deaths: p.deaths ?? 0,
@@ -70,11 +113,11 @@ function buildPayload(match: Match, row: MatchLiveRow): MatchResultPayload {
     awpKills: p.awpKills ?? 0,
   }));
 
-  if (players.some((p) => p.team !== 'A' && p.team !== 'B')) {
-    const teamASteams = new Set(match.teamA.players.map((pl) => pl.steamId));
-    for (const pl of players) {
-      if (teamASteams.has(pl.steamId)) pl.team = 'A';
-      else pl.team = 'B';
+  for (const pl of players) {
+    if (rosterHasSteam(match.teamA, pl.steamId)) {
+      pl.team = 'A';
+    } else if (rosterHasSteam(match.teamB, pl.steamId)) {
+      pl.team = 'B';
     }
   }
 
@@ -111,8 +154,10 @@ function buildPayload(match: Match, row: MatchLiveRow): MatchResultPayload {
   if (live.deaths.length > 0) {
     payload.deaths = live.deaths.map((death) => ({
       roundNumber: death.roundNumber ?? 0,
-      victimSteamId: death.victimSteamId,
-      killerSteamId: death.killerSteamId ?? null,
+      victimSteamId: normalizeSteamId64(death.victimSteamId),
+      killerSteamId: death.killerSteamId
+        ? normalizeSteamId64(death.killerSteamId)
+        : null,
       weapon: death.weapon ?? null,
       headshot: death.headshot ?? false,
       victimTeam: death.victimTeam ?? null,
@@ -128,7 +173,7 @@ function buildPayload(match: Match, row: MatchLiveRow): MatchResultPayload {
         ['ACE', 'CLUTCH', 'MULTI_KILL', 'HEADSHOTS', 'ENTRY', 'KNIFE'].includes(hl.type),
       )
       .map((hl) => ({
-        steamId: hl.steamId,
+        steamId: normalizeSteamId64(hl.steamId),
         type: hl.type as 'ACE' | 'CLUTCH' | 'MULTI_KILL' | 'HEADSHOTS' | 'ENTRY' | 'KNIFE',
         roundNumber: hl.roundNumber,
         detail: hl.detail,
@@ -138,14 +183,16 @@ function buildPayload(match: Match, row: MatchLiveRow): MatchResultPayload {
   return payload;
 }
 
-const forwardedMatchIds = new Set<string>();
-
 export function wasMatchResultForwarded(matchId: string): boolean {
   return forwardedMatchIds.has(matchId);
 }
 
 export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow): Promise<boolean> {
   if (forwardedMatchIds.has(match.id)) return true;
+
+  if (row.phase !== 'finished' || row.finishedAt <= 0) {
+    return false;
+  }
 
   const base = siteBaseUrlFromEnv();
   const key = siteSyncKeyFromEnv();
@@ -155,6 +202,11 @@ export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow):
   }
 
   const payload = buildPayload(match, row);
+  if (payload.players.length === 0) {
+    console.warn(`[match-live] skip forward ${match.id}: no player stats in SQLite payload`);
+    return false;
+  }
+
   const url = `${base}/api/csgo/match-result`;
 
   try {
@@ -173,8 +225,13 @@ export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow):
       return false;
     }
 
+    const body = (await res.json().catch(() => null)) as { skipped?: boolean } | null;
     forwardedMatchIds.add(match.id);
-    console.log(`[match-live] forwarded result for match ${match.id}`);
+    persistForwardedStore();
+    console.log(
+      `[match-live] forwarded result for match ${match.id} → session ${match.roomId}` +
+        (body?.skipped ? ' (already synced on site)' : ''),
+    );
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -186,4 +243,10 @@ export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow):
 export async function pollLiveMatchesAndForward(): Promise<void> {
   const { processMatchLiveDbChanges } = await import('./match-live-watcher');
   await processMatchLiveDbChanges();
+}
+
+export function resolveMatchForLiveRow(row: MatchLiveRow): Match | null {
+  const match = stateStore.matches.get(row.matchId);
+  if (!match || match.status === 'cancelled') return null;
+  return match;
 }

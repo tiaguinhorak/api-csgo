@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { getMatchLiveDbPath } from './weapons-db-path';
+import { getMatchLiveDbPath, getMatchLiveDbCandidates } from './weapons-db-path';
 
 export type MatchLiveRow = {
   matchId: string;
@@ -65,14 +65,8 @@ export type MatchLivePayload = {
 
 const TABLE = 'clutch_match_live';
 
-let db: Database.Database | null = null;
-
-function getDb(): Database.Database {
-  if (!db) {
-    const dbPath = getMatchLiveDbPath();
-    db = new Database(dbPath, { readonly: true, fileMustExist: true });
-  }
-  return db;
+function openReadonlyDb(dbPath: string): Database.Database {
+  return new Database(dbPath, { readonly: true, fileMustExist: true });
 }
 
 export function ensureMatchLiveTableWritable(): void {
@@ -98,17 +92,97 @@ export function ensureMatchLiveTableWritable(): void {
   writable.close();
 }
 
-export function readMatchLive(matchId: string): MatchLiveRow | null {
+function mapRow(row: {
+  match_id: string;
+  score_team_a: number;
+  score_team_b: number;
+  score_ct: number;
+  score_t: number;
+  round_num: number;
+  phase: string;
+  winner: string;
+  max_rounds: number;
+  started_at: number;
+  finished_at: number;
+  stats_json: string;
+  updated_at: number;
+}): MatchLiveRow {
+  return {
+    matchId: row.match_id,
+    scoreTeamA: row.score_team_a,
+    scoreTeamB: row.score_team_b,
+    scoreCt: row.score_ct,
+    scoreT: row.score_t,
+    roundNum: row.round_num,
+    phase: row.phase,
+    winner: row.winner,
+    maxRounds: row.max_rounds,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    statsJson: row.stats_json ?? '',
+    updatedAt: row.updated_at,
+  };
+}
+
+export function readMatchLiveFromPath(dbPath: string, matchId: string): MatchLiveRow | null {
   try {
-    const conn = getDb();
-    const row = conn
-      .prepare(
-        `SELECT match_id, score_team_a, score_team_b, score_ct, score_t, round_num,
-                phase, winner, max_rounds, started_at, finished_at, stats_json, updated_at
-         FROM ${TABLE} WHERE match_id = ? LIMIT 1`,
-      )
-      .get(matchId) as
-      | {
+    const conn = openReadonlyDb(dbPath);
+    try {
+      const row = conn
+        .prepare(
+          `SELECT match_id, score_team_a, score_team_b, score_ct, score_t, round_num,
+                  phase, winner, max_rounds, started_at, finished_at, stats_json, updated_at
+           FROM ${TABLE} WHERE match_id = ? LIMIT 1`,
+        )
+        .get(matchId) as
+        | {
+            match_id: string;
+            score_team_a: number;
+            score_team_b: number;
+            score_ct: number;
+            score_t: number;
+            round_num: number;
+            phase: string;
+            winner: string;
+            max_rounds: number;
+            started_at: number;
+            finished_at: number;
+            stats_json: string;
+            updated_at: number;
+          }
+        | undefined;
+      if (!row) return null;
+      return mapRow(row);
+    } finally {
+      conn.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+export function readMatchLive(matchId: string): MatchLiveRow | null {
+  for (const dbPath of getMatchLiveDbCandidates()) {
+    const row = readMatchLiveFromPath(dbPath, matchId);
+    if (row) return row;
+  }
+  return null;
+}
+
+export function listFinishedMatchLiveRows(dbPath: string, limit = 20): MatchLiveRow[] {
+  try {
+    const conn = openReadonlyDb(dbPath);
+    try {
+      const rows = conn
+        .prepare(
+          `SELECT match_id, score_team_a, score_team_b, score_ct, score_t, round_num,
+                  phase, winner, max_rounds, started_at, finished_at, stats_json, updated_at
+           FROM ${TABLE}
+           WHERE phase = 'finished' AND finished_at > 0
+           ORDER BY finished_at DESC
+           LIMIT ?`,
+        )
+        .all(limit) as Array<{
           match_id: string;
           score_team_a: number;
           score_team_b: number;
@@ -122,29 +196,27 @@ export function readMatchLive(matchId: string): MatchLiveRow | null {
           finished_at: number;
           stats_json: string;
           updated_at: number;
-        }
-      | undefined;
-
-    if (!row) return null;
-
-    return {
-      matchId: row.match_id,
-      scoreTeamA: row.score_team_a,
-      scoreTeamB: row.score_team_b,
-      scoreCt: row.score_ct,
-      scoreT: row.score_t,
-      roundNum: row.round_num,
-      phase: row.phase,
-      winner: row.winner,
-      maxRounds: row.max_rounds,
-      startedAt: row.started_at,
-      finishedAt: row.finished_at,
-      statsJson: row.stats_json ?? '',
-      updatedAt: row.updated_at,
-    };
+        }>;
+      return rows.map(mapRow);
+    } finally {
+      conn.close();
+    }
   } catch {
-    return null;
+    return [];
   }
+}
+
+export function listFinishedMatchLiveRowsAll(limitPerDb = 10): MatchLiveRow[] {
+  const byMatchId = new Map<string, MatchLiveRow>();
+  for (const dbPath of getMatchLiveDbCandidates()) {
+    for (const row of listFinishedMatchLiveRows(dbPath, limitPerDb)) {
+      const existing = byMatchId.get(row.matchId);
+      if (!existing || row.finishedAt > existing.finishedAt) {
+        byMatchId.set(row.matchId, row);
+      }
+    }
+  }
+  return [...byMatchId.values()].sort((a, b) => b.finishedAt - a.finishedAt);
 }
 
 function isPlayerStat(value: unknown): value is MatchLivePlayerStat {

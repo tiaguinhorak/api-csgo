@@ -257,3 +257,37 @@ export function getMatchLiveDbPath(): string {
 
   return weaponsPath;
 }
+
+/** All SQLite files that may hold clutch_match_live (multi-server installs). */
+export function getMatchLiveDbCandidates(): string[] {
+  const explicit = process.env.CLUTCH_MATCH_DB_PATH?.trim();
+  if (explicit) {
+    return [path.resolve(expandHome(explicit))];
+  }
+
+  const connectionName =
+    process.env.CLUTCH_MATCH_DB_CONNECTION?.trim() || 'storage-local';
+  const candidates = new Set<string>();
+
+  for (const root of getSourceModRoots()) {
+    const smRoot = path.join(root, 'addons/sourcemod');
+    const sqliteDir = path.join(smRoot, 'data/sqlite');
+    candidates.add(path.join(sqliteDir, `${connectionName}.sq3`));
+    const fromCfg = resolveFromDatabasesCfg(smRoot, connectionName);
+    if (fromCfg) candidates.add(fromCfg);
+    candidates.add(path.join(sqliteDir, 'sourcemod-local.sq3'));
+  }
+
+  try {
+    candidates.add(getWeaponsDbPath());
+  } catch {
+    // weapons db optional for candidate discovery
+  }
+
+  candidates.add(getMatchLiveDbPath());
+
+  return [...candidates]
+    .map((p) => path.resolve(p))
+    .filter((p, index, all) => all.indexOf(p) === index)
+    .filter((p) => fs.existsSync(p));
+}
