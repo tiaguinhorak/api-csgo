@@ -15,7 +15,7 @@ import { logAgentsDbPath } from './services/agents-db-sync';
 import { startMatchLiveWatcher } from './services/match-live-watcher';
 import { startSteamAllowlistSync } from './services/steam-allowlist-sync';
 import { getMatchLiveDbPath } from './services/weapons-db-path';
-import { siteBaseUrlFromEnv, siteSyncKeyFromEnv } from './services/site-http';
+import { siteBaseUrlFromEnv, siteRequestBaseUrl, siteSyncKeyFromEnv } from './services/site-http';
 import { assertProductionApiKey, requireApiAuth } from './middleware/auth';
 
 const app = express();
@@ -37,12 +37,14 @@ app.use(express.json({ limit: '64kb' }));
 // Health check (no auth — bind to private network in production)
 app.get('/health', (_req, res) => {
   const siteUrl = siteBaseUrlFromEnv();
+  const siteRequestUrl = siteRequestBaseUrl();
   const syncKey = siteSyncKeyFromEnv();
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     matchPipeline: {
       siteUrl: siteUrl ?? null,
+      siteRequestUrl: siteRequestUrl ?? null,
       syncKeyConfigured: Boolean(syncKey),
       matchLiveDb: (() => {
         try {
@@ -96,7 +98,12 @@ if (process.env.CLUTCH_SITE_URL?.trim() && process.env.CSGO_SKINS_SYNC_KEY?.trim
 const bindHost = process.env.BIND_HOST?.trim() || '0.0.0.0';
 
 const server = app.listen(config.port, bindHost, () => {
+  const sitePublic = siteBaseUrlFromEnv();
+  const siteRequest = siteRequestBaseUrl();
   console.log(`CS:GO API running on http://${bindHost}:${config.port}`);
+  console.log(
+    `[boot] match pipeline site public=${sitePublic ?? '(unset)'} request=${siteRequest ?? '(unset)'} syncKey=${siteSyncKeyFromEnv() ? 'set' : 'MISSING'}`,
+  );
 });
 
 server.on('error', (err: NodeJS.ErrnoException) => {

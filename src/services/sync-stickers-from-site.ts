@@ -1,5 +1,6 @@
 import type { StickerSyncEntry } from './stickers-db-map';
 import { syncPlayerStickersToDb } from './stickers-db-sync';
+import { siteRequestBaseUrl, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
 
 type SiteStickerPayload = {
   steamId: string;
@@ -11,20 +12,6 @@ type SiteStickersResponse = {
   stickers?: SiteStickerPayload[];
 };
 
-function resolveSiteBaseUrl(): string | null {
-  const raw =
-    process.env.CLUTCH_SITE_URL?.trim() ||
-    process.env.SITE_ORIGIN?.trim() ||
-    '';
-  if (!raw) return null;
-  return raw.replace(/\/$/, '');
-}
-
-function resolveSkinsSyncKey(): string | null {
-  const key = process.env.CSGO_SKINS_SYNC_KEY?.trim();
-  return key || null;
-}
-
 /**
  * Pull all player weapon stickers from site Postgres and write to local SQLite
  * (weaponstickers1 table — read by CSGO_WeaponStickers on spawn).
@@ -35,8 +22,8 @@ export async function syncAllStickersFromSite(): Promise<{
   errors: string[];
   siteUrl: string | null;
 }> {
-  const siteUrl = resolveSiteBaseUrl();
-  const syncKey = resolveSkinsSyncKey();
+  const siteUrl = siteRequestBaseUrl();
+  const syncKey = siteSyncKeyFromEnv();
 
   if (!siteUrl || !syncKey) {
     return {
@@ -52,10 +39,7 @@ export async function syncAllStickersFromSite(): Promise<{
 
   try {
     const res = await fetch(url, {
-      headers: {
-        'x-skins-sync-key': syncKey,
-        Accept: 'application/json',
-      },
+      headers: siteRequestHeaders({ Accept: 'application/json' }),
     });
 
     if (!res.ok) {

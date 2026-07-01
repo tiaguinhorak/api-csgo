@@ -2,6 +2,7 @@ import type { SyncWeaponPayload } from './weapons-db-map';
 import { stageClutchLoadoutInGame } from './clutch-rcon';
 import { syncAllStickersFromSite } from './sync-stickers-from-site';
 import { syncPlayerLoadoutToWeaponsDb } from './weapons-db-sync';
+import { siteRequestBaseUrl, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
 
 type SiteLoadoutPayload = {
   steamId: string;
@@ -12,20 +13,6 @@ type SiteLoadoutsResponse = {
   ok?: boolean;
   loadouts?: SiteLoadoutPayload[];
 };
-
-function resolveSiteBaseUrl(): string | null {
-  const raw =
-    process.env.CLUTCH_SITE_URL?.trim() ||
-    process.env.SITE_ORIGIN?.trim() ||
-    '';
-  if (!raw) return null;
-  return raw.replace(/\/$/, '');
-}
-
-function resolveSkinsSyncKey(): string | null {
-  const key = process.env.CSGO_SKINS_SYNC_KEY?.trim();
-  return key || null;
-}
 
 /**
  * Pull all equipped loadouts from the site Postgres (via site API) and write to
@@ -39,8 +26,8 @@ export async function syncAllLoadoutsFromSite(): Promise<{
   siteUrl: string | null;
   rconReload: boolean;
 }> {
-  const siteUrl = resolveSiteBaseUrl();
-  const syncKey = resolveSkinsSyncKey();
+  const siteUrl = siteRequestBaseUrl();
+  const syncKey = siteSyncKeyFromEnv();
 
   if (!siteUrl || !syncKey) {
     return {
@@ -58,10 +45,7 @@ export async function syncAllLoadoutsFromSite(): Promise<{
 
   try {
     const res = await fetch(url, {
-      headers: {
-        'x-skins-sync-key': syncKey,
-        Accept: 'application/json',
-      },
+      headers: siteRequestHeaders({ Accept: 'application/json' }),
     });
 
     if (!res.ok) {

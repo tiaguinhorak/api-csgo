@@ -1,12 +1,11 @@
 import Database from 'better-sqlite3';
 import { getWeaponsDbPath } from './weapons-db-path';
+import { siteRequestBaseUrl, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
 
 const TABLE = 'clutch_steam_allowlist';
 
-import { siteBaseUrlFromEnv, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
-
 export async function fetchSteamAllowlistFromSite(): Promise<number[]> {
-  const base = siteBaseUrlFromEnv();
+  const base = siteRequestBaseUrl();
   if (!base) {
     throw new Error('CLUTCH_SITE_URL is required for steam allowlist sync');
   }

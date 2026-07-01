@@ -111,3 +111,23 @@ clutch_is_ranked_pool() {
     || [[ "${SERVER_PROFILE:-}" == "ranked" ]] \
     || [[ "${CLUTCH_CS_SCREEN:-}" == *"clutch"* ]]
 }
+
+# Returns 0 when response body looks like Next.js /api/health (not api-csgo Unauthorized).
+clutch_is_nextjs_health_json() {
+  local body="${1:-}"
+  echo "${body}" | grep -q '"database"'
+}
+
+# Echo base URL (no trailing slash) when Next.js responds at host:port, else return 1.
+clutch_probe_nextjs_base_url() {
+  local host="$1"
+  local port="$2"
+  local url="http://${host}:${port}"
+  local health
+  health="$(curl -4 -sf -m 5 "${url}/api/health" 2>/dev/null || true)"
+  if clutch_is_nextjs_health_json "${health}"; then
+    echo "${url}"
+    return 0
+  fi
+  return 1
+}

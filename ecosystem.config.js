@@ -1,4 +1,11 @@
 const path = require('path');
+const fs = require('fs');
+const dotenv = require('dotenv');
+
+const envFile = path.join(__dirname, '.env');
+const fileEnv = fs.existsSync(envFile)
+  ? dotenv.parse(fs.readFileSync(envFile))
+  : {};
 
 module.exports = {
   apps: [{
@@ -12,9 +19,9 @@ module.exports = {
     max_restarts: 15,
     min_uptime: '10s',
     restart_delay: 8000,
-    env_file: path.join(__dirname, '.env'),
     env: {
       NODE_ENV: 'production',
+      ...fileEnv,
     },
     error_file: 'logs/err.log',
     out_file: 'logs/out.log',

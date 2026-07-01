@@ -15,7 +15,7 @@ import {
 import { stateStore } from './state-store';
 import { getMatchLiveDbPath } from './weapons-db-path';
 
-import { siteBaseUrlFromEnv, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
+import { siteRequestBaseUrl, siteRequestHeaders, siteSyncKeyFromEnv } from './site-http';
 
 type Snapshot = {
   phase: string;
@@ -33,7 +33,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let watcherStarted = false;
 
 async function pushLiveRoundToSite(match: Match, row: MatchLiveRow): Promise<void> {
-  const base = siteBaseUrlFromEnv();
+  const base = siteRequestBaseUrl();
   const key = siteSyncKeyFromEnv();
   if (!base || !key) return;
 

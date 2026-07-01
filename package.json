@@ -19,6 +19,8 @@
     "deploy:vps": "bash deploy.sh",
     "setup": "bash install.sh",
     "simulate:match": "npm run build && node dist/tools/simulate-match-pipeline.js",
+    "replay:results": "bash scripts/replay-pending-match-results.sh",
+    "verify:match-env": "bash scripts/verify-match-pipeline-env.sh",
     "sync:allowlist": "bash scripts/sync-steam-allowlist.sh",
     "lint": "tsc --noEmit"
   },

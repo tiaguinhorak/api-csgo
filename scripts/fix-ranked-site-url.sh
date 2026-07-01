@@ -71,6 +71,25 @@ else
   echo "OK: CLUTCH_SITE_URL=${CURRENT} (public)"
 fi
 
+# Site on same VPS often listens on :3000 while :80 is closed/hairpin-blocked.
+set -a
+# shellcheck disable=SC1091
+source "${ENV_FILE}"
+set +a
+parse_clutch_site_url "${CLUTCH_SITE_URL:-${PROD_URL}}"
+SITE_ON_3000=""
+if SITE_ON_3000="$(clutch_probe_nextjs_base_url "${SITE_HOST}" 3000)"; then
+  echo ""
+  echo "Detected Next.js at ${SITE_ON_3000} (port 80 may be unavailable from this VPS)."
+  if [[ "${CLUTCH_SITE_URL:-}" != "${SITE_ON_3000}" ]]; then
+    set_kv "CLUTCH_SITE_URL" "${SITE_ON_3000}"
+    set_kv "SITE_ORIGIN" "${SITE_ON_3000}"
+  fi
+  if [[ "${CLUTCH_SITE_INTERNAL_URL:-}" != "${SITE_ON_3000}" ]]; then
+    set_kv "CLUTCH_SITE_INTERNAL_URL" "${SITE_ON_3000}"
+  fi
+fi
+
 set -a
 # shellcheck disable=SC1091
 source "${ENV_FILE}"
@@ -89,7 +108,35 @@ elif ! clutch_site_host_is_ip "${SITE_HOST}"; then
 fi
 
 echo ""
-echo "Restart API: npm run pm2:restart"
+echo "--- Co-located site (same VPS) ---"
+INTERNAL_SET=0
+if [[ -n "${SITE_ON_3000:-}" ]]; then
+  echo "OK: using ${SITE_ON_3000} for api-csgo → site (127.0.0.1:3000 may be api-csgo, not Next.js)."
+  INTERNAL_SET=1
+else
+  for port in 3000 3002; do
+    health="$(curl -4 -sf -m 3 "http://127.0.0.1:${port}/api/health" 2>/dev/null || true)"
+    if clutch_is_nextjs_health_json "${health}"; then
+      internal_url="http://127.0.0.1:${port}"
+      if [[ "${CLUTCH_SITE_INTERNAL_URL:-}" != "${internal_url}" ]]; then
+        set_kv "CLUTCH_SITE_INTERNAL_URL" "${internal_url}"
+      else
+        echo "OK: CLUTCH_SITE_INTERNAL_URL=${internal_url}"
+      fi
+      INTERNAL_SET=1
+      echo "Next.js on loopback — api-csgo will use internal URL."
+      break
+    fi
+  done
+fi
+
+if [[ "${INTERNAL_SET}" -eq 0 ]]; then
+  echo "No Next.js detected on :3000 — site may be on another host."
+  echo "Public CLUTCH_SITE_URL must be reachable OR deploy site on this VPS."
+fi
+
+echo ""
+echo "Restart API: pm2 restart api-csgo --update-env"
 echo "Test DNS:    bash scripts/check-site-dns.sh"
 echo "When site is live: bash scripts/sync-stickers-from-site.sh"
 echo "Until then:        on dev PC → bash scripts/push-stickers-dev-to-vps.sh"

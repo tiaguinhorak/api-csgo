@@ -1,17 +1,8 @@
-/** Enabled catalog skins from clutchclube site Postgres (admin-driven allowlist). */
-
 import type { WsSkinAllowEntry } from './ws-weapons-config';
-
-function siteBaseUrl(): string {
-  const raw = process.env.CLUTCH_SITE_URL?.trim();
-  if (!raw) {
-    throw new Error('CLUTCH_SITE_URL is required for WS_ALLOWLIST_SOURCE=site-db');
-  }
-  return raw.replace(/\/$/, '');
-}
+import { siteRequestBaseUrl, siteSyncKeyFromEnv } from './site-http';
 
 function syncKey(): string {
-  const key = process.env.CSGO_SKINS_SYNC_KEY?.trim();
+  const key = siteSyncKeyFromEnv();
   if (!key) {
     throw new Error('CSGO_SKINS_SYNC_KEY is required for WS_ALLOWLIST_SOURCE=site-db');
   }
@@ -19,7 +10,11 @@ function syncKey(): string {
 }
 
 export async function fetchWsAllowlistFromSite(): Promise<WsSkinAllowEntry[]> {
-  const url = `${siteBaseUrl()}/api/csgo/catalog/allowlist`;
+  const base = siteRequestBaseUrl();
+  if (!base) {
+    throw new Error('CLUTCH_SITE_URL is required for WS_ALLOWLIST_SOURCE=site-db');
+  }
+  const url = `${base}/api/csgo/catalog/allowlist`;
   const res = await fetch(url, {
     headers: { "x-skins-sync-key": syncKey() },
   });

@@ -9,7 +9,7 @@ import { stateStore } from './state-store';
 import { normalizeSteamId64 } from '../utils/steam-id';
 
 import {
-  siteBaseUrlFromEnv,
+  siteRequestBaseUrl,
   siteRequestHeaders,
   siteSyncKeyFromEnv,
 } from './site-http';
@@ -194,7 +194,7 @@ export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow):
     return false;
   }
 
-  const base = siteBaseUrlFromEnv();
+  const base = siteRequestBaseUrl();
   const key = siteSyncKeyFromEnv();
   if (!base || !key) {
     console.warn('[match-live] CLUTCH_SITE_URL and CSGO_SKINS_SYNC_KEY required to forward results');
@@ -221,7 +221,9 @@ export async function forwardMatchResultToSite(match: Match, row: MatchLiveRow):
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      console.warn(`[match-live] site forward ${res.status}: ${text.slice(0, 200)}`);
+      console.warn(
+        `[match-live] site forward POST ${url} → ${res.status}: ${text.slice(0, 200)}`,
+      );
       return false;
     }
 
